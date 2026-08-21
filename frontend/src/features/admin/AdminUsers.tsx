@@ -72,6 +72,10 @@ export default function AdminUsers() {
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
+  const [deactivateTarget, setDeactivateTarget] = useState<UserListItem | null>(null);
+  const [deactivating, setDeactivating] = useState(false);
+  const [deactivateError, setDeactivateError] = useState<string | null>(null);
+
   function load() {
     setLoading(true);
     fetchUsers()
@@ -149,17 +153,34 @@ export default function AdminUsers() {
     }
   }
 
-  async function toggleActive(u: UserListItem) {
+  async function handleActivate(u: UserListItem) {
     setBusyId(u.id);
     try {
-      if (u.is_active) await deactivateUser(u.id);
-      else await activateUser(u.id);
-      setUsers((prev) => prev.map((x) => (x.id === u.id ? { ...x, is_active: !x.is_active } : x)));
-      show("success", `${u.username} ${u.is_active ? "deactivated" : "activated"}.`);
+      await activateUser(u.id);
+      setUsers((prev) => prev.map((x) => (x.id === u.id ? { ...x, is_active: true } : x)));
+      show("success", `${u.username} activated.`);
     } catch {
-      show("error", `Could not update ${u.username}'s status.`);
+      show("error", `Could not activate ${u.username}.`);
     } finally {
       setBusyId(null);
+    }
+  }
+
+  async function handleConfirmDeactivate() {
+    if (!deactivateTarget) return;
+    setDeactivating(true);
+    setDeactivateError(null);
+    try {
+      await deactivateUser(deactivateTarget.id);
+      setUsers((prev) => prev.map((x) => (x.id === deactivateTarget.id ? { ...x, is_active: false } : x)));
+      show("success", `${deactivateTarget.username} deactivated.`);
+      setDeactivateTarget(null);
+    } catch (err) {
+      setDeactivateError(
+        err instanceof ApiError ? err.message : `Could not deactivate ${deactivateTarget.username}.`
+      );
+    } finally {
+      setDeactivating(false);
     }
   }
 
@@ -428,7 +449,14 @@ export default function AdminUsers() {
                       variant={u.is_active ? "danger" : "secondary"}
                       size="sm"
                       loading={busyId === u.id}
-                      onClick={() => toggleActive(u)}
+                      onClick={() => {
+                        if (u.is_active) {
+                          setDeactivateError(null);
+                          setDeactivateTarget(u);
+                        } else {
+                          handleActivate(u);
+                        }
+                      }}
                       className="mr-2"
                     >
                       {u.is_active ? "Deactivate" : "Activate"}
@@ -550,6 +578,33 @@ export default function AdminUsers() {
               accounts that were never actually used.
             </p>
             {deleteError && <p className="text-tomato-600 text-sm">{deleteError}</p>}
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={!!deactivateTarget}
+        onClose={() => setDeactivateTarget(null)}
+        title="Deactivate Account"
+        actions={
+          <>
+            <Button variant="secondary" size="sm" onClick={() => setDeactivateTarget(null)}>
+              Cancel
+            </Button>
+            <Button variant="danger" size="sm" loading={deactivating} onClick={handleConfirmDeactivate}>
+              Deactivate
+            </Button>
+          </>
+        }
+      >
+        {deactivateTarget && (
+          <div className="space-y-3">
+            <p className="text-sm text-crate-950">
+              Deactivate <span className="font-mono font-semibold">{deactivateTarget.username}</span>{" "}
+              ({deactivateTarget.branch_name ?? deactivateTarget.supplier_name ?? deactivateTarget.role})?
+              They won't be able to sign in until reactivated.
+            </p>
+            {deactivateError && <p className="text-tomato-600 text-sm">{deactivateError}</p>}
           </div>
         )}
       </Modal>
