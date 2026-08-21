@@ -1,0 +1,55 @@
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: spar_user
+      POSTGRES_PASSWORD: spar_password
+      POSTGRES_DB: spar_procurement
+    volumes:
+      - spar_db_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U spar_user -d spar_procurement"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://spar_user:spar_password@db:5432/spar_procurement
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      # The seed scripts (seed_master_data.py, restore_pos_codes.py) look
+      # for CSVs at a path relative to their own location that resolves to
+      # /database/seed inside the container — but ./database sits next to
+      # ./backend on the host, so without this mount it's simply not
+      # reachable from inside the container at all. This was a real,
+      # pre-existing gap, not specific to one script.
+      - ./database:/database
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    environment:
+      VITE_API_BASE_URL: http://localhost:8000
+    depends_on:
+      - backend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+
+volumes:
+  spar_db_data:

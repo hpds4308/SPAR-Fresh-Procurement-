@@ -1,0 +1,20 @@
+# Production build — NOT the same as the dev Dockerfile, which runs the
+# Vite dev server (slower, not meant for real traffic). This builds real
+# static files once, then serves them with nginx.
+FROM node:20-slim AS build
+WORKDIR /app
+COPY package.json ./
+RUN npm install
+COPY . .
+
+# Vite bakes VITE_* variables into the built JS at build time, not at
+# container startup — so this has to be a build ARG, not a runtime env
+# var like in the dev setup. Passed in from docker-compose.prod.yml.
+ARG VITE_API_BASE_URL
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+RUN npm run build
+
+FROM nginx:1.27-alpine
+COPY --from=build /app/dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+EXPOSE 80

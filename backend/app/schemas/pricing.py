@@ -1,0 +1,113 @@
+from datetime import date
+from pydantic import BaseModel, Field, field_validator
+
+
+class PriceEntry(BaseModel):
+    product_id: int
+    price: float = Field(gt=0, description="Must be greater than zero.")
+
+    @field_validator("price")
+    @classmethod
+    def round_price(cls, v: float) -> float:
+        return round(v, 2)
+
+
+class PriceSubmitRequest(BaseModel):
+    prices: list[PriceEntry]
+
+    @field_validator("prices")
+    @classmethod
+    def at_least_one(cls, v: list[PriceEntry]) -> list[PriceEntry]:
+        if not v:
+            raise ValueError("Submit at least one price.")
+        return v
+
+
+class SupplierPriceOut(BaseModel):
+    id: int
+    product_id: int
+    product_code: str
+    product_description: str
+    unit_code: str
+    price: float
+    delivery_date: date
+    # Only populated once Admin has explicitly sent an adjusted price —
+    # a draft adjustment Admin hasn't sent yet never appears here.
+    adjusted_price: float | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class PriceWindowOut(BaseModel):
+    is_open: bool
+    delivery_date: date
+    cutoff_time: str  # "HH:MM"
+    server_time: str  # ISO datetime
+
+
+class LastPriceOut(BaseModel):
+    """The most recent price a supplier has ever quoted for one product,
+    regardless of which delivery date it was for — shown as a reference
+    on the Submit Prices page so a supplier isn't starting from a blank
+    slate every time the delivery window rolls forward."""
+
+    product_id: int
+    price: float
+    delivery_date: date
+
+
+class ReferencePriceOut(BaseModel):
+    product_id: int
+    source: str
+    price: float
+    delivery_date: date
+
+
+class ReferencePriceSetRequest(BaseModel):
+    price: float | None = Field(
+        default=None,
+        description="Null clears the reference price for this product/date.",
+    )
+
+    @field_validator("price")
+    @classmethod
+    def round_and_check(cls, v: float | None) -> float | None:
+        if v is None:
+            return None
+        if v <= 0:
+            raise ValueError("Reference price must be greater than zero.")
+        return round(v, 2)
+
+
+class AdminSupplierPriceOut(BaseModel):
+    id: int
+    supplier_id: int
+    supplier_code: str
+    supplier_name: str
+    product_id: int
+    product_code: str
+    product_description: str
+    unit_code: str
+    price: float
+    adjusted_price: float | None = None
+    sent_to_supplier: bool = False
+    delivery_date: date
+    is_lowest_for_product: bool
+
+
+class AdjustPriceRequest(BaseModel):
+    adjusted_price: float | None = Field(
+        default=None,
+        description="Null clears the adjustment and reverts to the supplier's original price.",
+    )
+
+    @field_validator("adjusted_price")
+    @classmethod
+    def round_and_check(cls, v: float | None) -> float | None:
+        if v is None:
+            return None
+        if v <= 0:
+            raise ValueError("Adjusted price must be greater than zero.")
+        return round(v, 2)
+

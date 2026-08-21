@@ -1,0 +1,54 @@
+import { useEffect } from "react";
+import ChromaKeyVideo from "./ChromaKeyVideo";
+
+const AUTO_CONTINUE_MS = 3500;
+
+export default function WelcomeScreen({
+  supplierName,
+  onContinue,
+}: {
+  supplierName: string;
+  onContinue: () => void;
+}) {
+  useEffect(() => {
+    const t = setTimeout(onContinue, AUTO_CONTINUE_MS);
+    return () => clearTimeout(t);
+  }, [onContinue]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-crate-950 bg-cover bg-center"
+      style={{ backgroundImage: "url(/images/supplier-welcome-bg.webp)" }}
+    >
+      <div className="absolute inset-0 bg-crate-950/45" aria-hidden="true" />
+      <div className="relative text-center motion-safe:animate-fade-up">
+        <ChromaKeyVideo
+          src="/videos/supplier-welcome-intro.mp4"
+          fit="contain"
+          className="mx-auto mb-3 h-40 md:h-52 w-auto aspect-[560/752]"
+        />
+
+        <span className="inline-flex items-center gap-1.5 bg-white/10 text-white text-xs font-semibold px-3 py-1.5 rounded-full mb-7">
+          <span className="w-4 h-4 rounded-full bg-white flex items-center justify-center text-crate-800 text-[10px] font-display font-bold">
+            S
+          </span>
+          SPAR Sri Lanka · Procurement
+        </span>
+
+        <h1 className="font-display font-extrabold text-3xl md:text-4xl text-white leading-tight">
+          ආයුබෝවන්, {supplierName}!
+        </h1>
+        <p className="text-white/70 text-sm md:text-base mt-3 tracking-wide uppercase">
+          SPAR Sri Lanka Fresh Department
+        </p>
+
+        <button
+          onClick={onContinue}
+          className="mt-9 bg-white text-crate-800 rounded-full px-6 py-2.5 text-sm font-semibold hover:brightness-95 active:scale-[0.98] transition-all duration-200"
+        >
+          Continue to Dashboard
+        </button>
+      </div>
+    </div>
+  );
+}
