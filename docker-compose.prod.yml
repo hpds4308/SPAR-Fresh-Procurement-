@@ -32,6 +32,8 @@ services:
   backend:
     build: ./backend
     restart: unless-stopped
+    labels:
+      - "autoheal=true"
     env_file:
       - .env.production
     environment:
@@ -44,6 +46,12 @@ services:
       # /database/seed inside the container, and it's not part of the
       # backend build context, so it needs an explicit mount.
       - ./database:/database
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   frontend:
     build:
@@ -52,8 +60,49 @@ services:
       args:
         VITE_API_BASE_URL: ${PUBLIC_URL}
     restart: unless-stopped
+    labels:
+      - "autoheal=true"
     depends_on:
       - backend
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:80/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Docker's own HEALTHCHECK only ever reports status — it does not act on
+  # it. A hung-but-still-running backend/frontend process would sit there
+  # marked "unhealthy" forever without this: autoheal watches containers
+  # labeled autoheal=true and kills them once unhealthy, so `restart:
+  # unless-stopped` above actually brings them back.
+  autoheal:
+    image: willfarrell/autoheal:1.2.0
+    restart: unless-stopped
+    environment:
+      AUTOHEAL_CONTAINER_LABEL: autoheal
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  # Reuses the postgres image purely for pg_dump — no host cron job to set
+  # up and forget. See docs/HOSTING.md for how to restore from one of
+  # these dumps.
+  db-backup:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: spar_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: spar_procurement
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./docker/backup_db.sh:/backup_db.sh:ro
+      - db_backups:/backups
+    entrypoint: ["sh", "/backup_db.sh"]
 
   caddy:
     image: caddy:2-alpine
@@ -66,10 +115,13 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
-      - backend
-      - frontend
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
 
 volumes:
   spar_db_data:
   caddy_data:
   caddy_config:
+  db_backups:

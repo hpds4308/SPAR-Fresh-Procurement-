@@ -107,9 +107,40 @@ docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
 
 ## Backing up the database
 
+A `db-backup` service runs automatically as part of `docker compose -f
+docker-compose.prod.yml up -d` — no cron job to set up or remember. It
+dumps the database on startup and then once a day after that (gzipped,
+timestamped), keeping the last 14 days by default in the `db_backups`
+Docker volume. Both numbers are configurable in `.env.production`:
+
 ```bash
-docker compose -f docker-compose.prod.yml exec db pg_dump -U spar_user spar_procurement > backup-$(date +%F).sql
+BACKUP_RETENTION_DAYS=14
+BACKUP_INTERVAL_SECONDS=86400
 ```
 
-Worth running this on a cron job (e.g. daily) and copying the file
-somewhere off the server.
+Check it's actually producing dumps:
+
+```bash
+docker compose -f docker-compose.prod.yml exec db-backup ls -lh /backups
+```
+
+**This alone does not protect against losing the whole server** — the
+dumps live in a Docker volume on the same machine as the database. Copy
+them off-server periodically too, e.g.:
+
+```bash
+docker compose -f docker-compose.prod.yml exec db-backup sh -c "cat /backups/\$(ls -t /backups | head -1)" > latest-backup.sql.gz
+scp latest-backup.sql.gz you@your-other-machine:/somewhere/safe/
+```
+
+### Restoring from a backup
+
+```bash
+# copy the dump into the db container, then restore it
+docker compose -f docker-compose.prod.yml cp latest-backup.sql.gz db:/tmp/restore.sql.gz
+docker compose -f docker-compose.prod.yml exec db sh -c "gunzip -c /tmp/restore.sql.gz | psql -U spar_user spar_procurement"
+```
+
+Restoring overwrites existing rows with the same primary keys — only do
+this against a database you intend to replace (e.g. after data loss),
+not casually against a live one.
