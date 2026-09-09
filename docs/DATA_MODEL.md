@@ -10,15 +10,18 @@ anywhere in the codebase.
 
 | Feature | Table | Delivery date = | Why |
 |---|---|---|---|
-| Branch Orders | `orders` | **same day** as order date | Branches order what they need today, for today. |
-| Supplier Orders (Admin → Supplier) | `supplier_order_items` | **same day** as order date | Mirrors branch orders — Admin builds a supplier order for the same day branches ordered. |
+| Branch Orders | `orders` | **order date + 2 days** | Same lead time as supplier pricing (below) — a branch's order and the prices used to fulfill it are submitted the same day, for the same future delivery date. |
+| Supplier Orders (Admin → Supplier) | `supplier_order_items` | whatever delivery date Admin targets | Mirrors branch orders — Admin builds a supplier order for whichever delivery date the Order Matrix shows real demand for (now typically order date + 2, since that's what branch orders target). |
 | Submit Prices | `supplier_prices` | **order date + 2 days** | Suppliers need lead time to plan and price ahead. |
 | Keells / Market Reference Prices | `market_reference_prices` | whatever date Admin picks | Independent of the order/pricing cycle — just a dated reference snapshot. |
 
-**The consequence:** an order built by Admin for "today" will almost never
-have an exact-date match in `supplier_prices`, because supplier pricing is
-keyed 2 days ahead. This is expected, not a bug — see "Cost Price
-resolution" below for how we handle it.
+**The consequence:** since branch orders and supplier pricing both target
+order date + 2, an order built by Admin will usually *have* an exact-date
+match in `supplier_prices` now — this used to be the rare case (branch
+orders were same-day while pricing was +2) and is now the common one. An
+exact match can still be missing when a supplier hasn't submitted for
+that specific date yet (missed cutoff, new product). See "Cost Price
+resolution" below for how we handle it either way.
 
 ## Cost Price resolution (`supplier_order_service._resolve_prices`)
 
@@ -33,9 +36,8 @@ in this priority order:
 3. **Submitted price** for the exact order date.
 4. **Fallback: most recent submitted/adjusted price for that product, any
    date** — flagged `price_is_estimated: true` in the API response and
-   shown in amber in the UI, because Submit Prices and Supplier Orders
-   run on different calendars (see table above) and an exact match is
-   often unavailable.
+   shown in amber in the UI, for whenever a supplier hasn't submitted a
+   price for that exact delivery date yet.
 
 If none of the four apply, Cost Price is `null` and shows as "—".
 
@@ -96,6 +98,12 @@ before `order_date == delivery_date` was enforced, a branch's last
 with a legitimately new order placed today, because both targeted the
 same `delivery_date`. If you ever reintroduce an order_date/delivery_date
 offset, re-audit this constraint first.
+
+**Update:** the order_date/delivery_date offset was reintroduced (branch
+orders now target order_date + 2, matching supplier pricing) — re-audited
+per the note above. The constraint is keyed on `order_date` alone, so two
+different `order_date`s never collide even though they may (now, usually
+do) share the same `delivery_date`; still safe.
 
 ## Quick reference: which fields are user-editable vs. computed
 

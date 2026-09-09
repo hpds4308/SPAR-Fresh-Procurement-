@@ -3,6 +3,28 @@
 # Replace yourdomain.com with your actual domain before deploying, and
 # make sure its DNS A record points at this server's IP first.
 yourdomain.com {
+	# Applied to every response Caddy sends, whether it came from the
+	# frontend (the actual HTML page) or the backend (JSON API + the
+	# Swagger docs page, when not disabled by APP_ENV=production) — this
+	# is the one place both surfaces are covered by a single set of
+	# headers, since Caddy is the only thing directly internet-facing.
+	#
+	# CSP is scoped to what the built frontend actually loads: same-origin
+	# scripts/styles plus Google Fonts (index.html pulls both the
+	# stylesheet from fonts.googleapis.com and the font files themselves
+	# from fonts.gstatic.com). style-src allows 'unsafe-inline' because
+	# the app uses React's style={{...}} prop in a number of places,
+	# which renders as inline style="" attributes — script-src does not
+	# get the same allowance, since inline <script> is the actual XSS
+	# vector this header exists to reduce.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+		-Server
+	}
 	handle /api/* {
 		reverse_proxy backend:8000
 	}

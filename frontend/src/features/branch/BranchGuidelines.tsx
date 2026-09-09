@@ -1,10 +1,12 @@
 import { useAuth } from "../auth/AuthContext";
 import { useSupportPhone } from "../shared/useSupportPhone";
+import { useOrderDeadline } from "../shared/useOrderDeadline";
 
 export default function BranchGuidelines() {
   const { user } = useAuth();
   const branchName = user?.branch_name ?? "our branch";
   const { number: CONTACT_NUMBER, tel: CONTACT_TEL } = useSupportPhone();
+  const { english: DEADLINE_EN, sinhala: DEADLINE_SI } = useOrderDeadline();
 
   return (
     <div className="space-y-5">
@@ -22,9 +24,9 @@ export default function BranchGuidelines() {
           <div>
             <p>අප සමූහයේ {branchName} ඔබ,</p>
             <ul className="list-disc pl-6 mt-1.5 space-y-1">
-              <li>ඔබගේ ඇනවුම් දහවල් 2.00 ට පෙර අප වෙත ඉදිරිපත් කරන්න.</li>
-              <li>දහවල් 2.00න් පසුව ඔබට මෙම පද්ධතිය හරහා ඇනවුම් ඉදිරිපත් කල නොහැක.</li>
-              <li>දහවල් 2.00න් පසු ඔබ කිසිවක් ඇනවුම් කර නැත්නම් සතියකට පෙර ඔබගේ ඇනවුම මෙම පද්ධතිය මඟින් ලබා ගනී.</li>
+              <li>ඔබගේ ඇනවුම් {DEADLINE_SI} ට පෙර අප වෙත ඉදිරිපත් කරන්න.</li>
+              <li>{DEADLINE_SI}න් පසුව ඔබට මෙම පද්ධතිය හරහා ඇනවුම් ඉදිරිපත් කල නොහැක.</li>
+              <li>{DEADLINE_SI}න් පසු ඔබ කිසිවක් ඇනවුම් කර නැත්නම් සතියකට පෙර ඔබගේ ඇනවුම මෙම පද්ධතිය මඟින් ලබා ගනී.</li>
             </ul>
           </div>
           <p>
@@ -51,11 +53,11 @@ export default function BranchGuidelines() {
           </p>
           <p>
             As a valued member of our &ldquo;{branchName}&rdquo; branch, please submit your orders to us
-            before 2:00 PM.
+            before {DEADLINE_EN}.
           </p>
-          <p>After 2:00 PM, you will not be able to submit orders through this system.</p>
+          <p>After {DEADLINE_EN}, you will not be able to submit orders through this system.</p>
           <p>
-            If you have not placed any orders by 2:00 PM, your order from one week prior will be
+            If you have not placed any orders by {DEADLINE_EN}, your order from one week prior will be
             automatically obtained through this system.
           </p>
           <p>

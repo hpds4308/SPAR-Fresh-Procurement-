@@ -42,8 +42,12 @@ async function tryRefresh(): Promise<string | null> {
 
 export async function apiFetch(path: string, options: RequestInit = {}, retry = true): Promise<any> {
   const { access } = getStoredTokens();
+  // A FormData body (file upload) needs the browser to set its own
+  // Content-Type with the multipart boundary it generates — forcing
+  // application/json here would silently break the upload.
+  const isFormData = options.body instanceof FormData;
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
+    ...(isFormData ? {} : { "Content-Type": "application/json" }),
     ...(options.headers as Record<string, string> | undefined),
   };
   if (access) headers["Authorization"] = `Bearer ${access}`;

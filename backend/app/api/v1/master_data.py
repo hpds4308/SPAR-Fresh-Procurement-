@@ -1,4 +1,5 @@
 from datetime import date
+import io
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
@@ -37,14 +38,24 @@ def update_master_data(
     return master_data_service.update_master_data_field(db, product_id, payload.field, payload.value)
 
 
+@router.post("/auto-generate-selling-prices")
+def auto_generate_selling_prices(
+    admin: User = Depends(require_roles("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """Fills Selling Price for every active product that doesn't have one yet,
+    using GP = (selling - cost) / selling solved for selling price. Products
+    with a selling price already set are left exactly as they are."""
+    updated = master_data_service.auto_generate_selling_prices(db)
+    return {"updated": updated}
+
+
 @router.get("/export")
 def export_master_data(
     admin: User = Depends(require_roles("ADMIN")),
     db: Session = Depends(get_db),
 ):
     """Same data as GET /master-data, downloaded as .xlsx — mirrors the on-screen table exactly."""
-    import io
-
     excel_bytes = master_data_service.build_master_data_excel(db)
     return StreamingResponse(
         io.BytesIO(excel_bytes),

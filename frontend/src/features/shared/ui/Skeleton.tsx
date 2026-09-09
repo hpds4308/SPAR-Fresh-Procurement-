@@ -22,17 +22,6 @@ export function Skeleton({
   );
 }
 
-/** A handful of text-line-shaped skeletons, for card/detail-style loading. */
-export function SkeletonLines({ count = 3, className = "" }: { count?: number; className?: string }) {
-  return (
-    <div className={`space-y-2.5 ${className}`}>
-      {Array.from({ length: count }).map((_, i) => (
-        <Skeleton key={i} className={`h-4 ${i === count - 1 ? "w-2/3" : "w-full"}`} />
-      ))}
-    </div>
-  );
-}
-
 /** Mimics a chat thread's alternating message bubbles while it loads. */
 export function SkeletonChat({ className = "" }: { className?: string }) {
   const widths = ["w-2/5", "w-1/2", "w-1/3", "w-2/5"];

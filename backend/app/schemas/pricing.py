@@ -1,10 +1,12 @@
 from datetime import date
 from pydantic import BaseModel, Field, field_validator
 
+from app.schemas._limits import MAX_NUMERIC_10_2
+
 
 class PriceEntry(BaseModel):
     product_id: int
-    price: float = Field(gt=0, description="Must be greater than zero.")
+    price: float = Field(gt=0, le=MAX_NUMERIC_10_2, description="Must be greater than zero.")
 
     @field_validator("price")
     @classmethod
@@ -77,6 +79,8 @@ class ReferencePriceSetRequest(BaseModel):
             return None
         if v <= 0:
             raise ValueError("Reference price must be greater than zero.")
+        if v > MAX_NUMERIC_10_2:
+            raise ValueError(f"Reference price can't exceed {MAX_NUMERIC_10_2:,.2f}.")
         return round(v, 2)
 
 
@@ -88,12 +92,18 @@ class AdminSupplierPriceOut(BaseModel):
     product_id: int
     product_code: str
     product_description: str
+    category_name: str
     unit_code: str
     price: float
     adjusted_price: float | None = None
     sent_to_supplier: bool = False
     delivery_date: date
     is_lowest_for_product: bool
+    # The next distinct price tier below the lowest for this product (None
+    # if fewer than two distinct prices exist yet) — see list_all_prices
+    # for why ties don't count as a second tier.
+    second_lowest_price: float | None = None
+    is_second_lowest_for_product: bool = False
 
 
 class AdjustPriceRequest(BaseModel):
@@ -109,5 +119,7 @@ class AdjustPriceRequest(BaseModel):
             return None
         if v <= 0:
             raise ValueError("Adjusted price must be greater than zero.")
+        if v > MAX_NUMERIC_10_2:
+            raise ValueError(f"Adjusted price can't exceed {MAX_NUMERIC_10_2:,.2f}.")
         return round(v, 2)
 

@@ -10,6 +10,25 @@ export type Product = {
   status: string;
 };
 
+// Fixed display grouping for every product listing across the app:
+// Fruit, then Vege Low, then Vege Pola, then Vege Up — alphabetical by
+// item name within each category. An unrecognized category name (should
+// never happen with today's 4 categories) sorts last rather than first,
+// so it stays visible instead of silently jumping to the top.
+const CATEGORY_DISPLAY_ORDER = ["Fruit", "Vege Low", "Vege Pola", "Vege Up"];
+
+function categoryRank(categoryName: string): number {
+  const idx = CATEGORY_DISPLAY_ORDER.indexOf(categoryName);
+  return idx === -1 ? CATEGORY_DISPLAY_ORDER.length : idx;
+}
+
+export function compareProductDisplayOrder(
+  a: { category_name: string; description: string },
+  b: { category_name: string; description: string }
+): number {
+  return categoryRank(a.category_name) - categoryRank(b.category_name) || a.description.localeCompare(b.description);
+}
+
 export type OrderWindow = {
   is_open: boolean;
   delivery_date: string; // YYYY-MM-DD
@@ -77,6 +96,18 @@ export function fetchOrder(id: number): Promise<Order> {
   return apiFetch(`/orders/${id}`);
 }
 
+export function fetchMyOrderToday(): Promise<Order | null> {
+  return apiFetch("/orders/mine/today");
+}
+
+// {product_id: current stock in hand}, from the POS system, for the
+// branch's own location. A product with no entry means unknown, not
+// zero — it's either not POS-tracked or the POS lookup couldn't run
+// (not configured, or this branch has no location code set yet).
+export function fetchStockInHand(): Promise<Record<number, number>> {
+  return apiFetch("/orders/stock-in-hand");
+}
+
 export type MatrixBranchColumn = {
   branch_id: number;
   branch_code: string;
@@ -133,8 +164,41 @@ export async function downloadOrderMatrix(deliveryDate?: string): Promise<void> 
   window.URL.revokeObjectURL(url);
 }
 
+export type ExcelOrderLinePreview = {
+  row_number: number;
+  product_code: string;
+  description: string | null;
+  unit_code: string | null;
+  quantity: number | null;
+  product_id: number | null;
+  error: string | null;
+};
+
+export type ExcelOrderPreview = {
+  lines: ExcelOrderLinePreview[];
+  valid_line_count: number;
+  error_count: number;
+};
+
+// Parses an uploaded order Excel (Product Code / POS Code / Product
+// Description / Unit / Quantity columns) into a preview — never saves
+// anything by itself. The caller reviews the result and still calls
+// saveDraftOrder/submitOrder separately, the same as manual entry.
+export function previewOrderExcel(file: File): Promise<ExcelOrderPreview> {
+  const formData = new FormData();
+  formData.append("file", file);
+  return apiFetch("/orders/draft/preview-excel", { method: "POST", body: formData });
+}
+
 export function submitOrder(lines: { product_id: number; quantity: number; notes?: string }[], notes?: string): Promise<Order> {
   return apiFetch("/orders", {
+    method: "POST",
+    body: JSON.stringify({ lines, notes: notes || null }),
+  });
+}
+
+export function saveDraftOrder(lines: { product_id: number; quantity: number; notes?: string }[], notes?: string): Promise<Order> {
+  return apiFetch("/orders/draft", {
     method: "POST",
     body: JSON.stringify({ lines, notes: notes || null }),
   });
@@ -148,8 +212,4 @@ export function confirmDelivery(
     method: "PUT",
     body: JSON.stringify({ lines }),
   });
-}
-
-export function cancelOrder(orderId: number): Promise<{ detail: string }> {
-  return apiFetch(`/orders/${orderId}/cancel`, { method: "POST" });
 }

@@ -6,8 +6,7 @@ from app.core.config import settings
 
 def configure_logging() -> None:
     """
-    Central logging setup. Never log passwords, tokens, or other secrets —
-    see app.core.security for helpers that redact sensitive fields.
+    Central logging setup. Never log passwords, tokens, or other secrets.
     """
     level = logging.DEBUG if settings.APP_ENV == "development" else logging.INFO
     logging.basicConfig(

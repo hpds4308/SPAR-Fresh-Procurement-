@@ -2,28 +2,42 @@
 Order placement for branches.
 
 Business rule (as agreed with the client): a branch orders once per day,
-for delivery *the same day* (delivery date = order date = today), and
-must submit before the daily cutoff (default 14:00, Asia/Colombo).
-Branches never pick a supplier — Admin assigns supplier(s) per line in a
-later phase.
+for delivery *two days later* (delivery date = order date + 2), and must
+submit before the daily cutoff (default 14:00, Asia/Colombo) — this
+mirrors supplier pricing's own two-day lead time (pricing_service.py), so
+a branch's order and the supplier prices used to fulfill it are both
+submitted on the same day for the same future delivery date. Branches
+never pick a supplier — Admin assigns supplier(s) per line in a later
+phase.
 
 All "what time / what date is it" logic lives here, in one place, using
 Asia/Colombo as the business timezone regardless of server locale — never
 scattered across routes or the frontend, so the rule can't drift.
 """
+import io
 from datetime import datetime, date, timedelta, time
 from zoneinfo import ZoneInfo
 
+import openpyxl
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.audit import write_audit_log
 from app.core.errors import ValidationFailedError, PermissionDeniedError, NotFoundError
 from app.models.order import Order, OrderLine
-from app.models.product import Product, ProductUnit
+from app.models.order_deadline_exception import OrderDeadlineException
+from app.models.product import Product, ProductCategory, ProductUnit
 from app.models.branch import Branch
 from app.models.user import User
-from app.schemas.order import OrderCreate, OrderWindowOut, DeliveryConfirmRequest
+from app.schemas._limits import MAX_NUMERIC_10_2
+from app.schemas.order import (
+    OrderCreate,
+    OrderWindowOut,
+    DeliveryConfirmRequest,
+    ExcelOrderLinePreview,
+    ExcelOrderPreviewOut,
+    OrderDeadlineExceptionOut,
+)
 from app.services import settings_service
 
 BUSINESS_TZ = ZoneInfo("Asia/Colombo")
@@ -34,18 +48,25 @@ def _parse_cutoff(cutoff_str: str) -> time:
     return time(hour=int(hh), minute=int(mm))
 
 
-def get_order_window(db: Session, now: datetime | None = None) -> OrderWindowOut:
+def get_order_window(db: Session, now: datetime | None = None, branch_id: int | None = None) -> OrderWindowOut:
     """
     Returns whether ordering is currently open, and which delivery date an
-    order placed right now would be for. Delivery date is always the same
-    calendar day as the order date ("Order Date") in business time,
+    order placed right now would be for. Delivery date is always two
+    calendar days after the order date ("Order Date") in business time,
     regardless of cutoff status — the cutoff only gates *whether* a
     submission is accepted, not which date it targets.
+
+    Pass branch_id to also honor a one-off late-submission exception Admin
+    may have granted that specific branch for today (see
+    grant_late_submission) — omitted entirely for Admin/Supplier callers,
+    who have no branch and never need one.
     """
     now = now.astimezone(BUSINESS_TZ) if now else datetime.now(BUSINESS_TZ)
     cutoff_str = settings_service.get_setting(db, settings_service.BRANCH_ORDER_DEADLINE)
     is_open = now.time() < _parse_cutoff(cutoff_str)
-    delivery_date = now.date()
+    if not is_open and branch_id is not None and _has_deadline_exception(db, branch_id, now.date()):
+        is_open = True
+    delivery_date = now.date() + timedelta(days=2)
     return OrderWindowOut(
         is_open=is_open,
         delivery_date=delivery_date,
@@ -54,38 +75,95 @@ def get_order_window(db: Session, now: datetime | None = None) -> OrderWindowOut
     )
 
 
-def create_order(db: Session, branch_user: User, payload: OrderCreate) -> Order:
-    if not branch_user.branch_id:
-        raise PermissionDeniedError("Only branch accounts can place orders.")
-
-    window = get_order_window(db)
-    if not window.is_open:
-        raise ValidationFailedError(
-            f"Ordering for {window.delivery_date.isoformat()} is closed. "
-            f"Daily cutoff is {window.cutoff_time}."
-        )
-
-    today = datetime.now(BUSINESS_TZ).date()
-    # One order per branch per order_date — this is the true "once a day"
-    # business key now that delivery_date always == order_date (see
-    # uq_orders_branch_order_date). It intentionally does NOT check
-    # delivery_date: a leftover order placed under the old rule (order_date
-    # = yesterday, delivery_date = today) must never block a genuinely new
-    # order placed today just because they happen to share a delivery_date.
-    existing = (
-        db.query(Order)
+def _has_deadline_exception(db: Session, branch_id: int, order_date: date) -> bool:
+    return (
+        db.query(OrderDeadlineException)
         .filter(
-            Order.branch_id == branch_user.branch_id,
-            Order.order_date == today,
+            OrderDeadlineException.branch_id == branch_id,
+            OrderDeadlineException.order_date == order_date,
         )
+        .first()
+        is not None
+    )
+
+
+def grant_late_submission(db: Session, admin: User, branch_id: int, order_date: date) -> None:
+    """
+    Lets one branch submit (or keep editing) its order_date order past
+    today's normal cutoff — a one-time, per-branch, per-date exception,
+    not a change to the cutoff itself. Idempotent: granting twice for the
+    same branch/date is a no-op, not a duplicate row.
+    """
+    branch = db.get(Branch, branch_id)
+    if not branch:
+        raise NotFoundError("Branch not found.")
+    existing = (
+        db.query(OrderDeadlineException)
+        .filter(OrderDeadlineException.branch_id == branch_id, OrderDeadlineException.order_date == order_date)
         .first()
     )
     if existing:
-        raise ValidationFailedError(
-            "An order for today has already been submitted. "
-            "Contact Admin if it needs to change."
-        )
+        return
+    db.add(OrderDeadlineException(branch_id=branch_id, order_date=order_date, granted_by=admin.id))
+    db.commit()
 
+    write_audit_log(
+        db,
+        user_id=admin.id,
+        role="ADMIN",
+        action="ORDER_DEADLINE_EXCEPTION_GRANTED",
+        entity_type="branch",
+        entity_id=branch_id,
+        description=f"Late order submission allowed for '{branch.branch_name}' on {order_date.isoformat()}.",
+    )
+
+
+def revoke_late_submission(db: Session, admin: User, branch_id: int, order_date: date) -> None:
+    """Withdraws a previously-granted exception. Safe to call even if none exists."""
+    row = (
+        db.query(OrderDeadlineException)
+        .filter(OrderDeadlineException.branch_id == branch_id, OrderDeadlineException.order_date == order_date)
+        .first()
+    )
+    if not row:
+        return
+    branch = db.get(Branch, branch_id)
+    db.delete(row)
+    db.commit()
+
+    write_audit_log(
+        db,
+        user_id=admin.id,
+        role="ADMIN",
+        action="ORDER_DEADLINE_EXCEPTION_REVOKED",
+        entity_type="branch",
+        entity_id=branch_id,
+        description=f"Late order submission withdrawn for '{branch.branch_name if branch else branch_id}' on {order_date.isoformat()}.",
+    )
+
+
+def list_deadline_exceptions(db: Session, order_date: date) -> list[OrderDeadlineExceptionOut]:
+    """Every branch currently granted a late-submission exception for one order_date."""
+    rows = db.query(OrderDeadlineException).filter(OrderDeadlineException.order_date == order_date).all()
+    if not rows:
+        return []
+    branches = {b.id: b for b in db.query(Branch).filter(Branch.id.in_([r.branch_id for r in rows])).all()}
+    grantors = {u.id: u for u in db.query(User).filter(User.id.in_([r.granted_by for r in rows])).all()}
+    out = [
+        OrderDeadlineExceptionOut(
+            branch_id=r.branch_id,
+            branch_name=branches[r.branch_id].branch_name if r.branch_id in branches else "—",
+            order_date=r.order_date,
+            granted_by_username=grantors[r.granted_by].username if r.granted_by in grantors else "—",
+            created_at=r.created_at,
+        )
+        for r in rows
+    ]
+    out.sort(key=lambda e: e.branch_name)
+    return out
+
+
+def _validate_lines(db: Session, payload: OrderCreate) -> tuple[dict[int, Product], dict[int, str]]:
     product_ids = [line.product_id for line in payload.lines]
     products = {p.id: p for p in db.query(Product).filter(Product.id.in_(product_ids)).all()}
     missing = set(product_ids) - set(products.keys())
@@ -96,20 +174,12 @@ def create_order(db: Session, branch_user: User, payload: OrderCreate) -> Order:
             raise ValidationFailedError(f"Product '{products[pid].description}' is not currently orderable.")
     if len(product_ids) != len(set(product_ids)):
         raise ValidationFailedError("Each product can only appear once per order — combine duplicate lines.")
-
     units = {u.id: u.code for u in db.query(ProductUnit).all()}
+    return products, units
 
-    order = Order(
-        branch_id=branch_user.branch_id,
-        submitted_by=branch_user.id,
-        order_date=today,
-        delivery_date=window.delivery_date,
-        status="SUBMITTED",
-        notes=payload.notes,
-    )
-    db.add(order)
-    db.flush()  # get order.id before adding lines
 
+def _replace_lines(db: Session, order: Order, payload: OrderCreate, products: dict, units: dict) -> None:
+    db.query(OrderLine).filter(OrderLine.order_id == order.id).delete()
     for line in payload.lines:
         product = products[line.product_id]
         db.add(
@@ -121,6 +191,306 @@ def create_order(db: Session, branch_user: User, payload: OrderCreate) -> Order:
                 notes=line.notes,
             )
         )
+
+
+# Header names the order-upload template recognizes, matched
+# case/whitespace-insensitively. Product Code is the only real lookup
+# key (the one genuinely unique, stable identifier a branch would
+# already know); POS Code/Description/Unit are accepted purely so the
+# uploader can visually confirm they have the right row — never used to
+# override the product's own actual data, the same never-trust-a-
+# lower-authority-source rule products.pos_code already follows
+# elsewhere in this app.
+_EXCEL_COLUMN_ALIASES = {
+    "product code": "product_code",
+    "pos code": "pos_code",
+    "product description": "description",
+    "unit": "unit",
+    "quantity": "quantity",
+}
+_EXCEL_REQUIRED_COLUMNS = {"product_code", "quantity"}
+
+
+def _parse_excel_quantity(raw) -> tuple[float | None, str | None]:
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return None, "Quantity is empty."
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None, f"'{raw}' is not a valid quantity."
+    if value <= 0:
+        return None, "Quantity must be greater than zero."
+    if value > MAX_NUMERIC_10_2:
+        return None, f"Quantity exceeds the maximum allowed value ({MAX_NUMERIC_10_2:,.2f})."
+    return round(value, 2), None
+
+
+def parse_order_excel(db: Session, branch_user: User, file_bytes: bytes) -> ExcelOrderPreviewOut:
+    """
+    Parses an uploaded order Excel into a row-by-row preview — never
+    saves anything itself. The branch user reviews this result (rows with
+    no `error` prefill quantities on the normal order form) and still has
+    to press Save/Submit themselves, going through the exact same
+    save_draft_order/create_order path as manual entry — this is purely
+    an alternate way to fill in quantities, never a separate way to place
+    an order, so cutoff/lock/one-per-day rules are never bypassed.
+
+    A malformed file (wrong format, corrupted, empty) is reported as a
+    clean validation error, never left to crash with a raw exception —
+    an uploaded file is arbitrary external input and openpyxl's own
+    failure modes for "this isn't really a spreadsheet" are varied enough
+    that a single broad catch here is the right tool, the same reasoning
+    already used for unpredictable external formats in
+    harti_import_service.py.
+    """
+    if not branch_user.branch_id:
+        raise PermissionDeniedError("Only branch accounts can upload an order.")
+
+    try:
+        workbook = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
+        sheet = workbook.active
+        rows = sheet.iter_rows(values_only=True)
+        header_row = next(rows)
+    except Exception:
+        raise ValidationFailedError(
+            "Could not read this file — make sure it's a valid .xlsx file with a header row."
+        )
+
+    header_map: dict[int, str] = {}
+    for idx, cell in enumerate(header_row):
+        key = _EXCEL_COLUMN_ALIASES.get(str(cell).strip().lower()) if cell is not None else None
+        if key:
+            header_map[idx] = key
+
+    missing = _EXCEL_REQUIRED_COLUMNS - set(header_map.values())
+    if missing:
+        raise ValidationFailedError(
+            f"Missing required column(s): {', '.join(sorted(missing))}. Expected a header row with: "
+            "Product Code, POS Code, Product Description, Unit, Quantity."
+        )
+
+    products_by_code = {p.product_code: p for p in db.query(Product).filter(Product.status == "ACTIVE").all()}
+    units = {u.id: u.code for u in db.query(ProductUnit).all()}
+
+    lines: list[ExcelOrderLinePreview] = []
+    seen_codes: set[str] = set()
+    for row_number, raw_row in enumerate(rows, start=2):  # row 1 is the header
+        values = {header_map[i]: raw_row[i] for i in range(len(raw_row)) if i in header_map}
+        product_code = str(values.get("product_code") or "").strip()
+        if not product_code:
+            continue  # a genuinely blank trailing row — common in exported sheets, silently skipped, not an error
+
+        description = str(values["description"]).strip() if values.get("description") is not None else None
+        unit_from_file = str(values["unit"]).strip() if values.get("unit") is not None else None
+
+        if product_code in seen_codes:
+            lines.append(
+                ExcelOrderLinePreview(
+                    row_number=row_number,
+                    product_code=product_code,
+                    description=description,
+                    unit_code=unit_from_file,
+                    error="Duplicate product code — already appears earlier in this file.",
+                )
+            )
+            continue
+        seen_codes.add(product_code)
+
+        product = products_by_code.get(product_code)
+        if not product:
+            lines.append(
+                ExcelOrderLinePreview(
+                    row_number=row_number,
+                    product_code=product_code,
+                    description=description,
+                    unit_code=unit_from_file,
+                    error="Unknown or inactive product code.",
+                )
+            )
+            continue
+
+        quantity, qty_error = _parse_excel_quantity(values.get("quantity"))
+        lines.append(
+            ExcelOrderLinePreview(
+                row_number=row_number,
+                product_code=product_code,
+                description=product.description,
+                unit_code=units.get(product.unit_id, "—"),
+                quantity=quantity,
+                product_id=product.id if qty_error is None else None,
+                error=qty_error,
+            )
+        )
+
+    valid_count = sum(1 for ln in lines if ln.error is None)
+    return ExcelOrderPreviewOut(lines=lines, valid_line_count=valid_count, error_count=len(lines) - valid_count)
+
+
+def get_my_order_today(db: Session, branch_user: User) -> Order | None:
+    """The branch's own order (DRAFT or beyond) for today's order_date, if any — lets the
+    order form resume a draft or show a locked/read-only submitted order after a refresh."""
+    if not branch_user.branch_id:
+        raise PermissionDeniedError("Only branch accounts have their own orders.")
+    today = datetime.now(BUSINESS_TZ).date()
+    return (
+        db.query(Order)
+        .filter(Order.branch_id == branch_user.branch_id, Order.order_date == today)
+        .first()
+    )
+
+
+def get_stock_in_hand_for_branch(db: Session, branch_user: User) -> dict[int, float]:
+    """
+    Current stock-in-hand per product, for the branch's own location, from
+    the POS system — {product_id: quantity}. A product with no entry means
+    "unknown," not "zero": it's either not POS-tracked (no pos_code), the
+    POS system has no data for it, or the lookup couldn't run at all (POS
+    integration not configured, or this branch has no location code set
+    yet). All of that is expected and silent — this is a reference figure
+    on the order form, never a reason an order can't be placed.
+    """
+    if not branch_user.branch_id:
+        raise PermissionDeniedError("Only branch accounts have their own orders.")
+
+    branch = db.get(Branch, branch_user.branch_id)
+    if not branch or not branch.pos_location_code:
+        return {}
+
+    from app.services import pos_stock_service
+
+    products = (
+        db.query(Product)
+        .filter(Product.status == "ACTIVE", Product.pos_code.isnot(None))
+        .all()
+    )
+    pos_code_to_product_id = {p.pos_code: p.id for p in products}
+    if not pos_code_to_product_id:
+        return {}
+
+    stock_by_pos_code = pos_stock_service.get_stock_in_hand(
+        list(pos_code_to_product_id.keys()), branch.pos_location_code
+    )
+    return {
+        pos_code_to_product_id[code]: quantity
+        for code, quantity in stock_by_pos_code.items()
+        if code in pos_code_to_product_id
+    }
+
+
+def save_draft_order(db: Session, branch_user: User, payload: OrderCreate) -> Order:
+    """
+    Saves (creates or updates in place) today's order as a DRAFT — never
+    sent to Admin. Calling this again just replaces the draft's lines, it
+    never creates a second row (uq_orders_branch_order_date is one row per
+    branch per order_date regardless of status, so there's nothing extra
+    to enforce here). Rejects if today's order has already moved past
+    DRAFT — a draft save is not a way to edit a submitted order.
+    """
+    if not branch_user.branch_id:
+        raise PermissionDeniedError("Only branch accounts can place orders.")
+
+    window = get_order_window(db, branch_id=branch_user.branch_id)
+    if not window.is_open:
+        raise ValidationFailedError(
+            f"Ordering for {window.delivery_date.isoformat()} is closed. "
+            f"Daily cutoff is {window.cutoff_time}."
+        )
+
+    today = datetime.now(BUSINESS_TZ).date()
+    existing = (
+        db.query(Order)
+        .filter(Order.branch_id == branch_user.branch_id, Order.order_date == today)
+        .first()
+    )
+    if existing and existing.status != "DRAFT":
+        raise ValidationFailedError(
+            f"Today's order is already {existing.status.lower()} and can no longer be edited here — "
+            "contact Admin if it needs to change."
+        )
+
+    products, units = _validate_lines(db, payload)
+
+    if existing:
+        order = existing
+        order.notes = payload.notes
+    else:
+        order = Order(
+            branch_id=branch_user.branch_id,
+            submitted_by=branch_user.id,
+            order_date=today,
+            delivery_date=window.delivery_date,
+            status="DRAFT",
+            notes=payload.notes,
+        )
+        db.add(order)
+        db.flush()  # get order.id before adding lines
+
+    _replace_lines(db, order, payload, products, units)
+    db.commit()
+    db.refresh(order)
+    return order
+
+
+def create_order(db: Session, branch_user: User, payload: OrderCreate) -> Order:
+    """
+    Submits today's order — the "Submit Order" action. If a DRAFT already
+    exists for today (see save_draft_order), this converts it in place to
+    SUBMITTED with the given lines; otherwise it creates a fresh SUBMITTED
+    order directly, so submitting still works for a branch that never
+    bothered saving a draft first. Once an order is SUBMITTED (or beyond),
+    this rejects further calls — a branch gets exactly one submission per
+    order_date (see uq_orders_branch_order_date, the "once a day" key).
+    """
+    if not branch_user.branch_id:
+        raise PermissionDeniedError("Only branch accounts can place orders.")
+
+    window = get_order_window(db, branch_id=branch_user.branch_id)
+    if not window.is_open:
+        raise ValidationFailedError(
+            f"Ordering for {window.delivery_date.isoformat()} is closed. "
+            f"Daily cutoff is {window.cutoff_time}."
+        )
+
+    today = datetime.now(BUSINESS_TZ).date()
+    # One order per branch per order_date — this is the "once a day"
+    # business key (see uq_orders_branch_order_date). It intentionally
+    # does NOT check delivery_date: delivery_date is now order_date + 2,
+    # so two different order_dates never share a delivery_date under the
+    # current rule, but this still protects against any legacy rows from
+    # before that rule existed that might collide on delivery_date alone.
+    existing = (
+        db.query(Order)
+        .filter(
+            Order.branch_id == branch_user.branch_id,
+            Order.order_date == today,
+        )
+        .first()
+    )
+    if existing and existing.status != "DRAFT":
+        raise ValidationFailedError(
+            "An order for today has already been submitted. "
+            "Contact Admin if it needs to change."
+        )
+
+    products, units = _validate_lines(db, payload)
+
+    if existing:
+        order = existing
+        order.notes = payload.notes
+        order.status = "SUBMITTED"
+    else:
+        order = Order(
+            branch_id=branch_user.branch_id,
+            submitted_by=branch_user.id,
+            order_date=today,
+            delivery_date=window.delivery_date,
+            status="SUBMITTED",
+            notes=payload.notes,
+        )
+        db.add(order)
+        db.flush()  # get order.id before adding lines
+
+    _replace_lines(db, order, payload, products, units)
 
     try:
         db.commit()
@@ -148,57 +518,16 @@ def create_order(db: Session, branch_user: User, payload: OrderCreate) -> Order:
     return order
 
 
-def cancel_order(db: Session, branch_user: User, order_id: int) -> None:
-    """
-    Lets a branch undo its own mistake (wrong quantity, wrong product)
-    without needing Admin to do it for them — previously there was no way
-    to do this at all; create_order's own error message says "contact
-    Admin if it needs to change" because that really was the only option.
-
-    Deliberately restricted to SUBMITTED orders, still before today's
-    cutoff: SupplierAssignment is keyed by (product, delivery_date,
-    supplier) — not by order — so once Admin starts assigning suppliers
-    against the aggregated demand for today, a branch's order is no
-    longer just that branch's own business to unwind. ASSIGNED/CONFIRMED
-    orders still require contacting Admin (now easier via Messages).
-    """
-    if not branch_user.branch_id:
-        raise PermissionDeniedError("Only branch accounts can cancel their own orders.")
-    order = db.query(Order).filter(Order.id == order_id).first()
-    if not order:
-        raise NotFoundError("Order not found.")
-    if order.branch_id != branch_user.branch_id:
-        raise PermissionDeniedError("You can only cancel your own branch's orders.")
-    if order.status != "SUBMITTED":
-        raise ValidationFailedError(
-            f"This order is already {order.status} and can no longer be cancelled here — "
-            "contact Admin if it needs to change."
-        )
-    window = get_order_window(db)
-    today = datetime.now(BUSINESS_TZ).date()
-    if order.order_date != today or not window.is_open:
-        raise ValidationFailedError(
-            f"Today's ordering cutoff ({window.cutoff_time}) has passed — this order can no longer be cancelled here."
-        )
-
-    write_audit_log(
-        db,
-        user_id=branch_user.id,
-        role="BRANCH",
-        action="ORDER_CANCELLED",
-        entity_type="order",
-        entity_id=order.id,
-        description=f"Order for delivery {order.delivery_date.isoformat()} cancelled before cutoff.",
-    )
-    db.delete(order)
-    db.commit()
-
-
 def get_order_detail(db: Session, current_user: User, order_id: int, roles: list[str]) -> Order:
     order = db.get(Order, order_id)
     if not order:
         raise NotFoundError("Order not found.")
-    if "ADMIN" not in roles and order.branch_id != current_user.branch_id:
+    is_owner = order.branch_id == current_user.branch_id
+    # A DRAFT is never visible to anyone but its own branch — not even
+    # Admin — since it hasn't been submitted yet.
+    if order.status == "DRAFT" and not is_owner:
+        raise NotFoundError("Order not found.")
+    if "ADMIN" not in roles and not is_owner:
         raise PermissionDeniedError("You do not have access to this order.")
     return order
 
@@ -265,16 +594,27 @@ def list_orders(db: Session, current_user: User, roles: list[str], delivery_date
     query = db.query(Order).order_by(Order.created_at.desc())
     if "ADMIN" not in roles:
         query = query.filter(Order.branch_id == current_user.branch_id)
+    else:
+        # Admin only ever sees orders that have actually been submitted —
+        # a DRAFT is still the branch's own private, unsent work.
+        query = query.filter(Order.status != "DRAFT")
     if delivery_date:
         query = query.filter(Order.delivery_date == delivery_date)
     return query.all()
 
 
 def list_order_dates(db: Session) -> list[date]:
-    """Every distinct date any branch order exists for, most recent first — powers the
-    Admin Order History day-by-day browser (which dates have anything to show, for
-    Prev/Next navigation and the date picker)."""
-    rows = db.query(Order.delivery_date).distinct().order_by(Order.delivery_date.desc()).all()
+    """Every distinct date any SUBMITTED-or-later branch order exists for, most recent
+    first — powers the Admin Order History day-by-day browser (which dates have anything
+    to show, for Prev/Next navigation and the date picker). Excludes DRAFT orders, which
+    aren't visible to Admin at all."""
+    rows = (
+        db.query(Order.delivery_date)
+        .filter(Order.status != "DRAFT")
+        .distinct()
+        .order_by(Order.delivery_date.desc())
+        .all()
+    )
     return [r[0] for r in rows]
 
 
@@ -286,12 +626,9 @@ def get_order_matrix(db: Session, delivery_date: date | None = None):
     all active products, not just ones with orders, so Admin sees the full
     picture including what nobody ordered.
     """
-    from app.models.branch import Branch
-    from app.models.product import Product, ProductCategory, ProductUnit
-    from app.models.order import Order, OrderLine
-
     available_dates = sorted(
-        {row[0] for row in db.query(Order.delivery_date).distinct().all()}, reverse=True
+        {row[0] for row in db.query(Order.delivery_date).filter(Order.status != "DRAFT").distinct().all()},
+        reverse=True,
     )
 
     if delivery_date is None:
@@ -300,17 +637,19 @@ def get_order_matrix(db: Session, delivery_date: date | None = None):
     branches = db.query(Branch).filter(Branch.status == "ACTIVE").order_by(Branch.id).all()
     categories = {c.id: c.name for c in db.query(ProductCategory).all()}
     units = {u.id: u.code for u in db.query(ProductUnit).all()}
+    # Category IDs match the requested display grouping (1=Fruit, 2=Vege
+    # Low, 3=Vege Pola, 4=Vege Up); alphabetical within each category.
     products = (
         db.query(Product)
         .filter(Product.status == "ACTIVE")
-        .order_by(Product.category_id, Product.id)
+        .order_by(Product.category_id, Product.description)
         .all()
     )
 
     lines = (
         db.query(OrderLine, Order.branch_id)
         .join(Order, Order.id == OrderLine.order_id)
-        .filter(Order.delivery_date == delivery_date)
+        .filter(Order.delivery_date == delivery_date, Order.status != "DRAFT")
         .all()
     )
     # (product_id, branch_id) -> quantity

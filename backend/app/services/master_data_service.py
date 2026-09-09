@@ -23,6 +23,8 @@ Field ownership:
   here — there is exactly one place a supplier's price can be changed,
   never two disagreeing UIs.
 """
+from datetime import date
+
 from sqlalchemy.orm import Session
 
 from app.core.errors import NotFoundError
@@ -37,7 +39,9 @@ from app.schemas.master_data import (
 )
 
 
-def _latest_prices(db: Session) -> tuple[dict[tuple[int, int], float], dict[tuple[int, int], float]]:
+def _latest_prices(
+    db: Session,
+) -> tuple[dict[tuple[int, int], float], dict[tuple[int, int], tuple[float, date]]]:
     """
     One query, two views of the same rows — for every (supplier_id,
     product_id) pair, that supplier's most recent quote, regardless of
@@ -47,10 +51,13 @@ def _latest_prices(db: Session) -> tuple[dict[tuple[int, int], float], dict[tupl
       otherwise the submitted price. Shown in the per-supplier "Adjusted
       CP" columns — this sheet is Admin-only, so a draft adjustment is
       useful to see here even before it's been sent to the supplier.
-    - `submitted_only`: always the supplier's own submitted price, never
-      an adjustment. Used for Cost Price specifically — Cost Price should
+    - `submitted_only`: (price, delivery_date) — always the supplier's own
+      submitted price, never an adjustment, plus the date it was
+      submitted for. Used for Cost Price specifically — Cost Price should
       reflect what suppliers are actually asking, not a negotiated figure
-      Admin may have typed in, so the two must not be conflated.
+      Admin may have typed in, so the two must not be conflated. The date
+      is carried through so the sheet can show admin which supplier's
+      quote won and when it was submitted.
     """
     rows = (
         db.query(SupplierPrice)
@@ -58,20 +65,27 @@ def _latest_prices(db: Session) -> tuple[dict[tuple[int, int], float], dict[tupl
         .all()
     )
     adjusted_or_submitted: dict[tuple[int, int], float] = {}
-    submitted_only: dict[tuple[int, int], float] = {}
+    submitted_only: dict[tuple[int, int], tuple[float, date]] = {}
     for r in rows:
         key = (r.supplier_id, r.product_id)
         if key in adjusted_or_submitted:
             continue
         adjusted_or_submitted[key] = float(r.adjusted_price) if r.adjusted_price is not None else float(r.price)
-        submitted_only[key] = float(r.price)
+        submitted_only[key] = (float(r.price), r.delivery_date)
     return adjusted_or_submitted, submitted_only
 
 
 def get_master_data_sheet(db: Session) -> MasterDataSheetOut:
     suppliers = db.query(Supplier).filter(Supplier.status == "ACTIVE").order_by(Supplier.supplier_name).all()
     categories = {c.id: c.name for c in db.query(ProductCategory).all()}
-    products = db.query(Product).filter(Product.status == "ACTIVE").order_by(Product.description).all()
+    # Category IDs match the requested display grouping (1=Fruit, 2=Vege
+    # Low, 3=Vege Pola, 4=Vege Up); alphabetical within each category.
+    products = (
+        db.query(Product)
+        .filter(Product.status == "ACTIVE")
+        .order_by(Product.category_id, Product.description)
+        .all()
+    )
     latest_prices, latest_submitted = _latest_prices(db)
 
     rows = []
@@ -79,9 +93,17 @@ def get_master_data_sheet(db: Session) -> MasterDataSheetOut:
         supplier_prices = {s.id: latest_prices.get((s.id, p.id)) for s in suppliers}
         # Cost Price = the highest of suppliers' latest SUBMITTED prices —
         # deliberately not the "Adjusted CP" values shown alongside it.
-        submitted_for_product = [latest_submitted.get((s.id, p.id)) for s in suppliers]
-        submitted_for_product = [v for v in submitted_for_product if v is not None]
-        cost_price = max(submitted_for_product) if submitted_for_product else None
+        # Also track which supplier + delivery date that winning quote came
+        # from, so Admin can see who it was and when, next to the number.
+        submitted_for_product = [
+            (s.id, *latest_submitted[(s.id, p.id)]) for s in suppliers if (s.id, p.id) in latest_submitted
+        ]
+        cost_price = None
+        cost_price_supplier_name = None
+        cost_price_date = None
+        if submitted_for_product:
+            winning_supplier_id, cost_price, cost_price_date = max(submitted_for_product, key=lambda t: t[1])
+            cost_price_supplier_name = next(s.supplier_name for s in suppliers if s.id == winning_supplier_id)
 
         selling_price = float(p.selling_price) if p.selling_price is not None else None
         computed_gp = None
@@ -102,6 +124,8 @@ def get_master_data_sheet(db: Session) -> MasterDataSheetOut:
                 selling_price=selling_price,
                 computed_gp_percent=computed_gp,
                 cost_price=cost_price,
+                cost_price_supplier_name=cost_price_supplier_name,
+                cost_price_date=cost_price_date,
                 supplier_prices=supplier_prices,
             )
         )
@@ -110,6 +134,48 @@ def get_master_data_sheet(db: Session) -> MasterDataSheetOut:
         suppliers=[MasterDataSupplierColumn(supplier_id=s.id, supplier_name=s.supplier_name) for s in suppliers],
         rows=rows,
     )
+
+
+def auto_generate_selling_prices(db: Session) -> int:
+    """
+    Fills in Selling Price for every active product that doesn't have one
+    yet, computed from the GP% formula solved for selling price:
+
+        GP = (selling_price - cost_price) / selling_price
+        => selling_price = cost_price / (1 - target_gp_percent)
+
+    Uses each product's own target_gp_percent (defaulting to 30% the same
+    way the sheet already does). Products that already have a manually-set
+    selling_price are left untouched — this only fills gaps, never
+    overwrites Admin's own numbers. Products with no cost_price yet (no
+    supplier has submitted a price) are skipped; there's nothing to derive
+    a selling price from. Returns how many rows were actually updated.
+    """
+    products = db.query(Product).filter(Product.status == "ACTIVE", Product.selling_price.is_(None)).all()
+    if not products:
+        return 0
+
+    _, latest_submitted = _latest_prices(db)
+    supplier_ids = [s.id for s in db.query(Supplier).filter(Supplier.status == "ACTIVE").all()]
+
+    updated = 0
+    for p in products:
+        submitted_for_product = [latest_submitted.get((sid, p.id)) for sid in supplier_ids]
+        submitted_for_product = [v[0] for v in submitted_for_product if v is not None]
+        if not submitted_for_product:
+            continue
+        cost_price = max(submitted_for_product)
+
+        target_gp = float(p.target_gp_percent) if p.target_gp_percent is not None else 0.30
+        if target_gp >= 1:
+            continue  # can't solve (division by zero or negative) — leave blank rather than guess
+
+        p.selling_price = round(cost_price / (1 - target_gp), 2)
+        updated += 1
+
+    if updated:
+        db.commit()
+    return updated
 
 
 def build_master_data_excel(db: Session) -> bytes:

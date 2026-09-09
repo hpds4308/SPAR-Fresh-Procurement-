@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import DashboardShell from "../shared/DashboardShell";
 import { SidebarItem } from "../shared/Sidebar";
-import { IconBasket, IconTruck, IconTag, IconChart, IconChat, IconClock, IconGrid, IconStore, IconLog, IconSettings, IconUser } from "../shared/Icons";
+import { IconBasket, IconTruck, IconTag, IconChart, IconChat, IconClock, IconGrid, IconStore, IconBranches, IconLog, IconSettings, IconUser } from "../shared/Icons";
 import { fetchAdminUnreadCount } from "../../api/messages";
 import OrderMatrixView from "./OrderMatrixView";
 import AdminOrderHistory from "./AdminOrderHistory";
@@ -9,6 +9,8 @@ import ReportsView from "./ReportsView";
 import SupplierOrderBuilder from "./SupplierOrderBuilder";
 import SupplierPricesView from "./SupplierPricesView";
 import AdminKeellsPrices from "./AdminKeellsPrices";
+import AdminMarketPrices from "./AdminMarketPrices";
+import AdminMarketPriceHistory from "./AdminMarketPriceHistory";
 import AdminMasterData from "./AdminMasterData";
 import AdminMessages from "./AdminMessages";
 import AdminAuditLog from "./AdminAuditLog";
@@ -16,7 +18,7 @@ import AdminSettings from "./AdminSettings";
 import AdminUsers from "./AdminUsers";
 import { FadeSwitch } from "../shared/ui/FadeSwitch";
 
-type Tab = "orders" | "orderHistory" | "supplierOrders" | "supplierPrices" | "keellsPrices" | "masterData" | "messages" | "reports" | "auditLog" | "settings" | "users";
+type Tab = "orders" | "orderHistory" | "supplierOrders" | "supplierPrices" | "keellsPrices" | "marketPrices" | "marketPriceHistory" | "masterData" | "messages" | "reports" | "auditLog" | "settings" | "users";
 
 const iconProps = { width: 17, height: 17 };
 const UNREAD_POLL_MS = 15000;
@@ -58,6 +60,8 @@ export default function AdminDashboard() {
     { id: "supplierOrders", label: "Supplier Orders", icon: <IconTruck {...iconProps} /> },
     { id: "supplierPrices", label: "Supplier Prices", icon: <IconTag {...iconProps} /> },
     { id: "keellsPrices", label: "Keells Prices", icon: <IconStore {...iconProps} /> },
+    { id: "marketPrices", label: "Local Market Prices", icon: <IconBranches {...iconProps} /> },
+    { id: "marketPriceHistory", label: "Price History", icon: <IconChart {...iconProps} /> },
     { id: "masterData", label: "Master Data Sheet", icon: <IconGrid {...iconProps} /> },
     { id: "messages", label: "Messages", icon: <IconChat {...iconProps} />, badge: unread },
     { id: "reports", label: "Reports", icon: <IconChart {...iconProps} /> },
@@ -115,6 +119,22 @@ export default function AdminDashboard() {
               Keells Prices
             </h2>
             <AdminKeellsPrices />
+          </>
+        )}
+        {tab === "marketPrices" && (
+          <>
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-crate-800/60 mb-3">
+              Local Market Prices
+            </h2>
+            <AdminMarketPrices />
+          </>
+        )}
+        {tab === "marketPriceHistory" && (
+          <>
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-crate-800/60 mb-3">
+              Price History
+            </h2>
+            <AdminMarketPriceHistory />
           </>
         )}
         {tab === "masterData" && (

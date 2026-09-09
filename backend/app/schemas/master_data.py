@@ -1,6 +1,9 @@
+from datetime import date
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, field_validator
+
+from app.schemas._limits import MAX_NUMERIC_10_2
 
 
 class MasterDataSupplierColumn(BaseModel):
@@ -18,6 +21,10 @@ class MasterDataRowOut(BaseModel):
     selling_price: float | None
     computed_gp_percent: float | None  # (selling_price - cost_price) / selling_price, live-derived
     cost_price: float | None  # Highest current price among suppliers who've quoted this — never manually set
+    # Which supplier's quote is currently winning Cost Price, and the delivery
+    # date they submitted it for — None whenever cost_price itself is None.
+    cost_price_supplier_name: str | None = None
+    cost_price_date: date | None = None
     # One entry per active supplier — that supplier's most recent Adjusted
     # Price (or their submitted price if never adjusted) for this product,
     # any date. Purely a read-only mirror of Supplier Prices; edit there,
@@ -59,5 +66,7 @@ class MasterDataFieldUpdateRequest(BaseModel):
             fv = float(v)
             if fv <= 0:
                 raise ValueError("Price must be greater than zero.")
+            if fv > MAX_NUMERIC_10_2:
+                raise ValueError(f"Price can't exceed {MAX_NUMERIC_10_2:,.2f}.")
             return fv
         return str(v)

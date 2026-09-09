@@ -47,11 +47,13 @@ def test_closed_at_and_after_cutoff():
     assert window2.is_open is False
 
 
-def test_pricing_and_order_delivery_dates_stay_2_days_apart():
+def test_pricing_and_order_delivery_dates_line_up():
     """
-    The exact relationship Admin depends on to line up what was ordered
-    against what suppliers quoted for the same delivery day — this drifting
-    apart would silently break that comparison across the whole app.
+    Branch orders and supplier prices submitted on the same day both
+    target the same future delivery date (submission date + 2) — that's
+    what lets Admin match what was ordered against what suppliers quoted
+    for the same delivery day. These drifting apart would silently break
+    that comparison across the whole app.
     """
     from app.services import order_service
 
@@ -59,4 +61,4 @@ def test_pricing_and_order_delivery_dates_stay_2_days_apart():
     now = datetime(2026, 6, 15, 9, 0, tzinfo=BUSINESS_TZ)
     order_window = order_service.get_order_window(db, now=now)
     price_window = pricing_service.get_price_window(db, now=now)
-    assert (price_window.delivery_date - order_window.delivery_date) == timedelta(days=2)
+    assert price_window.delivery_date == order_window.delivery_date

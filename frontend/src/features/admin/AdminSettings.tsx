@@ -1,7 +1,19 @@
 import { useEffect, useState } from "react";
 import { ApiError } from "../../api/client";
 import { Settings, fetchSettings, updateSetting } from "../../api/settings";
+import {
+  Branch,
+  OrderDeadlineException,
+  fetchBranches,
+  fetchOrderDeadlineExceptions,
+  grantOrderDeadlineException,
+  revokeOrderDeadlineException,
+} from "../../api/branches";
 import { Skeleton } from "../shared/ui/Skeleton";
+
+function todayISO(): string {
+  return new Date().toISOString().slice(0, 10);
+}
 
 type FieldState = "idle" | "saving" | "saved" | "error";
 
@@ -119,6 +131,148 @@ export default function AdminSettings() {
         </div>
       </div>
       {error && <p className="text-tomato-600 text-sm px-1">{error}</p>}
+
+      <LateSubmissionPanel />
+    </div>
+  );
+}
+
+/**
+ * Admin's escape hatch for the daily cutoff: let one specific branch
+ * submit (or keep editing) its order for one specific date past today's
+ * normal cutoff, without changing the cutoff itself for anyone else.
+ * Scoped to one branch + one date per grant — see order_service.py's
+ * grant_late_submission for why this stays a one-off exception rather
+ * than a standing rule.
+ */
+function LateSubmissionPanel() {
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [orderDate, setOrderDate] = useState(todayISO());
+  const [selectedBranchId, setSelectedBranchId] = useState<number | "">("");
+  const [exceptions, setExceptions] = useState<OrderDeadlineException[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [granting, setGranting] = useState(false);
+  const [revokingId, setRevokingId] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchBranches().then(setBranches).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    setLoading(true);
+    fetchOrderDeadlineExceptions(orderDate)
+      .then(setExceptions)
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Could not load exceptions."))
+      .finally(() => setLoading(false));
+  }, [orderDate]);
+
+  async function handleGrant() {
+    if (!selectedBranchId) {
+      setError("Choose a branch first.");
+      return;
+    }
+    setError(null);
+    setGranting(true);
+    try {
+      await grantOrderDeadlineException(selectedBranchId, orderDate);
+      setSelectedBranchId("");
+      const fresh = await fetchOrderDeadlineExceptions(orderDate);
+      setExceptions(fresh);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not grant the exception.");
+    } finally {
+      setGranting(false);
+    }
+  }
+
+  async function handleRevoke(branchId: number) {
+    setRevokingId(branchId);
+    try {
+      await revokeOrderDeadlineException(branchId, orderDate);
+      setExceptions((prev) => prev.filter((e) => e.branch_id !== branchId));
+    } catch {
+      setError("Could not withdraw that exception.");
+    } finally {
+      setRevokingId(null);
+    }
+  }
+
+  const eligibleBranches = branches.filter(
+    (b) => b.status === "ACTIVE" && !exceptions.some((e) => e.branch_id === b.id)
+  );
+
+  return (
+    <div className="bg-white rounded-2xl shadow-card border border-sage-100 p-6">
+      <h2 className="font-display font-semibold text-lg text-crate-950 mb-1">Late Order Submission</h2>
+      <p className="text-sm text-crate-800/50 mb-5">
+        Let one branch submit (or keep editing) its order for one date, past today's cutoff — a one-time
+        exception, not a change to the cutoff itself.
+      </p>
+
+      <div className="flex flex-wrap items-end gap-3 mb-5">
+        <div>
+          <label className="block text-xs font-semibold uppercase tracking-wide text-crate-800/60 mb-1.5">
+            Order Date
+          </label>
+          <input
+            type="date"
+            value={orderDate}
+            onChange={(e) => setOrderDate(e.target.value)}
+            className="border border-sage-300 bg-sage-50/60 rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-crate-700/30 focus:border-crate-700 focus:bg-white transition-all duration-150"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-semibold uppercase tracking-wide text-crate-800/60 mb-1.5">
+            Branch
+          </label>
+          <select
+            value={selectedBranchId}
+            onChange={(e) => setSelectedBranchId(e.target.value ? Number(e.target.value) : "")}
+            className="border border-sage-300 bg-sage-50/60 rounded-full px-4 py-2 text-sm min-w-[12rem] focus:outline-none focus:ring-2 focus:ring-crate-700/30 focus:border-crate-700 focus:bg-white transition-all duration-150"
+          >
+            <option value="">Select a branch…</option>
+            {eligibleBranches.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.branch_name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <button
+          onClick={handleGrant}
+          disabled={granting || !selectedBranchId}
+          className="text-sm bg-gradient-to-b from-crate-700 to-crate-800 text-white rounded-full px-4 py-2 font-semibold hover:brightness-110 disabled:opacity-50 transition-all duration-150"
+        >
+          {granting ? "Granting…" : "Grant exception"}
+        </button>
+      </div>
+
+      {error && <p className="text-tomato-600 text-sm mb-3">{error}</p>}
+
+      {loading ? (
+        <Skeleton className="h-10 w-full" />
+      ) : exceptions.length === 0 ? (
+        <p className="text-sm text-crate-800/40">No exceptions granted for this date.</p>
+      ) : (
+        <div className="divide-y divide-sage-100 border border-sage-100 rounded-xl overflow-hidden">
+          {exceptions.map((e) => (
+            <div key={e.branch_id} className="flex items-center justify-between px-4 py-2.5 text-sm">
+              <div>
+                <span className="text-crate-950 font-medium">{e.branch_name}</span>
+                <span className="text-crate-800/40 text-xs ml-2">granted by {e.granted_by_username}</span>
+              </div>
+              <button
+                onClick={() => handleRevoke(e.branch_id)}
+                disabled={revokingId === e.branch_id}
+                className="text-tomato-500 hover:text-tomato-600 text-xs font-medium disabled:opacity-50 transition-colors duration-150"
+              >
+                {revokingId === e.branch_id ? "Withdrawing…" : "Withdraw"}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

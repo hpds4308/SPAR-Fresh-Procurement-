@@ -102,22 +102,23 @@ def main():
 
     today = date.today().isoformat()
 
-    print("\n== Branch orders (same-day delivery date) ==")
+    print("\n== Branch orders (delivery date = order date + 2) ==")
+    expected_order_delivery_date = (date.today() + timedelta(days=2)).isoformat()
     status, window = api.get("/orders/window", token=branch)
     check("order window reachable", status == 200, f"status={status}")
     if status == 200:
         check(
-            "order window delivery_date == today (same-day rule)",
-            window["delivery_date"] == today,
-            f"expected {today}, got {window.get('delivery_date')}",
+            "order window delivery_date == today+2 (lead-time rule, matches pricing)",
+            window["delivery_date"] == expected_order_delivery_date,
+            f"expected {expected_order_delivery_date}, got {window.get('delivery_date')}",
         )
 
     status, order = api.post("/orders", token=branch, body={"lines": [{"product_id": 1, "quantity": 5}]})
     if status == 200:
         check("branch can place an order", True)
         check(
-            "order_date == delivery_date (same-day rule)",
-            order["order_date"] == order["delivery_date"],
+            "delivery_date == order_date + 2 days",
+            order["delivery_date"] == expected_order_delivery_date,
             f"order_date={order.get('order_date')} delivery_date={order.get('delivery_date')}",
         )
     elif status == 422 and "already" in json.dumps(order).lower():
@@ -188,10 +189,10 @@ def main():
     if status == 200 and mine_orders["branches"]:
         item = mine_orders["branches"][0]["items"][0]
         # The sent adjusted price above was for expected_price_date
-        # (today+2, per the pricing lead-time rule), but this order is for
-        # `today` (per the same-day order rule) — there's no exact-date
-        # match, so Cost Price correctly falls back to the most recent
-        # known price and must be flagged as an estimate. See
+        # (today+2), but this supplier order was deliberately built for
+        # plain `today` — a date with no submitted price — so there's no
+        # exact-date match and Cost Price correctly falls back to the
+        # most recent known price, flagged as an estimate. See
         # docs/DATA_MODEL.md "Cost Price resolution" — this is the
         # expected, documented behaviour, not a bug.
         check(
@@ -203,13 +204,13 @@ def main():
     # Now submit + send a price for the order's OWN delivery date, so we
     # can also verify the exact-match (non-estimated) path.
     status, _ = api.post("/pricing", token=supplier, body={"prices": [{"product_id": 1, "price": 33}]})
-    # This submission lands on the current price window's date (today+2),
-    # same as before, since pricing always targets order_date+2 regardless
-    # of what other dates exist — submitting again doesn't change that.
-    # To actually test the exact-match path we go straight to the DB-free
-    # option available to us: build the supplier order for the SAME date
-    # pricing already exists for, instead of moving pricing to match
-    # orders (orders are always same-day, by design — see DATA_MODEL.md).
+    # This submission lands on the current price window's date (today+2)
+    # — pricing always targets submission_date+2 regardless of what other
+    # dates exist, so submitting again doesn't change that. To test the
+    # exact-match path, build a supplier order for that SAME date
+    # directly (this now also matches what a real branch order placed
+    # today would target, since orders are order_date+2 too — see
+    # docs/DATA_MODEL.md).
     status, order_result2 = api.put(
         f"/supplier-orders/admin?supplier_id=1&delivery_date={expected_price_date}",
         token=admin,

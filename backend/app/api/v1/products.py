@@ -14,10 +14,13 @@ router = APIRouter(prefix="/products", dependencies=[Depends(get_current_user)])
 def list_products(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     categories = {c.id: c.name for c in db.query(ProductCategory).all()}
     units = {u.id: u.code for u in db.query(ProductUnit).all()}
+    # Category IDs already match the client's requested display grouping
+    # (1=Fruit, 2=Vege Low, 3=Vege Pola, 4=Vege Up); within each category,
+    # items are alphabetical.
     products = (
         db.query(Product)
         .filter(Product.status == "ACTIVE")
-        .order_by(Product.description)
+        .order_by(Product.category_id, Product.description)
         .all()
     )
     return [

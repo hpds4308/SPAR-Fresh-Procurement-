@@ -8,16 +8,17 @@ from app.core.database import Base
 
 class MarketReferencePrice(Base):
     """
-    A manually-entered competitor retail price for one product, for one
-    delivery date — shown alongside supplier quotes on the Supplier Prices
-    page purely as a reference point for Admin (e.g. "Keells sells this
-    to consumers at Rs. X, so paying our supplier Rs. Y makes sense").
+    A reference price for one product, for one delivery date, shown
+    alongside supplier quotes on the Admin pricing pages purely as a
+    comparison point (e.g. "Keells sells this to consumers at Rs. X, so
+    paying our supplier Rs. Y makes sense"). Nothing else in the system
+    reads or depends on this table — it's a pure reference, never used
+    in any calculation, order, or price comparison logic.
 
-    This is deliberately NOT scraped automatically: `source` exists so
-    more than one competitor could be tracked later, but for now it's
-    always "KEELLS", entered by hand. Nothing else in the system reads
-    or depends on this table — it's a pure reference, never used in any
-    calculation, order, or price comparison logic.
+    `source` distinguishes where a row came from: "KEELLS" is entered by
+    hand (competitor retail pricing); "LOCAL_MARKET" is populated by the
+    daily wholesale-market auto-import (see harti_import_service.py),
+    which merges HARTI/Dambulla/Keppetipola/CBSL/GoviSaviya data.
     """
 
     __tablename__ = "market_reference_prices"

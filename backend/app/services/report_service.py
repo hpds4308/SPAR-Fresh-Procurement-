@@ -5,9 +5,11 @@ Admin reporting across a date range.
 price from supplier_assignments, not raw branch demand — demand has no
 price attached until Admin assigns and negotiates it, so it isn't money
 yet. Fulfillment is measured by order count (what fraction of branch
-orders in range are fully ASSIGNED), not by summing quantities across
-products, since quantities use different units (kg, pcs, ...) and can't
-be added together meaningfully.
+orders in range are fully covered by supplier assignments, i.e. status
+ASSIGNED or CONFIRMED — CONFIRMED still counts, it's an order that was
+assigned *and* delivered), not by summing quantities across products,
+since quantities use different units (kg, pcs, ...) and can't be added
+together meaningfully.
 """
 from datetime import date
 
@@ -28,9 +30,15 @@ from app.schemas.report import (
 
 
 def build_report(db: Session, start_date: date, end_date: date) -> AdminReportOut:
+    # DRAFT orders are excluded — they're still the branch's own unsent
+    # work, not something Admin has actually received yet.
     orders = (
         db.query(Order)
-        .filter(Order.delivery_date >= start_date, Order.delivery_date <= end_date)
+        .filter(
+            Order.delivery_date >= start_date,
+            Order.delivery_date <= end_date,
+            Order.status != "DRAFT",
+        )
         .all()
     )
     order_ids = [o.id for o in orders]
@@ -72,7 +80,7 @@ def build_report(db: Session, start_date: date, end_date: date) -> AdminReportOu
             DailyReportRow(
                 delivery_date=d,
                 orders_count=len(day_orders),
-                assigned_orders_count=sum(1 for o in day_orders if o.status == "ASSIGNED"),
+                assigned_orders_count=sum(1 for o in day_orders if o.status in ("ASSIGNED", "CONFIRMED")),
                 branches_count=len({o.branch_id for o in day_orders}),
                 spend=sum(float(a.quantity) * float(a.agreed_price) for a in day_assignments),
             )
@@ -143,7 +151,7 @@ def build_report(db: Session, start_date: date, end_date: date) -> AdminReportOu
     top_products = top_products[:15]
 
     total_spend = sum(float(a.quantity) * float(a.agreed_price) for a in assignments)
-    assigned_orders = sum(1 for o in orders if o.status == "ASSIGNED")
+    assigned_orders = sum(1 for o in orders if o.status in ("ASSIGNED", "CONFIRMED"))
 
     return AdminReportOut(
         start_date=start_date,

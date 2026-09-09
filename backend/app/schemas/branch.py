@@ -6,6 +6,7 @@ class BranchOut(BaseModel):
     branch_code: str
     branch_name: str
     location: str | None = None
+    pos_location_code: str | None = None
     status: str
 
     class Config:
@@ -19,3 +20,9 @@ class BranchCreate(BaseModel):
     branch_code: str | None = Field(default=None, max_length=20)
     branch_name: str = Field(min_length=1, max_length=100)
     location: str | None = Field(default=None, max_length=200)
+
+
+class BranchPosLocationCodeUpdate(BaseModel):
+    # Null clears it. Not validated against the POS system itself — Admin
+    # is expected to copy this from the POS system's own location list.
+    pos_location_code: str | None = Field(default=None, max_length=30)

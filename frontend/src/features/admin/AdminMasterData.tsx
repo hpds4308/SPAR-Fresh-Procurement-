@@ -4,6 +4,7 @@ import {
   MasterDataFieldName,
   MasterDataRow,
   MasterDataSheet,
+  autoGenerateSellingPrices,
   downloadMasterData,
   fetchMasterData,
   sendMasterDataEmail,
@@ -33,6 +34,8 @@ export default function AdminMasterData() {
   const [emailSentMessage, setEmailSentMessage] = useState<string | null>(null);
   const [clearing, setClearing] = useState(false);
   const [confirmClearOpen, setConfirmClearOpen] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [generateMessage, setGenerateMessage] = useState<string | null>(null);
 
   const [drafts, setDrafts] = useState<Record<CellKey, string>>({});
   const [cellState, setCellState] = useState<Record<CellKey, CellState>>({});
@@ -176,6 +179,31 @@ export default function AdminMasterData() {
     }
   }
 
+  // Fills Selling Price only for rows that don't have one yet, from
+  // Cost Price and each row's own Target GP% — never touches a row Admin
+  // already filled in manually.
+  async function handleAutoGenerate() {
+    setGenerating(true);
+    setError(null);
+    setGenerateMessage(null);
+    try {
+      const result = await autoGenerateSellingPrices();
+      const fresh = await fetchMasterData();
+      setSheet(fresh);
+      seedDrafts(fresh.rows);
+      setGenerateMessage(
+        result.updated === 0
+          ? "Nothing to fill — every item either has a selling price already or no cost price yet."
+          : `Filled selling price for ${result.updated} item${result.updated === 1 ? "" : "s"}.`
+      );
+      setTimeout(() => setGenerateMessage((m) => (m ? null : m)), 5000);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not auto-generate selling prices. Please try again.");
+    } finally {
+      setGenerating(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="bg-white rounded-2xl shadow-card border border-sage-100 overflow-hidden">
@@ -229,6 +257,14 @@ export default function AdminMasterData() {
         </span>
         <div className="ml-auto flex items-center gap-2">
           <button
+            onClick={handleAutoGenerate}
+            disabled={generating}
+            title="Fills Selling Price (from Cost Price and Target GP%) only for items that don't have one yet"
+            className="text-sm border border-sage-300 text-crate-800/70 rounded-full px-4 py-2 font-medium hover:bg-sage-50 disabled:opacity-50 transition-colors duration-150"
+          >
+            {generating ? "Generating…" : "Auto-generate Selling Price"}
+          </button>
+          <button
             onClick={() => setConfirmClearOpen(true)}
             disabled={clearing}
             className="text-sm border border-sage-300 text-crate-800/70 rounded-full px-4 py-2 font-medium hover:bg-sage-50 disabled:opacity-50 transition-colors duration-150"
@@ -255,6 +291,9 @@ export default function AdminMasterData() {
 
       {emailSentMessage && (
         <p className="text-crate-700 text-sm px-1 font-medium">✓ {emailSentMessage}</p>
+      )}
+      {generateMessage && (
+        <p className="text-crate-700 text-sm px-1 font-medium">✓ {generateMessage}</p>
       )}
       {error && sheet && <p className="text-tomato-600 text-sm px-1">{error}</p>}
 
@@ -363,7 +402,21 @@ export default function AdminMasterData() {
                     )}
                   </td>
                   <td className="px-3 py-2 text-right text-crate-800/70 whitespace-nowrap">
-                    {row.cost_price !== null ? `Rs. ${row.cost_price.toFixed(2)}` : <span className="text-crate-800/20">—</span>}
+                    {row.cost_price !== null ? (
+                      <div className="flex flex-col items-end">
+                        <span>Rs. {row.cost_price.toFixed(2)}</span>
+                        {row.cost_price_supplier_name && (
+                          <span className="text-[9px] text-crate-800/40 leading-none mt-0.5">
+                            {row.cost_price_supplier_name}
+                            {row.cost_price_date
+                              ? ` · ${new Date(row.cost_price_date + "T00:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short" })}`
+                              : ""}
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-crate-800/20">—</span>
+                    )}
                   </td>
                   {sheet.suppliers.map((s) => {
                     const price = row.supplier_prices[s.supplier_id];

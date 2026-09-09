@@ -3,10 +3,11 @@ Supplier price submission.
 
 Business rule (as agreed with the client): a supplier submits prices for
 the products they can supply, before the daily cutoff (default 12:00,
-Asia/Colombo), and those prices apply to delivery *two days later* — this
-gives suppliers lead time to plan and price ahead, unlike branch orders
-(order_service.py) which are same-day. Pricing's delivery_date is
-deliberately NOT the same as the submission date here.
+Asia/Colombo), and those prices apply to delivery *two days later* — the
+same lead time branch orders use (order_service.py), so a submission
+made today lines up with orders placed today for the same future
+delivery date. Pricing's delivery_date is deliberately NOT the same as
+the submission date here.
 
 Resubmitting a price for the same product/delivery date before the cutoff
 overwrites the previous quote (upsert), so a supplier can correct a typo
@@ -22,7 +23,8 @@ from app.core.audit import write_audit_log
 from app.core.errors import ValidationFailedError, PermissionDeniedError, NotFoundError
 from app.models.pricing import SupplierPrice
 from app.models.market_reference_price import MarketReferencePrice
-from app.models.product import Product, ProductUnit
+from app.models.product import Product, ProductCategory, ProductUnit
+from app.models.supplier import Supplier
 from app.models.user import User
 from app.schemas.pricing import PriceSubmitRequest, PriceWindowOut
 from app.services import settings_service
@@ -33,6 +35,22 @@ BUSINESS_TZ = ZoneInfo("Asia/Colombo")
 def _parse_cutoff(cutoff_str: str) -> time:
     hh, mm = cutoff_str.split(":")
     return time(hour=int(hh), minute=int(mm))
+
+
+def second_lowest_price(prices: list[float]) -> float | None:
+    """
+    The next DISTINCT price tier below the lowest of a set of supplier
+    quotes, or None if fewer than two distinct prices exist yet. Ties at
+    the lowest price don't count as a second tier — e.g. quotes of
+    300/300/320 have a second-lowest of 320, not another 300. This is the
+    conventional reading of "second-lowest bid" in procurement (the price
+    a switch away from the cheapest would actually cost), but it's a real
+    interpretation choice for ties, not something this codebase had
+    already defined before — worth confirming against the actual business
+    rule if a different tie-breaking convention was intended.
+    """
+    distinct_sorted = sorted(set(prices))
+    return distinct_sorted[1] if len(distinct_sorted) >= 2 else None
 
 
 def get_price_window(db: Session, now: datetime | None = None) -> PriceWindowOut:
@@ -178,8 +196,6 @@ def list_all_prices(
     if delivery_date is None:
         delivery_date = get_price_window(db).delivery_date
 
-    from app.models.supplier import Supplier
-
     query = db.query(SupplierPrice).filter(SupplierPrice.delivery_date == delivery_date)
     if supplier_id:
         query = query.filter(SupplierPrice.supplier_id == supplier_id)
@@ -191,19 +207,25 @@ def list_all_prices(
     product_ids = {r.product_id for r in rows}
     suppliers = {s.id: s for s in db.query(Supplier).filter(Supplier.id.in_(supplier_ids)).all()}
     products = {p.id: p for p in db.query(Product).filter(Product.id.in_(product_ids)).all()}
+    categories = {c.id: c.name for c in db.query(ProductCategory).all()}
 
     lowest_by_product: dict[int, float] = {}
+    prices_by_product: dict[int, list[float]] = {}
     for r in rows:
-        current = lowest_by_product.get(r.product_id)
         price = float(r.price)
+        prices_by_product.setdefault(r.product_id, []).append(price)
+        current = lowest_by_product.get(r.product_id)
         if current is None or price < current:
             lowest_by_product[r.product_id] = price
+
+    second_lowest_by_product = {pid: second_lowest_price(prices) for pid, prices in prices_by_product.items()}
 
     result = []
     for r in rows:
         supplier = suppliers.get(r.supplier_id)
         product = products.get(r.product_id)
         price = float(r.price)
+        second_lowest = second_lowest_by_product.get(r.product_id)
         result.append(
             {
                 "id": r.id,
@@ -213,15 +235,27 @@ def list_all_prices(
                 "product_id": r.product_id,
                 "product_code": product.product_code if product else "—",
                 "product_description": product.description if product else "—",
+                "category_name": categories.get(product.category_id, "—") if product else "—",
                 "unit_code": r.unit_code,
                 "price": price,
                 "adjusted_price": float(r.adjusted_price) if r.adjusted_price is not None else None,
                 "sent_to_supplier": r.sent_to_supplier_at is not None,
                 "delivery_date": r.delivery_date,
                 "is_lowest_for_product": price == lowest_by_product.get(r.product_id),
+                "second_lowest_price": second_lowest,
+                "is_second_lowest_for_product": second_lowest is not None and price == second_lowest,
             }
         )
-    result.sort(key=lambda row: (row["product_description"], row["price"]))
+    # Fixed display grouping: Fruit, Vege Low, Vege Pola, Vege Up (category
+    # IDs 1-4 already match that order), alphabetical by item within each.
+    category_display_order = {"Fruit": 0, "Vege Low": 1, "Vege Pola": 2, "Vege Up": 3}
+    result.sort(
+        key=lambda row: (
+            category_display_order.get(row["category_name"], len(category_display_order)),
+            row["product_description"],
+            row["price"],
+        )
+    )
     return result
 
 
@@ -310,8 +344,10 @@ def unsend_adjusted_price(db: Session, admin: User, price_id: int) -> SupplierPr
     return row
 
 
-# ---- Market reference prices (e.g. Keells retail price) — manual entry,
-# purely informational, never used in any calculation elsewhere. ----
+# ---- Market reference prices (e.g. Keells retail price, entered by hand;
+# or the LOCAL_MARKET wholesale prices from the daily auto-import — see
+# harti_import_service.py) — purely informational, never used in any
+# calculation elsewhere. ----
 
 
 def list_reference_prices(
@@ -343,6 +379,23 @@ def get_last_reference_prices(db: Session, source: str = "KEELLS") -> list[Marke
         if row.product_id not in latest_by_product:
             latest_by_product[row.product_id] = row
     return list(latest_by_product.values())
+
+
+def list_reference_price_history(
+    db: Session, source: str, start_date: date, end_date: date
+) -> list[MarketReferencePrice]:
+    """Every reference price entry for one source across a date range — powers the
+    admin-facing trend/history view (Product x Date), as opposed to list_reference_prices'
+    single-date lookup used by the daily entry page."""
+    return (
+        db.query(MarketReferencePrice)
+        .filter(
+            MarketReferencePrice.source == source,
+            MarketReferencePrice.delivery_date >= start_date,
+            MarketReferencePrice.delivery_date <= end_date,
+        )
+        .all()
+    )
 
 
 def set_reference_price(

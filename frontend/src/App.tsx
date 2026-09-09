@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import { useAuth } from "./features/auth/AuthContext";
 import LoginPage from "./features/auth/LoginPage";
+import RecoverAccountPage from "./features/auth/RecoverAccountPage";
 import ProtectedRoute from "./features/auth/ProtectedRoute";
 import AdminDashboard from "./features/admin/AdminDashboard";
 import BranchDashboard from "./features/branch/BranchDashboard";
@@ -24,6 +25,7 @@ export default function App() {
     <Routes>
       <Route path="/" element={<HomeRedirect />} />
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/recover" element={<RecoverAccountPage />} />
       <Route
         path="/admin"
         element={

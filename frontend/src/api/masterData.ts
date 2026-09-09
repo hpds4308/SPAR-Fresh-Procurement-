@@ -15,6 +15,8 @@ export type MasterDataRow = {
   selling_price: number | null;
   computed_gp_percent: number | null;
   cost_price: number | null;
+  cost_price_supplier_name: string | null;
+  cost_price_date: string | null;
   supplier_prices: Record<number, number | null>;
 };
 
@@ -66,4 +68,8 @@ export async function downloadMasterData(): Promise<void> {
 
 export function sendMasterDataEmail(): Promise<{ sent_to: string }> {
   return apiFetch("/master-data/send-email", { method: "POST" });
+}
+
+export function autoGenerateSellingPrices(): Promise<{ updated: number }> {
+  return apiFetch("/master-data/auto-generate-selling-prices", { method: "POST" });
 }

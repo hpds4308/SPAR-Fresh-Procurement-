@@ -55,24 +55,42 @@ cd /root && unzip spar-project-updated.zip && cd spar-project
 
 ## 5. Configure production settings
 
+There are three env files, each copied from its own `.env.example` —
+backend and frontend config are kept separate from each other and from
+what Docker Compose itself needs:
+
 ```bash
 cp .env.example .env.production
-nano .env.production
+cp backend/.env.example backend/.env.production
+cp frontend/.env.example frontend/.env.production
 ```
 
-Fill in real values:
+**`.env.production`** (this directory — Compose's own settings, `db` and
+`db-backup`):
+```bash
+nano .env.production
+```
+- `POSTGRES_PASSWORD` — generate one: `openssl rand -hex 16`
+
+**`backend/.env.production`**:
+```bash
+nano backend/.env.production
+```
+- `APP_ENV=production` — turns off the interactive API docs (`/api/v1/docs`)
+  and the raw OpenAPI schema, which have no reason to be public once real
+  traffic can reach this server.
 - `SECRET_KEY` — generate one: `openssl rand -hex 32`
-- `CORS_ORIGINS` — `["https://yourdomain.com"]`
+- `CORS_ORIGINS=["https://yourdomain.com"]`
 - Leave `DATABASE_URL` as-is; `docker-compose.prod.yml` overrides it automatically.
 - Fill in `SMTP_*` if you want "Send to Master Data" to work.
 
-Then add two more variables `docker-compose.prod.yml` needs, either in
-`.env.production` or exported before running compose:
-
+**`frontend/.env.production`**:
 ```bash
-echo "POSTGRES_PASSWORD=$(openssl rand -hex 16)" >> .env.production
-echo "PUBLIC_URL=https://yourdomain.com" >> .env.production
+nano frontend/.env.production
 ```
+- `VITE_API_BASE_URL=https://yourdomain.com` — Caddy proxies `/api/*` on
+  that same domain through to the backend, so this is just your domain,
+  not a separate backend address.
 
 ## 6. Edit the Caddyfile
 

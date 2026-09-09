@@ -1,5 +1,4 @@
 import { apiFetch } from "./client";
-import { Product } from "./orders";
 
 export type PriceWindow = {
   is_open: boolean;
@@ -60,6 +59,14 @@ export function fetchLastReferencePrices(source = "KEELLS"): Promise<ReferencePr
   return apiFetch(`/pricing/reference/last?source=${source}`);
 }
 
+export function fetchReferencePriceHistory(
+  startDate: string,
+  endDate: string,
+  source = "KEELLS"
+): Promise<ReferencePrice[]> {
+  return apiFetch(`/pricing/reference/history?start_date=${startDate}&end_date=${endDate}&source=${source}`);
+}
+
 export function setReferencePrice(
   productId: number,
   deliveryDate: string,
@@ -80,12 +87,18 @@ export type AdminSupplierPrice = {
   product_id: number;
   product_code: string;
   product_description: string;
+  category_name: string;
   unit_code: string;
   price: number;
   adjusted_price: number | null;
   sent_to_supplier: boolean;
   delivery_date: string;
   is_lowest_for_product: boolean;
+  // Next distinct price tier below the lowest (null if fewer than two
+  // distinct prices exist yet for this product) — ties at the lowest
+  // price don't count as a second tier, see the backend for why.
+  second_lowest_price: number | null;
+  is_second_lowest_for_product: boolean;
 };
 
 export function fetchAllPrices(params?: {
@@ -122,5 +135,3 @@ export function unsendAdjustedPrice(
 ): Promise<{ id: number; adjusted_price: number | null; sent_to_supplier: boolean }> {
   return apiFetch(`/pricing/admin/${priceId}/unsend`, { method: "POST" });
 }
-
-export type { Product };

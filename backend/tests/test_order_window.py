@@ -1,7 +1,7 @@
 """
 Covers the same invariants scripts/smoke_test.py checks against a live
-server ("order window delivery_date == today", cutoff gating), but as a
-fast, deterministic unit test — no server or database needed.
+server ("order window delivery_date == order date + 2", cutoff gating),
+but as a fast, deterministic unit test — no server or database needed.
 """
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -18,11 +18,11 @@ def _cutoff() -> time:
     return time(hour=int(hh), minute=int(mm))
 
 
-def test_delivery_date_is_always_same_day_as_order_date():
+def test_delivery_date_is_always_two_days_after_order_date():
     db = FakeDB()
     now = datetime(2026, 6, 15, 9, 0, tzinfo=BUSINESS_TZ)
     window = order_service.get_order_window(db, now=now)
-    assert window.delivery_date == now.date()
+    assert window.delivery_date == now.date() + timedelta(days=2)
 
 
 def test_open_just_before_cutoff():

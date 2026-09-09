@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ApiError } from "../../api/client";
-import { fetchProducts, Product } from "../../api/orders";
+import { compareProductDisplayOrder, fetchProducts, Product } from "../../api/orders";
 import { fetchLastReferencePrices, fetchPriceWindow, fetchReferencePrices, setReferencePrice } from "../../api/pricing";
 import EmptyState from "../shared/EmptyState";
 import { SkeletonTable } from "../shared/ui/Skeleton";
@@ -85,7 +85,7 @@ export default function AdminKeellsPrices() {
     return products
       .filter((p) => (category ? p.category_name === category : true))
       .filter((p) => (q ? p.description.toLowerCase().includes(q) || p.product_code.toLowerCase().includes(q) : true))
-      .sort((a, b) => a.description.localeCompare(b.description));
+      .sort(compareProductDisplayOrder);
   }, [products, search, category]);
 
   async function saveField(productId: number, raw: string) {

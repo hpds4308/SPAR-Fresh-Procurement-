@@ -1,12 +1,14 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from datetime import date
 import io
 
 from app.core.database import get_db
+from app.core.errors import ValidationFailedError
 from app.core.security import get_current_user, get_user_roles, require_roles
 from app.models.branch import Branch
+from app.models.order import OrderLine
 from app.models.product import Product
 from app.models.user import User
 from app.schemas.order import (
@@ -16,6 +18,7 @@ from app.schemas.order import (
     OrderSummary,
     OrderWindowOut,
     OrderMatrixOut,
+    ExcelOrderPreviewOut,
     DeliveryConfirmRequest,
 )
 from app.schemas.assignment import ProductComparisonOut, SetAssignmentsRequest
@@ -31,8 +34,6 @@ def _to_order_out(db: Session, order) -> OrderOut:
 
     # No ORM relationship defined between Order and OrderLine (kept explicit,
     # matching the rest of this codebase) — fetch lines directly instead.
-    from app.models.order import OrderLine
-
     lines = db.query(OrderLine).filter(OrderLine.order_id == order.id).all()
     line_product_ids = [ln.product_id for ln in lines]
     products = {p.id: p for p in db.query(Product).filter(Product.id.in_(line_product_ids)).all()}
@@ -66,9 +67,14 @@ def _to_order_out(db: Session, order) -> OrderOut:
 
 
 @router.get("/window", response_model=OrderWindowOut)
-def order_window(db: Session = Depends(get_db)):
-    """Tells the branch UI whether ordering is open right now, and for which delivery date."""
-    return order_service.get_order_window(db)
+def order_window(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """
+    Tells the branch UI whether ordering is open right now, and for which
+    delivery date. Passes the caller's own branch_id (None for Admin/
+    Supplier) so a late-submission exception Admin granted that branch for
+    today is honored here too.
+    """
+    return order_service.get_order_window(db, branch_id=current_user.branch_id)
 
 
 # NOTE: these two /admin/matrix* routes must stay registered before
@@ -164,6 +170,21 @@ def set_product_assignments(
     return assignment_service.set_assignments(db, admin, product_id, delivery_date, payload)
 
 
+@router.get("/stock-in-hand", response_model=dict[int, float])
+def get_stock_in_hand(
+    current_user: User = Depends(require_roles("BRANCH")),
+    db: Session = Depends(get_db),
+):
+    """
+    {product_id: current_stock_in_hand} for the branch's own location, from
+    the POS system — a missing product_id means unknown, not zero. Always
+    returns 200 (possibly {}); a POS outage or missing configuration never
+    surfaces as an error here, since this is a reference figure on the
+    order form, not something an order's validity depends on.
+    """
+    return order_service.get_stock_in_hand_for_branch(db, current_user)
+
+
 @router.post("", response_model=OrderOut)
 def submit_order(
     payload: OrderCreate,
@@ -171,6 +192,63 @@ def submit_order(
     db: Session = Depends(get_db),
 ):
     order = order_service.create_order(db, current_user, payload)
+    return _to_order_out(db, order)
+
+
+@router.post("/draft", response_model=OrderOut)
+def save_draft_order(
+    payload: OrderCreate,
+    current_user: User = Depends(require_roles("BRANCH")),
+    db: Session = Depends(get_db),
+):
+    """Saves today's order as a DRAFT — not sent to Admin. Safe to call
+    repeatedly; it updates the same draft rather than creating another."""
+    order = order_service.save_draft_order(db, current_user, payload)
+    return _to_order_out(db, order)
+
+
+# Generous ceiling for an order template — a few hundred products is a
+# few hundred KB even loosely formatted; this only exists to reject
+# something clearly wrong (or abusive) before it's even opened, not to
+# constrain a legitimate file.
+MAX_ORDER_EXCEL_BYTES = 5 * 1024 * 1024
+
+
+@router.post("/draft/preview-excel", response_model=ExcelOrderPreviewOut)
+async def preview_order_excel(
+    file: UploadFile = File(...),
+    current_user: User = Depends(require_roles("BRANCH")),
+    db: Session = Depends(get_db),
+):
+    """
+    Parses an uploaded order Excel (columns: Product Code, POS Code,
+    Product Description, Unit, Quantity) into a row-by-row preview — never
+    saves anything. The branch reviews the result client-side and still
+    saves/submits through the normal /orders/draft or /orders endpoints,
+    so this can never bypass the cutoff, lock, or once-a-day rules.
+    """
+    contents = await file.read()
+    if len(contents) > MAX_ORDER_EXCEL_BYTES:
+        raise ValidationFailedError("That file is too large — please upload the order template as-is, unmodified.")
+    return order_service.parse_order_excel(db, current_user, contents)
+
+
+# NOTE: must stay registered before GET /{order_id} below, same reason as
+# the /admin/matrix* routes — "mine" would otherwise never be reached
+# since /{order_id} expects an int and FastAPI would 422 first. Since
+# this is a two-segment path ("mine/today") it can't actually collide
+# with the one-segment /{order_id}, but keeping it here matches the
+# existing convention in this file.
+@router.get("/mine/today", response_model=OrderOut | None)
+def get_my_order_today(
+    current_user: User = Depends(require_roles("BRANCH")),
+    db: Session = Depends(get_db),
+):
+    """The branch's own order (DRAFT or beyond) for today, if any — lets the order
+    form resume a draft or show a locked submitted order after a page refresh."""
+    order = order_service.get_my_order_today(db, current_user)
+    if not order:
+        return None
     return _to_order_out(db, order)
 
 
@@ -182,7 +260,6 @@ def list_orders(
 ):
     roles = get_user_roles(db, current_user.id)
     orders = order_service.list_orders(db, current_user, roles, delivery_date)
-    from app.models.order import OrderLine
 
     result = []
     for o in orders:
@@ -232,18 +309,3 @@ def confirm_delivery(
     order = order_service.confirm_delivery(db, current_user, order_id, payload)
     return _to_order_out(db, order)
 
-
-@router.post("/{order_id}/cancel")
-def cancel_order(
-    order_id: int,
-    current_user: User = Depends(require_roles("BRANCH")),
-    db: Session = Depends(get_db),
-):
-    """
-    Branch cancels its own still-SUBMITTED order before today's cutoff —
-    only path is currently "submit a corrected one afterward", since
-    there's no in-place edit. Only ADMIN reassignment work happens once
-    it's ASSIGNED/CONFIRMED, which this deliberately does not touch.
-    """
-    order_service.cancel_order(db, current_user, order_id)
-    return {"detail": "Order cancelled."}

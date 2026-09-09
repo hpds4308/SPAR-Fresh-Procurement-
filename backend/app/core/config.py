@@ -37,6 +37,16 @@ class Settings(BaseSettings):
     SMTP_FROM_EMAIL: str = ""
     SMTP_USE_TLS: bool = True
 
+    # 24X7Retail / Dynamic Web POS integration (see the Web API Document
+    # supplied by SPAR's POS vendor) — used for the branch order form's
+    # stock-in-hand lookup. Left blank by default; if POS_API_BASE_URL
+    # isn't set, the stock-in-hand lookup is skipped entirely rather than
+    # trying and failing — it's a display enhancement, never a blocker
+    # for placing an order.
+    POS_API_BASE_URL: str = ""
+    POS_API_USERNAME: str = ""
+    POS_API_PASSWORD: str = ""
+
     # CORS
     CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:8080"]
 

@@ -81,6 +81,24 @@ export function fetchSupplierOrderAdmin(supplierId: number, deliveryDate: string
   return apiFetch(`/supplier-orders/admin?supplier_id=${supplierId}&delivery_date=${deliveryDate}`);
 }
 
+export type SupplierOrderSummary = {
+  supplier_id: number;
+  supplier_name: string;
+  delivery_date: string;
+  line_count: number;
+  total_value: number;
+};
+
+// Powers the Supplier-wise side of Admin Order History — mirrors
+// fetchOrderDates/fetchOrdersForDate on the Branch-wise side.
+export function fetchSupplierOrderDates(): Promise<string[]> {
+  return apiFetch("/supplier-orders/admin/dates");
+}
+
+export function fetchSupplierOrderSummaries(deliveryDate: string): Promise<SupplierOrderSummary[]> {
+  return apiFetch(`/supplier-orders/admin/summary?delivery_date=${deliveryDate}`);
+}
+
 export function setSupplierOrderAdmin(
   supplierId: number,
   deliveryDate: string,
@@ -103,6 +121,35 @@ export function fetchAssignedQuantities(
   const qs = new URLSearchParams({ delivery_date: deliveryDate });
   if (excludeSupplierId !== undefined) qs.set("exclude_supplier_id", String(excludeSupplierId));
   return apiFetch(`/supplier-orders/admin/assigned?${qs.toString()}`);
+}
+
+// Same as fetchAssignedQuantities, broken down per branch — key is
+// "product_id:branch_id", matching the grid's own cellKey convention.
+// Powers each branch column's remaining-quantity placeholder.
+export function fetchAssignedQuantitiesByBranch(
+  deliveryDate: string,
+  excludeSupplierId?: number
+): Promise<Record<string, number>> {
+  const qs = new URLSearchParams({ delivery_date: deliveryDate });
+  if (excludeSupplierId !== undefined) qs.set("exclude_supplier_id", String(excludeSupplierId));
+  return apiFetch(`/supplier-orders/admin/assigned-by-branch?${qs.toString()}`);
+}
+
+export type SupplierAssignedProduct = {
+  product_id: number;
+  quantity: number;
+  agreed_price: number;
+};
+
+// Products already assigned to this supplier for this delivery date via
+// Product Assignment (Order Matrix) — powers "Fill from assignments" on
+// the Order Builder grid.
+export function fetchAssignmentsForSupplier(
+  supplierId: number,
+  deliveryDate: string
+): Promise<SupplierAssignedProduct[]> {
+  const qs = new URLSearchParams({ supplier_id: String(supplierId), delivery_date: deliveryDate });
+  return apiFetch(`/supplier-orders/admin/assignments?${qs.toString()}`);
 }
 
 export type SupplierPricePreview = {

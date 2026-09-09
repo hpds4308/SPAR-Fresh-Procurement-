@@ -8,10 +8,9 @@ RUN npm install
 COPY . .
 
 # Vite bakes VITE_* variables into the built JS at build time, not at
-# container startup — so this has to be a build ARG, not a runtime env
-# var like in the dev setup. Passed in from docker-compose.prod.yml.
-ARG VITE_API_BASE_URL
-ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+# container startup, and it defaults to production mode here — so it
+# loads frontend/.env.production on its own (COPY . . above already
+# brought it into the build context). Nothing to pass in from Compose.
 RUN npm run build
 
 FROM nginx:1.27-alpine

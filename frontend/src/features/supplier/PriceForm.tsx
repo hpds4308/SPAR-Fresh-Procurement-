@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ApiError } from "../../api/client";
-import { fetchProducts } from "../../api/orders";
-import { Product } from "../../api/orders";
+import { Product, fetchProducts } from "../../api/orders";
 import { LastPrice, PriceWindow, fetchLastPrices, fetchPriceWindow, fetchMyPrices, submitPrices } from "../../api/pricing";
 import { CategoryBadge } from "../shared/ui/CategoryBadge";
 

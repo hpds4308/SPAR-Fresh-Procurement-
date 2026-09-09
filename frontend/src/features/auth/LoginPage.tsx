@@ -36,7 +36,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="relative min-h-screen overflow-hidden font-body flex items-center justify-center px-4 py-16">
+    <div className="relative h-screen overflow-hidden font-body flex items-center justify-center px-4 py-4">
       {/* full-bleed ambient produce video background */}
       <video
         aria-hidden
@@ -50,26 +50,28 @@ export default function LoginPage() {
       </video>
 
       <div className="relative z-10 w-full max-w-md motion-safe:animate-fade-up">
-        {/* card */}
+        {/* card, scaled down 10% as a unit */}
         <form
           onSubmit={handleSubmit}
-          className="relative z-0 bg-white rounded-[2rem] shadow-[0_30px_60px_-15px_rgba(21,56,38,0.25)] pt-9 pb-9 px-8 md:px-10"
+          className="relative z-0 bg-white rounded-[2rem] shadow-[0_30px_60px_-15px_rgba(21,56,38,0.25)] pt-6 pb-6 px-8 md:px-10"
+          style={{ transform: "scale(0.9)", transformOrigin: "center" }}
         >
-          <div className="flex justify-center mb-4">
-            <img src="/images/spar-fresh-choice-logo.png" alt="SPAR Fresh Choice" className="h-28 w-auto" />
+          <div className="flex justify-center mb-3">
+            <img src="/images/spar-fresh-procurement-logo.png" alt="SPAR Fresh Procurement" className="h-[180px] w-auto" />
           </div>
 
           <h1 className="font-display font-extrabold text-2xl md:text-[1.7rem] text-center text-crate-950 leading-tight">
-            Welcome back
+            Welcome to SPAR
+            Fresh Procurement
           </h1>
-          <p className="text-center text-sm mt-1.5 mb-7" style={{ color: "#5B6E5F" }}>
+          <p className="text-center text-sm mt-1.5 mb-4" style={{ color: "#5B6E5F" }}>
             Sign in to source fresh, simplified.
           </p>
 
           <label htmlFor="username" className="block text-xs font-semibold uppercase tracking-wide text-crate-800/70 mb-1.5 ml-1">
             Username
           </label>
-          <div className="relative mb-4 group">
+          <div className="relative mb-3 group">
             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-crate-700 transition-transform duration-300 group-focus-within:scale-110">
               <LeafIcon />
             </span>
@@ -110,7 +112,7 @@ export default function LoginPage() {
             </button>
           </div>
 
-          <div className="flex justify-end mb-2 mt-2">
+          <div className="flex justify-end mb-1 mt-1">
             <button
               type="button"
               onClick={() => setShowForgotHelp((s) => !s)}
@@ -127,6 +129,17 @@ export default function LoginPage() {
                 {supportNumber}
               </a>{" "}
               and they can reset it for you from the Admin dashboard.
+              <p className="mt-2 pt-2 border-t border-sage-200">
+                Administrator locked out with no one else to ask?{" "}
+                <button
+                  type="button"
+                  onClick={() => navigate("/recover")}
+                  className="font-semibold text-crate-700 hover:underline"
+                >
+                  Recover account access
+                </button>{" "}
+                with a token from your server operator.
+              </p>
             </div>
           )}
 
@@ -156,7 +169,7 @@ export default function LoginPage() {
             )}
           </button>
 
-          <p className="mt-6 text-center text-xs text-crate-950/35">
+          <p className="mt-4 text-center text-xs text-crate-950/35">
             Fresh sourcing, sorted. Internal access only.
           </p>
         </form>

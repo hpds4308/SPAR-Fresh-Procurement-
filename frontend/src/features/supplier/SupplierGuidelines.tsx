@@ -1,10 +1,12 @@
 import { useAuth } from "../auth/AuthContext";
 import { useSupportPhone } from "../shared/useSupportPhone";
+import { useSupplierPriceDeadline } from "../shared/useOrderDeadline";
 
 export default function SupplierGuidelines() {
   const { user } = useAuth();
   const supplierName = user?.supplier_name ?? "our supplier";
   const { number: CONTACT_NUMBER, tel: CONTACT_TEL } = useSupportPhone();
+  const { english: DEADLINE_EN, sinhala: DEADLINE_SI } = useSupplierPriceDeadline();
 
   return (
     <div className="space-y-5">
@@ -24,8 +26,8 @@ export default function SupplierGuidelines() {
             <p>අප සමූහය හා අත්වැල් බැඳ සිටින ඔබ,</p>
             <ul className="list-disc pl-6 mt-1.5 space-y-1">
               <li>ඉහල ප්‍රමිතියකින් ඇති එළවලු සහ පලතුරු ලබා දීමට කටයුතු කරන්න.</li>
-              <li>ඔබගේ මිළ ගණන් දවල් 12.00 ට පෙර අප වෙත ඉදිරිපත් කරන්න.</li>
-              <li>දහවල් 12.00න් පසුව ඔබට මෙම පද්ධතිය හරහා මිළ ගණන් ඉදිරිපත් කල නොහැක.</li>
+              <li>ඔබගේ මිළ ගණන් {DEADLINE_SI} ට පෙර අප වෙත ඉදිරිපත් කරන්න.</li>
+              <li>{DEADLINE_SI}න් පසුව ඔබට මෙම පද්ධතිය හරහා මිළ ගණන් ඉදිරිපත් කල නොහැක.</li>
             </ul>
           </div>
           <p>
@@ -55,7 +57,7 @@ export default function SupplierGuidelines() {
             fruits that meet the required standards.
           </p>
           <p>
-            Please submit your prices to us before 12:00 noon. After 12:00 noon, you will not be able to
+            Please submit your prices to us before {DEADLINE_EN}. After {DEADLINE_EN}, you will not be able to
             submit your prices through this system.
           </p>
           <p>

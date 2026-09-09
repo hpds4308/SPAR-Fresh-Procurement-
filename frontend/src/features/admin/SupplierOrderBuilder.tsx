@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { ApiError } from "../../api/client";
 import { Supplier, fetchSuppliers } from "../../api/suppliers";
-import { Product, fetchProducts, fetchOrderMatrix, OrderMatrix } from "../../api/orders";
+import { Product, compareProductDisplayOrder, fetchProducts, fetchOrderMatrix, OrderMatrix } from "../../api/orders";
 import {
+  SupplierAssignedProduct,
   SupplierOrderItem,
   SupplierPricePreview,
   fetchAssignedQuantities,
+  fetchAssignedQuantitiesByBranch,
+  fetchAssignmentsForSupplier,
   fetchSupplierOrderAdmin,
   fetchSupplierPricePreview,
   setSupplierOrderAdmin,
@@ -19,11 +22,6 @@ function cellKey(productId: number, branchId: number): string {
 
 type ExtraDetail = { agreed_price: string; notes: string };
 
-function todayIso(): string {
-  const d = new Date();
-  return d.toISOString().slice(0, 10);
-}
-
 function formatDate(iso: string): string {
   const d = new Date(iso + "T00:00:00");
   return d.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" });
@@ -33,7 +31,11 @@ export default function SupplierOrderBuilder() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [supplierId, setSupplierId] = useState<number | "">("");
-  const [deliveryDate, setDeliveryDate] = useState(todayIso());
+  // Starts empty — the first load asks the backend for its own best
+  // default (most recent date with real branch demand, same one Order
+  // History/Order Matrix land on) rather than guessing today's date,
+  // which usually has no demand yet since delivery is order date + 2.
+  const [deliveryDate, setDeliveryDate] = useState("");
   const [matrix, setMatrix] = useState<OrderMatrix | null>(null);
 
   // Which product rows are visible in the grid. Starts as "whatever branches
@@ -59,11 +61,23 @@ export default function SupplierOrderBuilder() {
   // subtracted from branch demand so Required Qty reflects what's actually
   // still unassigned, not the full original demand every time.
   const [assignedElsewhere, setAssignedElsewhere] = useState<Record<number, number>>({});
+  // Same thing broken down per branch (key: cellKey(productId, branchId)) —
+  // so each branch column shows what's still remaining for THAT branch,
+  // not the branch's full original order, once some of it has already
+  // gone to another supplier.
+  const [assignedElsewhereByBranch, setAssignedElsewhereByBranch] = useState<Record<string, number>>({});
 
   // This supplier's resolved price per product — a reference shown right
   // in the grid so Admin can see what they charge while still deciding
   // quantities, without switching over to the Supplier Prices page.
   const [supplierPrices, setSupplierPrices] = useState<Record<number, SupplierPricePreview>>({});
+
+  // Products Admin already committed to this supplier via Product
+  // Assignment (Order Matrix), keyed by product_id — a separate,
+  // total-only commitment from the branch-level lines saved here. Powers
+  // "Fill from assignments" so that commitment doesn't have to be
+  // manually re-decided branch by branch.
+  const [assignedToSupplier, setAssignedToSupplier] = useState<Record<number, SupplierAssignedProduct>>({});
 
   useEffect(() => {
     fetchSuppliers().then(setSuppliers).catch(() => {});
@@ -71,8 +85,11 @@ export default function SupplierOrderBuilder() {
   }, []);
 
   useEffect(() => {
-    fetchOrderMatrix(deliveryDate)
-      .then(setMatrix)
+    fetchOrderMatrix(deliveryDate || undefined)
+      .then((data) => {
+        setMatrix(data);
+        if (!deliveryDate) setDeliveryDate(data.delivery_date);
+      })
       .catch(() => setMatrix(null));
   }, [deliveryDate]);
 
@@ -82,7 +99,9 @@ export default function SupplierOrderBuilder() {
       setExtra({});
       setRowProductIds([]);
       setAssignedElsewhere({});
+      setAssignedElsewhereByBranch({});
       setSupplierPrices({});
+      setAssignedToSupplier({});
       return;
     }
     let cancelled = false;
@@ -92,9 +111,11 @@ export default function SupplierOrderBuilder() {
     Promise.all([
       fetchSupplierOrderAdmin(supplierId, deliveryDate),
       fetchAssignedQuantities(deliveryDate, supplierId),
+      fetchAssignedQuantitiesByBranch(deliveryDate, supplierId),
       fetchSupplierPricePreview(supplierId, deliveryDate),
+      fetchAssignmentsForSupplier(supplierId, deliveryDate),
     ])
-      .then(([order, assigned, prices]) => {
+      .then(([order, assigned, assignedByBranch, prices, assignedProducts]) => {
         if (cancelled) return;
         const nextQty: Record<string, string> = {};
         const nextExtra: Record<string, ExtraDetail> = {};
@@ -108,17 +129,26 @@ export default function SupplierOrderBuilder() {
           };
           savedProductIds.add(item.product_id);
         }
-        // Default rows: anything any branch ordered this date, plus
-        // anything already saved on this supplier's order (even if no
-        // branch happened to order it — e.g. a manually added item).
+        const assignedMap: Record<number, SupplierAssignedProduct> = {};
+        for (const a of assignedProducts) assignedMap[a.product_id] = a;
+        // Default rows: anything any branch ordered this date, anything
+        // already saved on this supplier's order (even if no branch
+        // happened to order it — e.g. a manually added item), plus
+        // anything Admin already committed to this supplier via Product
+        // Assignment (which might not be in either of the above, e.g. an
+        // item no single branch ordered enough of to show demand here).
         const demandProductIds = matrix.rows
           .filter((r) => Object.keys(r.quantities).length > 0)
           .map((r) => r.product_id);
-        const merged = Array.from(new Set([...demandProductIds, ...savedProductIds]));
+        const merged = Array.from(
+          new Set([...demandProductIds, ...savedProductIds, ...Object.keys(assignedMap).map(Number)])
+        );
         setQty(nextQty);
         setExtra(nextExtra);
         setRowProductIds(merged);
         setAssignedElsewhere(assigned);
+        setAssignedElsewhereByBranch(assignedByBranch);
+        setAssignedToSupplier(assignedMap);
         const priceMap: Record<number, SupplierPricePreview> = {};
         for (const p of prices) priceMap[p.product_id] = p;
         setSupplierPrices(priceMap);
@@ -152,7 +182,7 @@ export default function SupplierOrderBuilder() {
     return rowProductIds
       .map((id) => productById.get(id))
       .filter((p): p is Product => !!p)
-      .sort((a, b) => a.description.localeCompare(b.description));
+      .sort(compareProductDisplayOrder);
   }, [rowProductIds, productById]);
 
   const searchResults = useMemo(() => {
@@ -197,8 +227,13 @@ export default function SupplierOrderBuilder() {
       const next = { ...prev };
       for (const r of matrix.rows) {
         for (const b of matrix.branches) {
-          const d = r.quantities[String(b.branch_id)];
           const key = cellKey(r.product_id, b.branch_id);
+          const ordered = r.quantities[String(b.branch_id)] ?? 0;
+          const givenElsewhere = assignedElsewhereByBranch[key] ?? 0;
+          // Fill with what's actually still remaining for this branch, not
+          // its full original order — otherwise this button would re-offer
+          // quantity already given to another supplier.
+          const d = Math.max(0, ordered - givenElsewhere);
           if (d && !next[key]) next[key] = String(d);
         }
       }
@@ -208,6 +243,53 @@ export default function SupplierOrderBuilder() {
       const demandIds = matrix.rows.filter((r) => Object.keys(r.quantities).length > 0).map((r) => r.product_id);
       return Array.from(new Set([...prev, ...demandIds]));
     });
+  }
+
+  // Turns a total-only Product Assignment ("200kg avocado to this
+  // supplier") into a starting set of branch-level lines, since
+  // SupplierAssignment itself carries no branch breakdown. Splits each
+  // assigned product's quantity across branches in proportion to how much
+  // each branch actually ordered — the only allocation basis available —
+  // and never overwrites a cell that already has a quantity or price, same
+  // non-destructive rule as "Fill quantities from branch orders".
+  function fillFromAssignments() {
+    if (!matrix) return;
+    const productIds = Object.keys(assignedToSupplier).map(Number);
+    if (productIds.length === 0) return;
+
+    setQty((prev) => {
+      const next = { ...prev };
+      for (const productId of productIds) {
+        const assignment = assignedToSupplier[productId];
+        const demand = demandByProduct.get(productId) ?? {};
+        const totalOrdered = matrix.branches.reduce((sum, b) => sum + (demand[String(b.branch_id)] ?? 0), 0);
+        if (totalOrdered <= 0) continue;
+        for (const b of matrix.branches) {
+          const key = cellKey(productId, b.branch_id);
+          if (next[key]) continue;
+          const branchOrdered = demand[String(b.branch_id)] ?? 0;
+          if (!branchOrdered) continue;
+          const share = Math.round(assignment.quantity * (branchOrdered / totalOrdered) * 100) / 100;
+          if (share > 0) next[key] = String(share);
+        }
+      }
+      return next;
+    });
+    setExtra((prev) => {
+      const next = { ...prev };
+      for (const productId of productIds) {
+        const assignment = assignedToSupplier[productId];
+        const demand = demandByProduct.get(productId) ?? {};
+        for (const b of matrix.branches) {
+          const key = cellKey(productId, b.branch_id);
+          const branchOrdered = demand[String(b.branch_id)] ?? 0;
+          if (!branchOrdered || next[key]?.agreed_price) continue;
+          next[key] = { ...(next[key] ?? { agreed_price: "", notes: "" }), agreed_price: String(assignment.agreed_price) };
+        }
+      }
+      return next;
+    });
+    setRowProductIds((prev) => Array.from(new Set([...prev, ...productIds])));
   }
 
   const filledCells = useMemo(() => {
@@ -293,7 +375,7 @@ export default function SupplierOrderBuilder() {
 
           <div>
             <label className="block text-xs font-semibold text-crate-800/50 uppercase tracking-wide mb-1.5">
-              Order Date
+              Delivery Date
             </label>
             <input
               type="date"
@@ -303,19 +385,30 @@ export default function SupplierOrderBuilder() {
             />
           </div>
 
-          {matrix && matrix.rows.some((r) => Object.keys(r.quantities).length > 0) && (
-            <button
-              onClick={fillFromDemand}
-              disabled={!supplierId}
-              className="text-xs text-crate-700 border border-sage-300 rounded-full px-3.5 py-2 hover:bg-sage-50 disabled:opacity-40 transition-colors duration-150 ml-auto"
-            >
-              Fill quantities from branch orders
-            </button>
-          )}
+          <div className="flex items-center gap-2 ml-auto">
+            {Object.keys(assignedToSupplier).length > 0 && (
+              <button
+                onClick={fillFromAssignments}
+                className="text-xs text-crate-700 border border-sage-300 rounded-full px-3.5 py-2 hover:bg-sage-50 transition-colors duration-150"
+                title="Fills branch-level quantities from what's already been committed to this supplier via Product Assignment"
+              >
+                Fill from assignments
+              </button>
+            )}
+            {matrix && matrix.rows.some((r) => Object.keys(r.quantities).length > 0) && (
+              <button
+                onClick={fillFromDemand}
+                disabled={!supplierId}
+                className="text-xs text-crate-700 border border-sage-300 rounded-full px-3.5 py-2 hover:bg-sage-50 disabled:opacity-40 transition-colors duration-150"
+              >
+                Fill quantities from branch orders
+              </button>
+            )}
+          </div>
         </div>
         <p className="text-xs text-crate-800/40 mt-3">
-          {formatDate(deliveryDate)}. Pick the supplier and order date first — the order below is saved
-          for that combination.
+          {deliveryDate ? `${formatDate(deliveryDate)}. ` : ""}Pick the supplier and order date first — the
+          order below is saved for that combination.
         </p>
       </div>
 
@@ -425,22 +518,34 @@ export default function SupplierOrderBuilder() {
                             {totalDemand} total · {alreadyAssigned} given elsewhere
                           </div>
                         )}
+                        {assignedToSupplier[productId] && (
+                          <div className="text-[10px] text-crate-700 font-normal leading-none mt-0.5">
+                            {assignedToSupplier[productId].quantity} assigned to this supplier
+                          </div>
+                        )}
                       </td>
                       {branches.map((b) => {
                         const key = cellKey(productId, b.branch_id);
-                        const hadDemand = (demand[String(b.branch_id)] ?? 0) > 0;
+                        // This branch's own ordered quantity, minus whatever of
+                        // it has already gone to another supplier — never the
+                        // raw original order once part of it is spoken for.
+                        const branchOrdered = demand[String(b.branch_id)] ?? 0;
+                        const branchAssignedElsewhere = assignedElsewhereByBranch[key] ?? 0;
+                        const branchRemaining = Math.max(0, branchOrdered - branchAssignedElsewhere);
+                        const hadDemand = branchOrdered > 0;
+                        const stillNeeded = branchRemaining > 0;
                         const hasQty = qty[key]?.trim() !== "" && qty[key] !== undefined;
                         return (
                           <td
                             key={b.branch_id}
-                            className={`px-2 py-1.5 text-center border-l border-sage-100 ${hadDemand ? "bg-mango-500/5" : ""}`}
+                            className={`px-2 py-1.5 text-center border-l border-sage-100 ${stillNeeded ? "bg-mango-500/5" : ""}`}
                           >
                             <div className="flex flex-col items-center gap-1">
                               <input
                                 type="number"
                                 min="0"
                                 step="0.01"
-                                placeholder={hadDemand ? String(demand[String(b.branch_id)]) : "—"}
+                                placeholder={!hadDemand ? "—" : stillNeeded ? String(branchRemaining) : "0 left"}
                                 value={qty[key] ?? ""}
                                 onChange={(e) => setCellQty(productId, b.branch_id, e.target.value)}
                                 className="w-16 border border-sage-300 bg-white rounded-lg px-1.5 py-1 text-center text-sm focus:outline-none focus:ring-2 focus:ring-crate-700/30 focus:border-crate-700 transition-colors duration-150"
@@ -502,9 +607,10 @@ export default function SupplierOrderBuilder() {
         {rows.length > 0 && (
           <p className="text-[11px] text-crate-800/35 mt-3">
             <span className="inline-block w-2.5 h-2.5 rounded-sm bg-mango-500/20 align-middle mr-1.5" /> shaded
-            cells are pre-filled with what that branch actually ordered — placeholder shows the demand figure
-            even if you haven't typed a value yet. "Required Qty" is the total across all branches, regardless
-            of supplier — use it as your target if this item is being split across more than one supplier.
+            cells still have quantity remaining for that branch — the placeholder shows what's left after
+            subtracting anything already given to another supplier, not the branch's original order. A cell
+            showing "0 left" means this branch's order has already been fully covered elsewhere. "Required
+            Qty" is the same remaining-total idea, summed across all branches.
           </p>
         )}
 

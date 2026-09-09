@@ -130,7 +130,7 @@ export default function ReportsView() {
             <KpiCard
               label="Fulfillment"
               value={`${Math.round(report.totals.fulfillment_rate * 100)}%`}
-              hint={`${report.totals.assigned_orders} of ${report.totals.total_orders} assigned`}
+              hint={`${report.totals.assigned_orders} of ${report.totals.total_orders} fulfilled`}
               accent="violet"
             />
             <KpiCard label="Total spend" value={rs(report.totals.total_spend)} accent="emerald" />
@@ -154,7 +154,7 @@ export default function ReportsView() {
                     </div>
                     <span className="w-24 text-right text-crate-950 font-medium shrink-0">{rs(d.spend)}</span>
                     <span className="w-20 text-right text-crate-800/50 text-xs shrink-0">
-                      {d.assigned_orders_count}/{d.orders_count} assigned
+                      {d.assigned_orders_count}/{d.orders_count} fulfilled
                     </span>
                   </div>
                 ))}

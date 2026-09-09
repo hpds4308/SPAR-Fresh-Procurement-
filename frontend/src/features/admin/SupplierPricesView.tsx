@@ -10,8 +10,8 @@ import {
   setAdjustedPrice,
   unsendAdjustedPrice,
 } from "../../api/pricing";
+import { compareProductDisplayOrder } from "../../api/orders";
 import { Supplier, fetchSuppliers } from "../../api/suppliers";
-import EmptyState from "../shared/EmptyState";
 import { SkeletonTable } from "../shared/ui/Skeleton";
 import { IconTag } from "../shared/Icons";
 
@@ -156,7 +156,13 @@ export default function SupplierPricesView() {
   const productRows = useMemo(() => {
     const byProduct = new Map<
       number,
-      { product_id: number; description: string; code: string; cells: Map<number, AdminSupplierPrice> }
+      {
+        product_id: number;
+        description: string;
+        code: string;
+        category_name: string;
+        cells: Map<number, AdminSupplierPrice>;
+      }
     >();
     for (const r of rows) {
       if (!byProduct.has(r.product_id)) {
@@ -164,6 +170,7 @@ export default function SupplierPricesView() {
           product_id: r.product_id,
           description: r.product_description,
           code: r.product_code,
+          category_name: r.category_name,
           cells: new Map(),
         });
       }
@@ -175,7 +182,7 @@ export default function SupplierPricesView() {
         (p) => p.description.toLowerCase().includes(q) || p.code.toLowerCase().includes(q)
       );
     }
-    return list.sort((a, b) => a.description.localeCompare(b.description));
+    return list.sort(compareProductDisplayOrder);
   }, [rows, q]);
 
   // The winning (lowest-price) supplier cell per product, for the summary
@@ -184,6 +191,16 @@ export default function SupplierPricesView() {
   function bestCellFor(p: { cells: Map<number, AdminSupplierPrice> }): AdminSupplierPrice | undefined {
     for (const cell of p.cells.values()) {
       if (cell.is_lowest_for_product) return cell;
+    }
+    return undefined;
+  }
+
+  // Same idea, for the next distinct price tier below the lowest — see
+  // pricing_service.list_all_prices for why a tie at the lowest price
+  // doesn't count as a second tier.
+  function secondLowestCellFor(p: { cells: Map<number, AdminSupplierPrice> }): AdminSupplierPrice | undefined {
+    for (const cell of p.cells.values()) {
+      if (cell.is_second_lowest_for_product) return cell;
     }
     return undefined;
   }
@@ -445,6 +462,7 @@ export default function SupplierPricesView() {
                       if (!best) return <span className="text-sm text-crate-800/20">—</span>;
                       const keells = referenceDrafts[p.product_id] ? Number(referenceDrafts[p.product_id]) : null;
                       const diff = keells !== null ? best.price - keells : null;
+                      const secondBest = secondLowestCellFor(p);
                       return (
                         <div className="flex flex-col items-center gap-0.5">
                           <span className="text-sm font-semibold text-crate-800">Rs. {best.price.toFixed(2)}</span>
@@ -456,6 +474,11 @@ export default function SupplierPricesView() {
                               }`}
                             >
                               Rs. {Math.abs(diff).toFixed(2)} {diff <= 0 ? "below" : "above"} Keells
+                            </span>
+                          )}
+                          {secondBest && (
+                            <span className="text-[10px] text-crate-800/35 border-t border-sage-200 mt-0.5 pt-0.5 w-full text-center">
+                              2nd: Rs. {secondBest.price.toFixed(2)} ({secondBest.supplier_name})
                             </span>
                           )}
                         </div>

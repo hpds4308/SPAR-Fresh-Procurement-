@@ -148,7 +148,8 @@ def admin_unsend_price(
     }
 
 
-# ---- Market reference prices (e.g. Keells retail price) — manual entry only ----
+# ---- Market reference prices — e.g. Keells retail price (manual entry) or
+# LOCAL_MARKET wholesale prices (daily auto-import, see harti_import_service.py) ----
 
 
 @router.get("/reference", response_model=list[ReferencePriceOut])
@@ -173,6 +174,22 @@ def last_reference_prices(
 ):
     """Most recent reference price ever entered per product, any date — powers the carry-forward pre-fill."""
     rows = pricing_service.get_last_reference_prices(db, source)
+    return [
+        ReferencePriceOut(product_id=r.product_id, source=r.source, price=float(r.price), delivery_date=r.delivery_date)
+        for r in rows
+    ]
+
+
+@router.get("/reference/history", response_model=list[ReferencePriceOut])
+def reference_price_history(
+    start_date: date,
+    end_date: date,
+    source: str = "KEELLS",
+    admin: User = Depends(require_roles("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """Every entry for one source across a date range — powers the Price History trend view."""
+    rows = pricing_service.list_reference_price_history(db, source, start_date, end_date)
     return [
         ReferencePriceOut(product_id=r.product_id, source=r.source, price=float(r.price), delivery_date=r.delivery_date)
         for r in rows

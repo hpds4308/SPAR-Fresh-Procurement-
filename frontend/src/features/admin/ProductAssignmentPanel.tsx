@@ -5,6 +5,18 @@ import { useToast } from "../shared/ui/Toast";
 
 type Row = { supplier_id: number; quantity: string; agreed_price: string };
 
+// Mirrors assignment_service.compute_savings exactly, so the live draft
+// total shown here (before Save) never disagrees with what the backend
+// will actually persist. null whenever either input isn't a usable
+// number yet, or there's no second quote to compare against at all.
+function computeSavings(secondLowest: number | null, agreedPrice: string, quantity: string): number | null {
+  if (secondLowest === null) return null;
+  const price = parseFloat(agreedPrice);
+  const qty = parseFloat(quantity);
+  if (!Number.isFinite(price) || !Number.isFinite(qty)) return null;
+  return Math.round((secondLowest - price) * qty * 100) / 100;
+}
+
 export default function ProductAssignmentPanel({
   productId,
   deliveryDate,
@@ -99,8 +111,6 @@ export default function ProductAssignmentPanel({
     }
   }
 
-  const unassignedQuotes = data?.quotes.filter((q) => !rows.some((r) => r.supplier_id === q.supplier_id)) ?? [];
-
   return (
     <div
       className="fixed inset-0 bg-crate-950/40 backdrop-blur-sm flex items-center justify-center z-50 p-4"
@@ -135,9 +145,16 @@ export default function ProductAssignmentPanel({
 
             <div className="p-5 space-y-5">
               <div>
-                <p className="text-xs font-semibold text-crate-800/50 uppercase tracking-wide mb-2">
-                  Supplier quotes
-                </p>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-semibold text-crate-800/50 uppercase tracking-wide">
+                    Supplier quotes
+                  </p>
+                  {data.second_lowest_price !== null && (
+                    <p className="text-xs text-crate-800/40">
+                      2nd lowest: Rs. {data.second_lowest_price.toFixed(2)}
+                    </p>
+                  )}
+                </div>
                 {data.quotes.length === 0 ? (
                   <p className="text-sm text-crate-800/40">No suppliers have submitted a price for this product.</p>
                 ) : (
@@ -178,6 +195,7 @@ export default function ProductAssignmentPanel({
                     {rows.map((r) => {
                       const quote = data.quotes.find((q) => q.supplier_id === r.supplier_id);
                       const name = quote?.supplier_name ?? `Supplier #${r.supplier_id}`;
+                      const savings = computeSavings(data.second_lowest_price, r.agreed_price, r.quantity);
                       return (
                         <div key={r.supplier_id} className="flex items-center gap-2 text-sm">
                           <span className="flex-1 text-crate-800 truncate">{name}</span>
@@ -201,6 +219,16 @@ export default function ProductAssignmentPanel({
                             placeholder="Price"
                             className="w-24 border border-sage-300 bg-sage-50/60 rounded-xl px-2 py-1.5 text-right focus:outline-none focus:ring-2 focus:ring-crate-700/30 focus:border-crate-700 focus:bg-white transition-all duration-150"
                           />
+                          {savings !== null && (
+                            <span
+                              className={`text-xs w-24 text-right shrink-0 ${
+                                savings >= 0 ? "text-crate-700" : "text-tomato-600"
+                              }`}
+                              title="Versus the 2nd-lowest quote"
+                            >
+                              {savings >= 0 ? "saves" : "costs"} Rs. {Math.abs(savings).toFixed(2)}
+                            </span>
+                          )}
                           <button
                             onClick={() => removeRow(r.supplier_id)}
                             className="text-tomato-500 hover:text-tomato-600 text-xs px-1.5 font-medium transition-colors duration-150"
@@ -213,8 +241,6 @@ export default function ProductAssignmentPanel({
                   </div>
                 </div>
               )}
-
-              {unassignedQuotes.length === 0 && data.quotes.length > 0 && rows.length === 0 && null}
 
               <div
                 className={`text-sm rounded-2xl px-4 py-2.5 font-medium ${

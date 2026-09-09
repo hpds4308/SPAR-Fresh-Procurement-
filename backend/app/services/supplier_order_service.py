@@ -29,6 +29,7 @@ from app.schemas.supplier_order import (
     SetSupplierOrderRequest,
     SupplierOrderItemOut,
     SupplierOrderAdminOut,
+    SupplierOrderSummaryOut,
     BranchOrderGroup,
     MySupplierOrdersOut,
 )
@@ -36,6 +37,49 @@ from app.schemas.supplier_order import (
 
 def list_suppliers(db: Session) -> list[Supplier]:
     return db.query(Supplier).filter(Supplier.status == "ACTIVE").order_by(Supplier.supplier_name).all()
+
+
+def list_supplier_order_dates(db: Session) -> list[date]:
+    """Every distinct delivery date any supplier order exists for, most
+    recent first — powers the Supplier-wise side of Admin Order History,
+    the same way order_service.list_order_dates powers the Branch-wise
+    side."""
+    rows = (
+        db.query(SupplierOrderItem.delivery_date)
+        .distinct()
+        .order_by(SupplierOrderItem.delivery_date.desc())
+        .all()
+    )
+    return [r[0] for r in rows]
+
+
+def list_supplier_order_summaries(db: Session, delivery_date: date) -> list[SupplierOrderSummaryOut]:
+    """One row per supplier with any order on this delivery date. Reuses
+    get_supplier_order per supplier so the total shown here can never
+    drift from what expanding that same supplier's row shows — one price
+    resolution rule, not two parallel calculations of it."""
+    supplier_ids = {
+        row[0]
+        for row in db.query(SupplierOrderItem.supplier_id)
+        .filter(SupplierOrderItem.delivery_date == delivery_date)
+        .distinct()
+        .all()
+    }
+    summaries = []
+    for supplier_id in supplier_ids:
+        order = get_supplier_order(db, supplier_id, delivery_date)
+        total_value = sum(it.line_total for it in order.items if it.line_total is not None)
+        summaries.append(
+            SupplierOrderSummaryOut(
+                supplier_id=order.supplier_id,
+                supplier_name=order.supplier_name,
+                delivery_date=delivery_date,
+                line_count=len(order.items),
+                total_value=round(total_value, 2),
+            )
+        )
+    summaries.sort(key=lambda s: s.supplier_name)
+    return summaries
 
 
 def get_assigned_quantities(
@@ -57,6 +101,32 @@ def get_assigned_quantities(
         query = query.filter(SupplierOrderItem.supplier_id != exclude_supplier_id)
     rows = query.group_by(SupplierOrderItem.product_id).all()
     return {product_id: float(total) for product_id, total in rows}
+
+
+def get_assigned_quantities_by_branch(
+    db: Session, delivery_date: date, exclude_supplier_id: int | None = None
+) -> dict[str, float]:
+    """
+    Same idea as get_assigned_quantities, broken down per branch instead
+    of summed across all of them — powers each individual branch column
+    on the Order Builder grid, so a branch whose demand has already been
+    fully given to another supplier shows 0 remaining for THAT branch
+    specifically, rather than the grid inviting Admin to re-enter its
+    full original order quantity on top of what's already covered.
+
+    Keyed as "{product_id}:{branch_id}" — the same cell-key convention
+    the frontend grid already uses, so it's a direct lookup with no
+    reshaping needed on that side.
+    """
+    query = db.query(
+        SupplierOrderItem.product_id,
+        SupplierOrderItem.branch_id,
+        func.sum(SupplierOrderItem.quantity),
+    ).filter(SupplierOrderItem.delivery_date == delivery_date)
+    if exclude_supplier_id is not None:
+        query = query.filter(SupplierOrderItem.supplier_id != exclude_supplier_id)
+    rows = query.group_by(SupplierOrderItem.product_id, SupplierOrderItem.branch_id).all()
+    return {f"{product_id}:{branch_id}": float(total) for product_id, branch_id, total in rows}
 
 
 def get_supplier_price_preview(db: Session, supplier_id: int, delivery_date: date) -> dict[int, "_ResolvedPrice"]:
@@ -103,13 +173,15 @@ def _resolve_prices(
     the supplier's own submitted price. This is the fallback used when an
     order line has no explicit per-line agreed_price of its own.
 
-    Submit Prices and Supplier Orders run on different delivery-date
-    conventions (pricing defaults 2 days ahead of submission; orders are
-    same-day), so an order's delivery_date usually won't have an exact
-    price match yet. When that happens, fall back to that supplier's most
-    recent submitted price for the product, on ANY date, and flag it as
-    an estimate — better than showing nothing, but the caller must be
-    able to tell the difference from a confirmed same-date price.
+    Branch orders and supplier pricing both target delivery_date =
+    submission_date + 2, so an order's delivery_date usually DOES have an
+    exact price match by the time Admin builds the supplier order. It
+    won't when a supplier hasn't submitted for that date yet (missed
+    cutoff, new product, etc.) — in that case, fall back to that
+    supplier's most recent submitted price for the product, on ANY date,
+    and flag it as an estimate — better than showing nothing, but the
+    caller must be able to tell the difference from a confirmed
+    same-date price.
     """
     if not product_ids:
         return {}

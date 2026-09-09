@@ -12,6 +12,10 @@ export type AssignmentEntry = {
   supplier_id: number;
   quantity: number;
   agreed_price: number;
+  // (second_lowest_price - agreed_price) * quantity — what this saved
+  // versus the next-best alternative quote, as of when it was last
+  // saved. null when there was no second quote to compare against.
+  savings: number | null;
 };
 
 export type ProductComparison = {
@@ -22,6 +26,10 @@ export type ProductComparison = {
   delivery_date: string;
   total_demand: number;
   quotes: SupplierQuote[];
+  // Next distinct price tier below the lowest quote, or null if fewer
+  // than two distinct prices exist yet — ties at the lowest don't count
+  // as a second tier.
+  second_lowest_price: number | null;
   assignments: AssignmentEntry[];
   assigned_quantity: number;
   fully_assigned: boolean;

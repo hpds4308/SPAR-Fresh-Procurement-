@@ -89,16 +89,6 @@ export function IconChart(props: IconProps) {
   );
 }
 
-export function IconCheckCircle(props: IconProps) {
-  return base(
-    <>
-      <circle cx="10" cy="10" r="7.3" />
-      <path d="M7 10.2l2 2 4-4.4" />
-    </>,
-    props
-  );
-}
-
 export function IconBranches(props: IconProps) {
   return base(
     <>

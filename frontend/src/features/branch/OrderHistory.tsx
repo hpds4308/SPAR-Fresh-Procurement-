@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ApiError } from "../../api/client";
-import { Order, OrderSummary, fetchMyOrders, fetchOrder, confirmDelivery, cancelOrder } from "../../api/orders";
+import { Order, OrderSummary, fetchMyOrders, fetchOrder, confirmDelivery } from "../../api/orders";
 import EmptyState from "../shared/EmptyState";
 import { IconBasket } from "../shared/Icons";
 import { useToast } from "../shared/ui/Toast";
@@ -103,9 +103,6 @@ export default function OrderHistory({ refreshKey }: { refreshKey: number }) {
   const [selected, setSelected] = useState<Order | null>(null);
   const [selectedLoading, setSelectedLoading] = useState(false);
   const [confirming, setConfirming] = useState(false);
-  const [cancelConfirming, setCancelConfirming] = useState(false);
-  const [cancelling, setCancelling] = useState(false);
-  const [cancelError, setCancelError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -128,14 +125,10 @@ export default function OrderHistory({ refreshKey }: { refreshKey: number }) {
     if (selected?.id === id) {
       setSelected(null);
       setConfirming(false);
-      setCancelConfirming(false);
-      setCancelError(null);
       return;
     }
     setSelectedLoading(true);
     setConfirming(false);
-    setCancelConfirming(false);
-    setCancelError(null);
     try {
       const order = await fetchOrder(id);
       setSelected(order);
@@ -151,25 +144,6 @@ export default function OrderHistory({ refreshKey }: { refreshKey: number }) {
     setConfirming(false);
     setOrders((prev) => prev.map((o) => (o.id === updated.id ? { ...o, status: updated.status } : o)));
     show("success", "Delivery confirmed.");
-  }
-
-  async function handleCancel() {
-    if (!selected) return;
-    setCancelling(true);
-    setCancelError(null);
-    try {
-      await cancelOrder(selected.id);
-      setOrders((prev) => prev.filter((o) => o.id !== selected.id));
-      setSelected(null);
-      setCancelConfirming(false);
-      show("success", "Order cancelled — you can submit a corrected one from New Order.");
-    } catch (err) {
-      setCancelError(
-        err instanceof ApiError ? err.message : "Could not cancel this order. Please try again."
-      );
-    } finally {
-      setCancelling(false);
-    }
   }
 
   if (loading) {
@@ -262,43 +236,6 @@ export default function OrderHistory({ refreshKey }: { refreshKey: number }) {
                       Confirmed {new Date(selected.confirmed_at).toLocaleString()}
                       {selected.confirmed_by_username ? ` by ${selected.confirmed_by_username}` : ""}
                     </p>
-                  )}
-
-                  {selected.status === "SUBMITTED" && !cancelConfirming && (
-                    <div className="flex justify-end mt-3">
-                      <button
-                        onClick={() => setCancelConfirming(true)}
-                        className="text-sm text-tomato-600 rounded-full px-4 py-1.5 font-medium border border-tomato-500/30 hover:bg-tomato-500/5 active:scale-[0.98] transition-all duration-150"
-                      >
-                        Cancel Order
-                      </button>
-                    </div>
-                  )}
-
-                  {selected.status === "SUBMITTED" && cancelConfirming && (
-                    <div className="mt-3 border border-tomato-500/25 rounded-xl p-3 bg-tomato-500/5">
-                      <p className="text-sm text-crate-950">
-                        Cancel this order? You can submit a corrected one right after, as long as today's
-                        cutoff hasn't passed.
-                      </p>
-                      {cancelError && <p className="text-tomato-600 text-xs mt-2">{cancelError}</p>}
-                      <div className="flex justify-end gap-2 mt-3">
-                        <button
-                          onClick={() => setCancelConfirming(false)}
-                          disabled={cancelling}
-                          className="text-sm text-crate-800/60 rounded-full px-4 py-1.5 font-medium hover:bg-sage-100 active:scale-[0.98] transition-all duration-150 disabled:opacity-50"
-                        >
-                          Keep Order
-                        </button>
-                        <button
-                          onClick={handleCancel}
-                          disabled={cancelling}
-                          className="text-sm bg-tomato-600 text-white rounded-full px-4 py-1.5 font-medium hover:bg-tomato-600/90 active:scale-[0.98] transition-all duration-150 disabled:opacity-50"
-                        >
-                          {cancelling ? "Cancelling…" : "Yes, Cancel It"}
-                        </button>
-                      </div>
-                    </div>
                   )}
 
                   {selected.status === "ASSIGNED" && !confirming && (

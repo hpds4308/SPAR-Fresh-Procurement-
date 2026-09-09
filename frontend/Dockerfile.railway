@@ -1,0 +1,22 @@
+# Railway build — a variant of Dockerfile.prod, not a replacement for it.
+# VPS hosting (docker-compose.prod.yml) bakes VITE_API_BASE_URL in by
+# copying a frontend/.env.production file into the build context, which
+# only exists on the VPS itself. Railway builds straight from this repo,
+# so there is no such file to copy — instead this Dockerfile takes
+# VITE_API_BASE_URL as a build ARG, which Railway fills in automatically
+# from a service variable of the same name (Settings > Variables) when
+# it builds this Dockerfile. See docs/RAILWAY.md.
+FROM node:20-slim AS build
+WORKDIR /app
+COPY package.json ./
+RUN npm install
+COPY . .
+
+ARG VITE_API_BASE_URL
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+RUN npm run build
+
+FROM nginx:1.27-alpine
+COPY --from=build /app/dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+EXPOSE 80

@@ -23,6 +23,14 @@ class ChangePasswordRequest(BaseModel):
     new_password: str = Field(min_length=8)
 
 
+class RedeemRecoveryTokenRequest(BaseModel):
+    """Body for the break-glass account-recovery endpoint — see
+    scripts/generate_recovery_token.py for how the token is issued."""
+
+    token: str
+    new_password: str = Field(min_length=8)
+
+
 class CurrentUserResponse(BaseModel):
     id: int
     username: str

@@ -1,8 +1,11 @@
-# Production stack. Run alongside .env.production (copy .env.example,
-# fill in real values — see docs/HOSTING.md).
+# Production stack. Needs three env files filled in first, each copied
+# from its own .env.example — see docs/HOSTING.md:
+#   .env.production                  (this directory — Compose itself)
+#   backend/.env.production          (backend app config)
+#   frontend/.env.production         (frontend app config, read at build time)
 #
 # Usage on the server:
-#   docker compose -f docker-compose.prod.yml up -d --build
+#   docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
 #   docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
 #
 # Key differences from docker-compose.yml (local dev):
@@ -35,7 +38,7 @@ services:
     labels:
       - "autoheal=true"
     env_file:
-      - .env.production
+      - ./backend/.env.production
     environment:
       DATABASE_URL: postgresql+psycopg2://spar_user:${POSTGRES_PASSWORD}@db:5432/spar_procurement
     depends_on:
@@ -57,8 +60,6 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile.prod
-      args:
-        VITE_API_BASE_URL: ${PUBLIC_URL}
     restart: unless-stopped
     labels:
       - "autoheal=true"
@@ -103,6 +104,21 @@ services:
       - ./docker/backup_db.sh:/backup_db.sh:ro
       - db_backups:/backups
     entrypoint: ["sh", "/backup_db.sh"]
+
+  # Reuses the backend image just to run scripts/import_harti_prices.py on
+  # its own daily schedule — informational-only local market prices, so a
+  # failure here never affects the main backend/frontend containers.
+  harti-price-import:
+    build: ./backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env.production
+    environment:
+      DATABASE_URL: postgresql+psycopg2://spar_user:${POSTGRES_PASSWORD}@db:5432/spar_procurement
+    depends_on:
+      db:
+        condition: service_healthy
+    entrypoint: ["python", "-m", "scripts.import_harti_prices"]
 
   caddy:
     image: caddy:2-alpine

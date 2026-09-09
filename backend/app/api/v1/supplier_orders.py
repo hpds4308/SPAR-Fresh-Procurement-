@@ -8,13 +8,15 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.security import get_current_user, require_roles
 from app.models.user import User
+from app.schemas.assignment import SupplierAssignedProductOut
 from app.schemas.supplier_order import (
     SetSupplierOrderRequest,
     SupplierOrderAdminOut,
+    SupplierOrderSummaryOut,
     MySupplierOrdersOut,
     SupplierPricePreviewOut,
 )
-from app.services import supplier_order_service
+from app.services import assignment_service, supplier_order_service
 
 router = APIRouter(prefix="/supplier-orders", dependencies=[Depends(get_current_user)])
 
@@ -128,6 +130,28 @@ def export_my_supplier_orders(
     )
 
 
+@router.get("/admin/dates", response_model=list[date])
+def admin_supplier_order_dates(
+    admin: User = Depends(require_roles("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """Every date any supplier order exists for — powers the Supplier-wise
+    side of Admin Order History (Prev/Next navigation and the date picker),
+    the same way /orders/admin/dates powers the Branch-wise side."""
+    return supplier_order_service.list_supplier_order_dates(db)
+
+
+@router.get("/admin/summary", response_model=list[SupplierOrderSummaryOut])
+def admin_supplier_order_summary(
+    delivery_date: date,
+    admin: User = Depends(require_roles("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """One row per supplier with orders on this date — line count and total value.
+    Expanding a row in the UI calls GET /supplier-orders/admin for the branch-by-branch detail."""
+    return supplier_order_service.list_supplier_order_summaries(db, delivery_date)
+
+
 @router.get("/admin", response_model=SupplierOrderAdminOut)
 def admin_get_supplier_order(
     supplier_id: int,
@@ -149,6 +173,32 @@ def admin_assigned_quantities(
     """Total quantity already given to suppliers per product, for one delivery date — pass the supplier
     currently being edited as exclude_supplier_id so their own lines don't count against themselves."""
     return supplier_order_service.get_assigned_quantities(db, delivery_date, exclude_supplier_id)
+
+
+@router.get("/admin/assigned-by-branch", response_model=dict[str, float])
+def admin_assigned_quantities_by_branch(
+    delivery_date: date,
+    exclude_supplier_id: int | None = None,
+    admin: User = Depends(require_roles("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """Same as /admin/assigned, broken down per branch (key: "product_id:branch_id") — powers
+    each branch column's remaining-quantity placeholder on the Order Builder grid."""
+    return supplier_order_service.get_assigned_quantities_by_branch(db, delivery_date, exclude_supplier_id)
+
+
+@router.get("/admin/assignments", response_model=list[SupplierAssignedProductOut])
+def admin_assignments_for_supplier(
+    supplier_id: int,
+    delivery_date: date,
+    admin: User = Depends(require_roles("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """Products already assigned to this supplier for this delivery date via
+    Product Assignment (Order Matrix) — powers "Fill from assignments" on
+    the Order Builder grid, so a commitment made there doesn't have to be
+    manually re-entered branch by branch here."""
+    return assignment_service.get_assignments_for_supplier(db, supplier_id, delivery_date)
 
 
 @router.get("/admin/prices", response_model=list[SupplierPricePreviewOut])

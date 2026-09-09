@@ -1,6 +1,8 @@
 from datetime import date
 from pydantic import BaseModel, Field, field_validator
 
+from app.schemas._limits import MAX_NUMERIC_10_2
+
 
 class SupplierOut(BaseModel):
     id: int
@@ -15,8 +17,8 @@ class SupplierOut(BaseModel):
 class SupplierOrderItemIn(BaseModel):
     branch_id: int
     product_id: int
-    quantity: float = Field(gt=0)
-    agreed_price: float | None = Field(default=None, ge=0)
+    quantity: float = Field(gt=0, le=MAX_NUMERIC_10_2)
+    agreed_price: float | None = Field(default=None, ge=0, le=MAX_NUMERIC_10_2)
     notes: str | None = None
 
     @field_validator("quantity", "agreed_price")
@@ -83,6 +85,19 @@ class MySupplierOrdersOut(BaseModel):
     branches: list[BranchOrderGroup]
     grand_total: float
     available_delivery_dates: list[date]
+
+
+class SupplierOrderSummaryOut(BaseModel):
+    """One row per supplier for the Supplier-wise side of Admin Order
+    History — mirrors OrderSummary on the Branch-wise side. Expanding a
+    row calls the existing GET /supplier-orders/admin endpoint for the
+    branch-by-branch detail, so this only needs to carry the summary."""
+
+    supplier_id: int
+    supplier_name: str
+    delivery_date: date
+    line_count: int
+    total_value: float
 
 
 class SupplierPricePreviewOut(BaseModel):

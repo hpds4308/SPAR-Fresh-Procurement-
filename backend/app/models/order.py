@@ -1,6 +1,6 @@
 from datetime import datetime, date
 
-from sqlalchemy import String, Integer, Numeric, Date, DateTime, ForeignKey, Text, func
+from sqlalchemy import String, Numeric, Date, DateTime, ForeignKey, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -10,17 +10,19 @@ class Order(Base):
     """
     A single branch's order for a single order date. Branches submit
     before the daily cutoff (see settings.BRANCH_ORDER_DEADLINE) and the
-    order is always for that same day (delivery date = order date) —
-    branches never choose a supplier; Admin assigns supplier(s) to each
-    line in a later phase.
+    order is always for delivery two days later (delivery date = order
+    date + 2) — the same lead time suppliers get for pricing (see
+    pricing_service.py), so both sides are submitted the same day for the
+    same future delivery date. Branches never choose a supplier; Admin
+    assigns supplier(s) to each line in a later phase.
 
     One order per branch per order_date, enforced by the
     uq_orders_branch_order_date unique constraint (see migration 0009).
-    That's the real "once a day" business key now that delivery_date is
-    always equal to order_date — it deliberately does NOT constrain on
-    delivery_date, since a handful of legacy rows from before that rule
-    existed have order_date != delivery_date, and must never block a
-    genuinely new order that happens to share their delivery_date.
+    That's the "once a day" business key — it deliberately does NOT
+    constrain on delivery_date, since a handful of legacy rows from
+    before the +2 rule existed have order_date == delivery_date, and must
+    never block a genuinely new order that happens to share their
+    delivery_date.
     """
 
     __tablename__ = "orders"
@@ -29,7 +31,7 @@ class Order(Base):
     branch_id: Mapped[int] = mapped_column(ForeignKey("branches.id"), nullable=False)
     submitted_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     order_date: Mapped[date] = mapped_column(Date, nullable=False)  # date it was placed
-    delivery_date: Mapped[date] = mapped_column(Date, nullable=False)  # always == order_date
+    delivery_date: Mapped[date] = mapped_column(Date, nullable=False)  # now: order_date + 2 days
     # SUBMITTED -> ASSIGNED (admin has assigned suppliers) -> CONFIRMED
     # (branch has confirmed what actually arrived)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="SUBMITTED")

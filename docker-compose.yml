@@ -20,7 +20,7 @@ services:
     build: ./backend
     restart: unless-stopped
     env_file:
-      - .env
+      - ./backend/.env
     environment:
       DATABASE_URL: postgresql+psycopg2://spar_user:spar_password@db:5432/spar_procurement
     depends_on:
@@ -44,11 +44,29 @@ services:
       retries: 5
       start_period: 20s
 
+  # Reuses the backend image just to run scripts/import_harti_prices.py on
+  # its own schedule — see that script for the daily run time and retry
+  # behavior. Local market prices are informational only, so a failure
+  # here never affects the main backend/frontend containers.
+  harti-price-import:
+    build: ./backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://spar_user:spar_password@db:5432/spar_procurement
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    entrypoint: ["python", "-m", "scripts.import_harti_prices"]
+
   frontend:
     build: ./frontend
     restart: unless-stopped
-    environment:
-      VITE_API_BASE_URL: http://localhost:8000
+    # VITE_API_BASE_URL comes from frontend/.env — Vite loads it
+    # automatically, no Compose wiring needed (see frontend/.env.example).
     depends_on:
       - backend
     ports:

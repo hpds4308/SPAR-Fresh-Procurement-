@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError } from "../../api/client";
+import { compareProductDisplayOrder } from "../../api/orders";
 import { MySupplierOrders, downloadMySupplierOrders, fetchMySupplierOrders } from "../../api/supplierOrders";
 import EmptyState from "../shared/EmptyState";
 import { SkeletonTable } from "../shared/ui/Skeleton";
@@ -98,9 +99,7 @@ export default function OrdersByBranch() {
       }
     }
 
-    const rows = Array.from(productMap.values()).sort(
-      (a, b) => a.category_name.localeCompare(b.category_name) || a.description.localeCompare(b.description)
-    );
+    const rows = Array.from(productMap.values()).sort(compareProductDisplayOrder);
 
     const branchTotals: Record<number, number> = {};
     for (const branch of branchList) {
@@ -152,7 +151,7 @@ export default function OrdersByBranch() {
   return (
     <div className="bg-white rounded-2xl shadow-card border border-sage-100 overflow-hidden">
       <div className="p-4 border-b border-sage-100 flex flex-wrap items-center gap-3">
-        <label className="text-sm text-crate-800/70">Order Date</label>
+        <label className="text-sm text-crate-800/70">Delivery Date</label>
         <select
           value={selectedDate}
           onChange={(e) => setSelectedDate(e.target.value)}
@@ -189,7 +188,7 @@ export default function OrdersByBranch() {
       {error && <p className="text-tomato-600 text-sm px-4 pt-3">{error}</p>}
 
       {rows.length === 0 ? (
-        <p className="p-6 text-sm text-crate-800/35 text-center">No orders for this order date.</p>
+        <p className="p-6 text-sm text-crate-800/35 text-center">No orders for this delivery date.</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm border-collapse">
