@@ -48,7 +48,10 @@ export default function DashboardShell<T extends string>({
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 font-body flex">
+    // h-screen + overflow-hidden pins the app to the viewport so the page
+    // itself never scrolls; the sidebar and the main column each get their
+    // own scroll container below.
+    <div className="h-screen overflow-hidden bg-gray-50 font-body flex">
       <Sidebar
         items={navItems}
         active={activeNav}
@@ -66,7 +69,7 @@ export default function DashboardShell<T extends string>({
         brandTitle="SPAR Procurement"
       />
 
-      <div className="flex-1 min-w-0 flex flex-col">
+      <div className="flex-1 min-w-0 flex flex-col h-screen">
         <Header
           title={title}
           subtitle={subtitle}
@@ -74,8 +77,12 @@ export default function DashboardShell<T extends string>({
           onBellClick={onBellClick}
           onMenuClick={() => setMobileNavOpen(true)}
         />
-        <main className="flex-1 px-4 md:px-6 py-6 md:py-8 animate-fade-up max-w-6xl w-full mx-auto">
-          {children}
+        {/* min-h-0 lets this flex child shrink so it — not the page — is the
+            scroll container for page content. */}
+        <main className="flex-1 min-h-0 overflow-y-auto">
+          <div className="px-4 md:px-6 py-6 md:py-8 animate-fade-up max-w-6xl w-full mx-auto">
+            {children}
+          </div>
         </main>
       </div>
     </div>
