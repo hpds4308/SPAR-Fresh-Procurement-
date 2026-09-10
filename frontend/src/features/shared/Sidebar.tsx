@@ -31,11 +31,6 @@ export default function Sidebar<T extends string>({
       }`}
     >
       <div className={`flex items-center gap-2.5 h-16 shrink-0 border-b border-sage-100 ${collapsed ? "justify-center px-0" : "px-4"}`}>
-        <img
-          src="/images/spar-fresh-procurement-logo.png"
-          alt="SPAR Fresh Procurement"
-          className="h-9 w-auto shrink-0 object-contain"
-        />
         {!collapsed && (
           <span className="font-display font-bold text-sm text-crate-950 truncate">{brandTitle}</span>
         )}
