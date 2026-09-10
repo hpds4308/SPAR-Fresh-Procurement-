@@ -26,7 +26,7 @@ export default function Sidebar<T extends string>({
 }) {
   return (
     <aside
-      className={`hidden md:flex flex-col shrink-0 bg-white border-r border-sage-200 transition-all duration-200 ${
+      className={`hidden md:flex flex-col shrink-0 h-screen bg-white border-r border-sage-200 transition-all duration-200 ${
         collapsed ? "w-16" : "w-56"
       }`}
     >
@@ -41,7 +41,9 @@ export default function Sidebar<T extends string>({
         )}
       </div>
 
-      <nav className="flex-1 py-3 px-2 space-y-0.5 overflow-y-auto">
+      {/* min-h-0 lets this nav shrink inside the flex column so it scrolls
+          independently — the logo and collapse toggle stay pinned. */}
+      <nav className="flex-1 min-h-0 py-3 px-2 space-y-0.5 overflow-y-auto">
         {items.map((item) => {
           const isActive = item.id === active;
           return (
