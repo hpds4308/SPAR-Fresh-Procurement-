@@ -23,7 +23,12 @@ export default function MobileNavDrawer<T extends string>({
     <div className="fixed inset-0 z-50 md:hidden">
       <div className="absolute inset-0 bg-crate-950/40" onClick={onClose} aria-hidden="true" />
       <div className="relative w-64 max-w-[80vw] h-full bg-white shadow-modal flex flex-col animate-fade-up" style={{ animationDuration: "0.2s" }}>
-        <div className="flex items-center gap-2.5 h-16 shrink-0 border-b border-sage-100 px-4">
+        <div className="flex flex-col items-center justify-center gap-1 h-16 shrink-0 border-b border-sage-100 px-3">
+          <img
+            src="/images/spar-logo.svg"
+            alt="SPAR"
+            className="h-7 w-auto object-contain"
+          />
           <span className="font-display font-bold text-sm text-crate-950 truncate">{brandTitle}</span>
         </div>
         <nav className="flex-1 py-3 px-2 space-y-0.5 overflow-y-auto">

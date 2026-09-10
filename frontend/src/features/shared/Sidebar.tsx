@@ -30,7 +30,12 @@ export default function Sidebar<T extends string>({
         collapsed ? "w-16" : "w-56"
       }`}
     >
-      <div className={`flex items-center gap-2.5 h-16 shrink-0 border-b border-sage-100 ${collapsed ? "justify-center px-0" : "px-4"}`}>
+      <div className={`flex flex-col items-center justify-center gap-1 h-16 shrink-0 border-b border-sage-100 ${collapsed ? "px-0" : "px-3"}`}>
+        <img
+          src="/images/spar-logo.svg"
+          alt="SPAR"
+          className={`w-auto object-contain ${collapsed ? "h-8" : "h-7"}`}
+        />
         {!collapsed && (
           <span className="font-display font-bold text-sm text-crate-950 truncate">{brandTitle}</span>
         )}

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 132" role="img" aria-label="SPAR">
+  <rect width="288" height="132" fill="#E3000F"/>
+  <text x="144" y="98" text-anchor="middle"
+        font-family="'Arial Black', 'Helvetica Neue', Arial, sans-serif"
+        font-weight="900" font-style="italic" font-size="80"
+        letter-spacing="-2" fill="#ffffff">SPAR</text>
+  <circle cx="332" cy="66" r="64" fill="#009C49"/>
+  <g fill="#ffffff">
+    <polygon points="332,16 357,57 307,57"/>
+    <polygon points="332,39 369,85 295,85"/>
+    <polygon points="332,62 379,110 285,110"/>
+    <rect x="325" y="106" width="14" height="17"/>
+  </g>
+</svg>
