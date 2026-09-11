@@ -26,6 +26,24 @@ def test_blank_phone_rejected():
         settings_service._validate_phone("   ")
 
 
+@pytest.mark.parametrize("good", ["a@b.co", "master.data@spar.lk", "team+md@example.com"])
+def test_valid_emails_pass(good):
+    settings_service._validate_email(good)
+
+
+@pytest.mark.parametrize("bad", ["", "   ", "no-at-sign", "missing@domain", "@example.com", "a b@c.com"])
+def test_invalid_emails_rejected(bad):
+    with pytest.raises(ValidationFailedError):
+        settings_service._validate_email(bad)
+
+
+def test_master_data_email_default_is_blank():
+    # No first-run default on purpose — the send endpoint checks for this
+    # and returns a "set an address first" message rather than emailing.
+    db = FakeDB()
+    assert settings_service.get_setting(db, settings_service.MASTER_DATA_EMAIL) == ""
+
+
 def test_get_setting_falls_back_to_env_default_when_unset():
     db = FakeDB()
     # No row exists (FakeDB always returns None), so this must return the

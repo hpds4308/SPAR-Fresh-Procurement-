@@ -82,7 +82,9 @@ nano backend/.env.production
 - `SECRET_KEY` — generate one: `openssl rand -hex 32`
 - `CORS_ORIGINS=["https://yourdomain.com"]`
 - Leave `DATABASE_URL` as-is; `docker-compose.prod.yml` overrides it automatically.
-- Fill in `SMTP_*` if you want "Send to Master Data" to work.
+- Fill in `SMTP_*` if you want "Send to Master Data" to work. The recipient
+  address itself is set in the app afterwards (Admin → Settings → "Master
+  Data recipient email"), not here.
 
 **`frontend/.env.production`**:
 ```bash

@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
 import { ApiError } from "../../api/client";
-import { Settings, fetchSettings, updateSetting } from "../../api/settings";
+import {
+  Settings,
+  fetchMasterDataEmail,
+  fetchSettings,
+  updateMasterDataEmail,
+  updateSetting,
+} from "../../api/settings";
 import {
   Branch,
   OrderDeadlineException,
@@ -128,11 +134,82 @@ export default function AdminSettings() {
               </div>
             );
           })}
+
+          <MasterDataEmailField />
         </div>
       </div>
       {error && <p className="text-tomato-600 text-sm px-1">{error}</p>}
 
       <LateSubmissionPanel />
+    </div>
+  );
+}
+
+/**
+ * The recipient for "Send to Master Data" on the Master Data Sheet page.
+ * Separate from the fields above because it's admin-only and has its own
+ * endpoint (it's deliberately not in the public GET /settings payload).
+ * Until it's set, the send button returns a clear "set an address first"
+ * error rather than emailing nowhere.
+ */
+function MasterDataEmailField() {
+  const [saved, setSaved] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [state, setState] = useState<FieldState>("idle");
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchMasterDataEmail()
+      .then((r) => {
+        setSaved(r.master_data_email);
+        setDraft(r.master_data_email);
+      })
+      .catch(() => setSaved(""));
+  }, []);
+
+  async function save(value: string) {
+    const trimmed = value.trim();
+    if (saved === null || trimmed === "" || trimmed === saved) return;
+    setState("saving");
+    setError(null);
+    try {
+      const updated = await updateMasterDataEmail(trimmed);
+      setSaved(updated.master_data_email);
+      setDraft(updated.master_data_email);
+      setState("saved");
+      setTimeout(() => setState((s) => (s === "saved" ? "idle" : s)), 1500);
+    } catch (err) {
+      setState("error");
+      setError(err instanceof ApiError ? err.message : "Could not save that address.");
+    }
+  }
+
+  return (
+    <div>
+      <label className="block text-xs font-semibold uppercase tracking-wide text-crate-800/60 mb-1.5">
+        Master Data recipient email
+      </label>
+      <div className="flex items-center gap-2">
+        <input
+          type="email"
+          value={draft}
+          placeholder="name@example.com"
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={(e) => save(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+          className={`border rounded-full px-4 py-2 text-sm bg-sage-50/60 focus:outline-none focus:ring-2 focus:ring-crate-700/30 focus:border-crate-700 focus:bg-white transition-colors duration-150 w-64 ${
+            state === "error" ? "border-tomato-500 ring-1 ring-tomato-500/30" : "border-sage-300"
+          }`}
+        />
+        {state === "saving" && <span className="text-xs text-crate-800/35">Saving…</span>}
+        {state === "saved" && <span className="text-xs text-crate-700">✓ Saved</span>}
+        {state === "error" && <span className="text-xs text-tomato-600">Failed</span>}
+      </div>
+      <p className="text-xs text-crate-800/40 mt-1.5">
+        Where "Send to Master Data" on the Master Data Sheet page emails the Excel export. Needs the
+        server's <code>SMTP_*</code> settings configured too.
+      </p>
+      {error && <p className="text-tomato-600 text-xs mt-1">{error}</p>}
     </div>
   );
 }

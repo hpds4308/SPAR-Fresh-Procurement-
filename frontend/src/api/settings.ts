@@ -16,3 +16,18 @@ export function updateSetting(key: keyof Settings, value: string): Promise<Setti
     body: JSON.stringify({ value }),
   });
 }
+
+// Kept separate from Settings above: this one is admin-only and isn't part
+// of the public GET /settings payload.
+export type MasterDataEmail = { master_data_email: string };
+
+export function fetchMasterDataEmail(): Promise<MasterDataEmail> {
+  return apiFetch("/settings/master-data-email");
+}
+
+export function updateMasterDataEmail(value: string): Promise<MasterDataEmail> {
+  return apiFetch("/settings/master-data-email", {
+    method: "PUT",
+    body: JSON.stringify({ value }),
+  });
+}

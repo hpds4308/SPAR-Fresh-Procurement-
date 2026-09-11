@@ -51,7 +51,9 @@ create a repo and push it there first.
   - `BRANCH_ORDER_DEADLINE=14:00`, `SUPPLIER_PRICE_DEADLINE=12:00` (or
     your real values)
   - `SMTP_*` — fill in if you want "Send to Master Data" to send email;
-    otherwise leave blank, same as local dev.
+    otherwise leave blank, same as local dev. The recipient address is
+    set later in-app (Admin → Settings → "Master Data recipient email"),
+    not as an env var.
   - `POS_API_BASE_URL`, `POS_API_USERNAME`, `POS_API_PASSWORD` — fill in
     if you want the branch order page's "Stock in Hand" column.
 - **Settings → Networking → Generate Domain**: set the target port to

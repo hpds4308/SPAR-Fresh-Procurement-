@@ -21,8 +21,12 @@ from app.models.user import User
 BRANCH_ORDER_DEADLINE = "branch_order_deadline"
 SUPPLIER_PRICE_DEADLINE = "supplier_price_deadline"
 SUPPORT_PHONE = "support_phone"
+MASTER_DATA_EMAIL = "master_data_email"
 
 _TIME_RE = re.compile(r"^\d{1,2}:\d{2}$")
+# Deliberately loose — just enough to catch obvious typos (missing @,
+# missing domain dot). Real deliverability is proven by the first send.
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 def _validate_time(value: str) -> None:
@@ -40,6 +44,11 @@ def _validate_phone(value: str) -> None:
         raise ValidationFailedError("Phone number can't be empty.")
 
 
+def _validate_email(value: str) -> None:
+    if not _EMAIL_RE.match(value.strip()):
+        raise ValidationFailedError("Enter a valid email address, e.g. name@example.com.")
+
+
 # Each editable key: how to validate it, and where its first-run default
 # comes from (the existing .env values — nothing changes for anyone who
 # never opens the Settings page).
@@ -47,6 +56,9 @@ _KEYS = {
     BRANCH_ORDER_DEADLINE: (_validate_time, lambda: env_settings.BRANCH_ORDER_DEADLINE),
     SUPPLIER_PRICE_DEADLINE: (_validate_time, lambda: env_settings.SUPPLIER_PRICE_DEADLINE),
     SUPPORT_PHONE: (_validate_phone, lambda: "076 562 2317"),
+    # No first-run default — "Send to Master Data" stays disabled with a
+    # clear message until Admin sets a real address on the Settings page.
+    MASTER_DATA_EMAIL: (_validate_email, lambda: ""),
 }
 
 

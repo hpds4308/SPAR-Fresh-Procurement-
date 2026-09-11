@@ -7,14 +7,13 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.email import send_email_with_attachment
+from app.core.errors import ValidationFailedError
 from app.core.security import get_current_user, require_roles
 from app.models.user import User
 from app.schemas.master_data import MasterDataSheetOut, MasterDataRowOut, MasterDataFieldUpdateRequest
-from app.services import master_data_service
+from app.services import master_data_service, settings_service
 
 router = APIRouter(prefix="/master-data", dependencies=[Depends(get_current_user)])
-
-MASTER_DATA_EMAIL_RECIPIENT = "pathiragedimujaya4308@gmail.com"
 
 
 @router.get("", response_model=MasterDataSheetOut)
@@ -69,12 +68,18 @@ def send_master_data_email(
     admin: User = Depends(require_roles("ADMIN")),
     db: Session = Depends(get_db),
 ):
-    """Emails the current Master Data Sheet as an .xlsx attachment to the fixed recipient
-    below. Requires SMTP_* to be configured in .env — see .env.example."""
+    """Emails the current Master Data Sheet as an .xlsx attachment to the address
+    set in Admin → Settings ("Master Data recipient email"). Requires SMTP_* to be
+    configured too — see .env.example."""
+    recipient = settings_service.get_setting(db, settings_service.MASTER_DATA_EMAIL).strip()
+    if not recipient:
+        raise ValidationFailedError(
+            "No Master Data recipient email is set yet — add one in Admin → Settings first."
+        )
     excel_bytes = master_data_service.build_master_data_excel(db)
     today = date.today().isoformat()
     send_email_with_attachment(
-        to=MASTER_DATA_EMAIL_RECIPIENT,
+        to=recipient,
         subject=f"SPAR Master Data Sheet — {today}",
         body=(
             f"Attached is the current Master Data Sheet, exported {today}.\n\n"
@@ -83,4 +88,4 @@ def send_master_data_email(
         attachment_bytes=excel_bytes,
         attachment_filename=f"master-data-sheet-{today}.xlsx",
     )
-    return {"sent_to": MASTER_DATA_EMAIL_RECIPIENT}
+    return {"sent_to": recipient}

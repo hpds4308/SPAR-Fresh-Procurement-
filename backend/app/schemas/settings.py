@@ -9,3 +9,9 @@ class SettingsOut(BaseModel):
 
 class SettingUpdateRequest(BaseModel):
     value: str = Field(min_length=1, max_length=200)
+
+
+class MasterDataEmailOut(BaseModel):
+    # Kept off the public SettingsOut on purpose — an internal distribution
+    # address, only ever read/written by Admin.
+    master_data_email: str
