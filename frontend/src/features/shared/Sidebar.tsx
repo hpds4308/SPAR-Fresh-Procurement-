@@ -24,11 +24,11 @@ export default function Sidebar<T extends string>({
 }) {
   return (
     <aside
-      className={`hidden md:flex flex-col shrink-0 h-screen bg-white border-r border-sage-200 transition-all duration-200 ${
+      className={`hidden md:flex flex-col shrink-0 h-screen bg-sage-100 border-r border-sage-200 transition-all duration-200 ${
         collapsed ? "w-16" : "w-56"
       }`}
     >
-      <div className={`flex items-center justify-center h-16 shrink-0 border-b border-sage-100 ${collapsed ? "px-2" : "px-4"}`}>
+      <div className={`flex items-center justify-center h-16 shrink-0 border-b border-sage-200 ${collapsed ? "px-2" : "px-4"}`}>
         <img
           src={collapsed ? "/images/spar-icon.svg" : "/images/spar-logo.svg"}
           alt="SPAR"
@@ -51,7 +51,7 @@ export default function Sidebar<T extends string>({
               } ${
                 isActive
                   ? "bg-tomato-500/10 text-tomato-600 font-semibold"
-                  : "text-crate-800/60 hover:bg-sage-50 hover:text-crate-800 font-medium"
+                  : "text-crate-800/60 hover:bg-sage-200 hover:text-crate-800 font-medium"
               }`}
             >
               <span className={isActive ? "text-tomato-600" : "text-crate-800/40"}>{item.icon}</span>
@@ -70,7 +70,7 @@ export default function Sidebar<T extends string>({
 
       <button
         onClick={onToggleCollapsed}
-        className="flex items-center justify-center gap-2 h-11 shrink-0 border-t border-sage-100 text-crate-800/40 hover:text-crate-700 hover:bg-sage-50 transition-colors duration-150"
+        className="flex items-center justify-center gap-2 h-11 shrink-0 border-t border-sage-200 text-crate-800/40 hover:text-crate-700 hover:bg-sage-200 transition-colors duration-150"
         aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
       >
         {collapsed ? <IconChevronRight width={14} height={14} /> : <IconChevronLeft width={14} height={14} />}
