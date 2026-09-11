@@ -58,7 +58,6 @@ export default function DashboardShell<T extends string>({
         onChange={onNavChange}
         collapsed={collapsed}
         onToggleCollapsed={toggleCollapsed}
-        brandTitle="SPAR Procurement"
       />
       <MobileNavDrawer
         open={mobileNavOpen}
@@ -66,7 +65,6 @@ export default function DashboardShell<T extends string>({
         items={navItems}
         active={activeNav}
         onChange={onNavChange}
-        brandTitle="SPAR Procurement"
       />
 
       <div className="flex-1 min-w-0 flex flex-col h-screen">

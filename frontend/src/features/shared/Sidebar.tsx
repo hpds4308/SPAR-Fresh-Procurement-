@@ -15,14 +15,12 @@ export default function Sidebar<T extends string>({
   onChange,
   collapsed,
   onToggleCollapsed,
-  brandTitle,
 }: {
   items: SidebarItem<T>[];
   active: T;
   onChange: (id: T) => void;
   collapsed: boolean;
   onToggleCollapsed: () => void;
-  brandTitle: string;
 }) {
   return (
     <aside
@@ -30,15 +28,12 @@ export default function Sidebar<T extends string>({
         collapsed ? "w-16" : "w-56"
       }`}
     >
-      <div className={`flex flex-col items-center justify-center gap-1 h-16 shrink-0 border-b border-sage-100 ${collapsed ? "px-0" : "px-3"}`}>
+      <div className={`flex items-center justify-center h-16 shrink-0 border-b border-sage-100 ${collapsed ? "px-2" : "px-4"}`}>
         <img
           src="/images/spar-logo.svg"
           alt="SPAR"
-          className={`w-auto object-contain ${collapsed ? "h-8" : "h-7"}`}
+          className={`w-auto object-contain ${collapsed ? "h-9" : "h-10"}`}
         />
-        {!collapsed && (
-          <span className="font-display font-bold text-sm text-crate-950 truncate">{brandTitle}</span>
-        )}
       </div>
 
       {/* min-h-0 lets this nav shrink inside the flex column so it scrolls
