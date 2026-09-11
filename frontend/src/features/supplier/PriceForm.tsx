@@ -30,24 +30,35 @@ export default function PriceForm({ onSubmitted }: { onSubmitted: () => void }) 
         if (cancelled) return;
         setProducts(p);
         setWindow(w);
-        // Pre-fill with anything already submitted for this delivery date,
-        // so a supplier revisiting the form sees and can adjust their quotes.
+
         const mine = await fetchMyPrices(w.delivery_date);
         if (cancelled) return;
-        const prefill: Record<number, string> = {};
-        for (const mp of mine) prefill[mp.product_id] = String(mp.price);
-        setPrices(prefill);
-        // Last price ever quoted per product, regardless of date — shown
-        // as a reference only, never auto-filled into the input above.
+
+        // Last price ever quoted per product, regardless of date. Also
+        // doubles as the "new delivery date" fallback below: when this
+        // date has no submission yet, it's necessarily the supplier's
+        // most recent earlier one.
+        let last: LastPrice[] = [];
         try {
-          const last = await fetchLastPrices();
+          last = await fetchLastPrices();
           if (cancelled) return;
-          const lastMap: Record<number, LastPrice> = {};
-          for (const lp of last) lastMap[lp.product_id] = lp;
-          setLastPrices(lastMap);
         } catch {
           // Non-critical — the form still works fine without this reference.
         }
+        const lastMap: Record<number, LastPrice> = {};
+        for (const lp of last) lastMap[lp.product_id] = lp;
+        setLastPrices(lastMap);
+
+        // Pre-fill priority: this delivery date's own submission first;
+        // otherwise carry forward the supplier's latest previous price as
+        // a starting default. Either way these are just starting values —
+        // nothing is "submitted" for this date until Submit is clicked.
+        const prefill: Record<number, string> = {};
+        for (const mp of mine) prefill[mp.product_id] = String(mp.price);
+        for (const lp of last) {
+          if (!(lp.product_id in prefill)) prefill[lp.product_id] = String(lp.price);
+        }
+        setPrices(prefill);
       } catch (err) {
         if (!cancelled) setError(err instanceof ApiError ? err.message : "Could not load the price form.");
       } finally {
@@ -230,17 +241,17 @@ export default function PriceForm({ onSubmitted }: { onSubmitted: () => void }) 
           <p className="text-sm text-crate-800/60">
             {lineCount} product{lineCount === 1 ? "" : "s"} with a price entered
           </p>
-          {lineCount > 0 && (
-            <button
-              onClick={clearAll}
-              className="text-xs text-crate-800/40 hover:text-tomato-600 underline decoration-dotted transition-colors duration-150"
-            >
-              Clear All
-            </button>
-          )}
         </div>
         <div className="flex items-center gap-3">
           {error && <p className="text-tomato-600 text-sm">{error}</p>}
+          <button
+            onClick={clearAll}
+            disabled={lineCount === 0}
+            title="Clears the values shown on this form only — does not affect anything already submitted."
+            className="border border-sage-300 text-crate-800/70 rounded-full px-4 py-2.5 text-sm font-medium hover:bg-sage-50 active:scale-[0.98] disabled:opacity-40 disabled:hover:bg-transparent transition-all duration-150"
+          >
+            Clear All
+          </button>
           <button
             onClick={handleSubmit}
             disabled={submitting || lineCount === 0}

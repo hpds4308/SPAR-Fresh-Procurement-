@@ -3,10 +3,13 @@ DB-backed tests for pricing_service — supplier price submission, admin
 adjustment, send/unsend, and supplier isolation. Covers H-4's "Supplier
 Pricing" category.
 """
+from datetime import date, timedelta
+
 import pytest
 from pydantic import ValidationError
 
 from app.core.errors import ValidationFailedError, PermissionDeniedError
+from app.models.pricing import SupplierPrice
 from app.models.system import SystemSetting
 from app.schemas.pricing import PriceSubmitRequest, PriceEntry
 from app.services import pricing_service
@@ -143,3 +146,85 @@ def test_admin_adjust_send_unsend_price_flow(db_session, supplier_ctx, admin_use
 
     unsent = pricing_service.unsend_adjusted_price(db_session, admin_user, price_id)
     assert unsent.sent_to_supplier_at is None
+
+
+# ---- Latest-previous-price fallback (Submit Prices auto-fill on a new
+# delivery date) — get_last_prices/list_my_prices are the two reads the
+# frontend combines to decide what to pre-fill; submit_prices always
+# targets "today + 2" via get_price_window, so rows for other dates are
+# inserted directly here to simulate prior days' submissions. ----
+
+
+def _add_price(db_session, supplier_user, product, delivery_date, price):
+    row = SupplierPrice(
+        supplier_id=supplier_user.supplier_id,
+        product_id=product.id,
+        delivery_date=delivery_date,
+        price=price,
+        unit_code="KG",
+        submitted_by=supplier_user.id,
+    )
+    db_session.add(row)
+    db_session.commit()
+    return row
+
+
+def test_last_price_falls_back_to_yesterday_when_current_date_has_none(db_session, supplier_ctx):
+    supplier_user, product = supplier_ctx
+    today = date(2026, 6, 20)
+    yesterday = today - timedelta(days=1)
+    _add_price(db_session, supplier_user, product, yesterday, 320)
+
+    assert pricing_service.list_my_prices(db_session, supplier_user, today) == []
+    last = pricing_service.get_last_prices(db_session, supplier_user)
+    assert len(last) == 1
+    assert float(last[0].price) == 320.0
+    assert last[0].delivery_date == yesterday
+
+
+def test_last_price_skips_gaps_to_most_recent_older_submission(db_session, supplier_ctx):
+    supplier_user, product = supplier_ctx
+    older = date(2026, 6, 10)
+    newer = date(2026, 6, 18)
+    _add_price(db_session, supplier_user, product, older, 200)
+    _add_price(db_session, supplier_user, product, newer, 260)
+
+    last = pricing_service.get_last_prices(db_session, supplier_user)
+    assert len(last) == 1
+    assert float(last[0].price) == 260.0
+    assert last[0].delivery_date == newer
+
+
+def test_current_date_submission_takes_priority_over_last_price(db_session, supplier_ctx):
+    supplier_user, product = supplier_ctx
+    previous = date(2026, 6, 18)
+    current = date(2026, 6, 20)
+    _add_price(db_session, supplier_user, product, previous, 200)
+    _add_price(db_session, supplier_user, product, current, 999)
+
+    mine_current = pricing_service.list_my_prices(db_session, supplier_user, current)
+    assert len(mine_current) == 1
+    assert float(mine_current[0].price) == 999.0
+
+
+def test_no_prior_submission_gives_no_fallback(db_session, supplier_ctx):
+    supplier_user, _product = supplier_ctx
+    assert pricing_service.get_last_prices(db_session, supplier_user) == []
+
+
+def test_last_price_fallback_respects_supplier_isolation(
+    db_session, make_supplier, make_user, make_product, open_price_window
+):
+    product = make_product()
+    supplier_a = make_supplier()
+    user_a = make_user(role="SUPPLIER", supplier=supplier_a)
+    supplier_b = make_supplier()
+    user_b = make_user(role="SUPPLIER", supplier=supplier_b)
+
+    _add_price(db_session, user_a, product, date(2026, 6, 10), 111)
+    _add_price(db_session, user_b, product, date(2026, 6, 10), 222)
+
+    last_a = pricing_service.get_last_prices(db_session, user_a)
+    last_b = pricing_service.get_last_prices(db_session, user_b)
+    assert len(last_a) == 1 and float(last_a[0].price) == 111.0
+    assert len(last_b) == 1 and float(last_b[0].price) == 222.0
