@@ -30,9 +30,9 @@ export default function Sidebar<T extends string>({
     >
       <div className={`flex items-center justify-center h-16 shrink-0 border-b border-sage-100 ${collapsed ? "px-2" : "px-4"}`}>
         <img
-          src="/images/spar-logo.svg"
+          src={collapsed ? "/images/spar-icon.svg" : "/images/spar-logo.svg"}
           alt="SPAR"
-          className={`w-auto object-contain ${collapsed ? "h-9" : "h-10"}`}
+          className={`w-auto object-contain ${collapsed ? "h-8" : "h-7"}`}
         />
       </div>
 

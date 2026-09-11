@@ -25,7 +25,7 @@ export default function MobileNavDrawer<T extends string>({
           <img
             src="/images/spar-logo.svg"
             alt="SPAR"
-            className="h-10 w-auto object-contain"
+            className="h-8 w-auto object-contain"
           />
         </div>
         <nav className="flex-1 py-3 px-2 space-y-0.5 overflow-y-auto">
