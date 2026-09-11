@@ -37,7 +37,7 @@ export default function Header({
   }
 
   return (
-    <header className="sticky top-0 z-30 bg-white/90 backdrop-blur border-b border-sage-200">
+    <header className="sticky top-0 z-30 bg-red-50/90 backdrop-blur border-b border-sage-200">
       <div className="px-4 md:px-6 py-3.5 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3 min-w-0">
           <button
