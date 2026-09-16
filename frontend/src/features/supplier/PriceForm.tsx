@@ -9,11 +9,31 @@ function formatDate(iso: string): string {
   return d.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
 }
 
+// Only some products have a real photo on file (named by product code);
+// most don't. Nothing is shown by default — hovering the item name pops
+// up the photo, only for products a preload check confirmed actually has
+// one, so hovering an item with no photo does nothing rather than
+// showing an empty or broken box.
+function productImageUrl(productCode: string): string {
+  return `/images/products/${productCode}.png`;
+}
+
+const PREVIEW_SIZE = 180;
+
 export default function PriceForm({ onSubmitted }: { onSubmitted: () => void }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [window_, setWindow] = useState<PriceWindow | null>(null);
   const [prices, setPrices] = useState<Record<number, string>>({});
   const [lastPrices, setLastPrices] = useState<Record<number, LastPrice>>({});
+  // Product IDs a real photo was found for, discovered by silently
+  // preloading every product's image once products are known (below) —
+  // this decides whether hovering an item's name can pop anything up at
+  // all, rather than trying and failing on every hover.
+  const [hasImage, setHasImage] = useState<Set<number>>(new Set());
+  // The single floating preview, positioned in viewport coordinates
+  // (not relative to the scrolling list) so it's never clipped by the
+  // list's own overflow — see showPreview/hidePreview below.
+  const [preview, setPreview] = useState<{ productCode: string; top: number; left: number } | null>(null);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState<string>("ALL");
   const [loading, setLoading] = useState(true);
@@ -70,6 +90,62 @@ export default function PriceForm({ onSubmitted }: { onSubmitted: () => void }) 
       cancelled = true;
     };
   }, []);
+
+  // Silently probes every product's photo once, off-screen — populates
+  // hasImage per product as each check resolves, so the hover preview
+  // only ever offers to pop up for an item that genuinely has one.
+  useEffect(() => {
+    if (products.length === 0) return;
+    let cancelled = false;
+    for (const p of products) {
+      const img = new Image();
+      img.onload = () => {
+        if (!cancelled) setHasImage((prev) => (prev.has(p.id) ? prev : new Set(prev).add(p.id)));
+      };
+      img.src = productImageUrl(p.product_code);
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [products]);
+
+  const productCodeById = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const p of products) m.set(p.id, p.product_code);
+    return m;
+  }, [products]);
+
+  function showPreview(productId: number, target: HTMLElement) {
+    const productCode = productCodeById.get(productId);
+    if (!productCode) return;
+    const rect = target.getBoundingClientRect();
+    // Prefer just above the name; if that would run off the top of the
+    // viewport (an item near the top of the scrolled list), show it just
+    // below instead.
+    const top = rect.top - PREVIEW_SIZE - 10 >= 8 ? rect.top - PREVIEW_SIZE - 10 : rect.bottom + 10;
+    setPreview({ productCode, top, left: rect.left });
+  }
+
+  function hidePreview() {
+    setPreview(null);
+  }
+
+  // Fixed positioning (viewport coordinates, from getBoundingClientRect)
+  // rather than absolute — so the popup is never clipped by the product
+  // list's own scroll container, wherever the hovered row currently sits.
+  const previewPopup = preview && (
+    <div
+      className="fixed z-50 pointer-events-none rounded-xl border border-sage-200 bg-white p-1.5 shadow-xl"
+      style={{ top: preview.top, left: preview.left }}
+    >
+      <img
+        src={productImageUrl(preview.productCode)}
+        alt=""
+        className="rounded-lg object-contain"
+        style={{ width: PREVIEW_SIZE, height: PREVIEW_SIZE }}
+      />
+    </div>
+  );
 
   const categories = useMemo(() => {
     const set = new Set(products.map((p) => p.category_name));
@@ -165,6 +241,7 @@ export default function PriceForm({ onSubmitted }: { onSubmitted: () => void }) 
 
   return (
     <div className="bg-white rounded-2xl shadow-[0_10px_30px_-12px_rgba(21,56,38,0.15)] border border-sage-100 overflow-hidden">
+      {previewPopup}
       <div className="p-6 border-b border-sage-100">
         {window_ && (
           <p className="text-sm text-crate-800/70">
@@ -203,7 +280,13 @@ export default function PriceForm({ onSubmitted }: { onSubmitted: () => void }) 
           return (
             <div key={p.id} className="flex items-center justify-between px-6 py-3 hover:bg-sage-50/50 transition-colors duration-100">
               <div className="min-w-0">
-                <p className="text-sm text-crate-950 truncate">{p.description}</p>
+                <p
+                  className={`text-sm text-crate-950 truncate w-fit ${hasImage.has(p.id) ? "cursor-pointer" : ""}`}
+                  onMouseEnter={(e) => hasImage.has(p.id) && showPreview(p.id, e.currentTarget)}
+                  onMouseLeave={hidePreview}
+                >
+                  {p.description}
+                </p>
                 <div className="flex items-center flex-wrap gap-1.5 mt-0.5">
                   <span className="text-xs text-crate-800/40">
                     {p.product_code}
