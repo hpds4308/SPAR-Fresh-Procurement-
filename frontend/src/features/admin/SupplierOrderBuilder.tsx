@@ -298,15 +298,21 @@ export default function SupplierOrderBuilder() {
       .map(([key]) => key);
   }, [qty]);
 
+  // Agreed price per cell wins when set (it's what was actually negotiated);
+  // otherwise falls back to this supplier's current listed price for the
+  // item (the same value shown in the Supplier Price column) so the total
+  // reflects the whole order, not just cells Admin happened to price by hand.
   const grandTotal = useMemo(() => {
     let total = 0;
     for (const key of filledCells) {
+      const productId = Number(key.split(":")[0]);
       const q = parseFloat(qty[key]) || 0;
-      const price = parseFloat(extra[key]?.agreed_price ?? "") || 0;
-      if (extra[key]?.agreed_price) total += q * price;
+      const agreedRaw = extra[key]?.agreed_price?.trim();
+      const price = agreedRaw ? parseFloat(agreedRaw) || 0 : supplierPrices[productId]?.price ?? 0;
+      total += q * price;
     }
     return total;
-  }, [filledCells, qty, extra]);
+  }, [filledCells, qty, extra, supplierPrices]);
 
   async function handleSave() {
     if (!supplierId) {
@@ -615,9 +621,14 @@ export default function SupplierOrderBuilder() {
         )}
 
         {filledCells.length > 0 && (
-          <div className="flex justify-end mt-3 text-sm text-crate-800/70">
-            Estimated total (priced lines only):{" "}
-            <span className="font-semibold text-crate-950 ml-1.5">Rs. {grandTotal.toFixed(2)}</span>
+          <div className="flex flex-col items-end mt-3 text-sm text-crate-800/70">
+            <div>
+              Estimated total:{" "}
+              <span className="font-semibold text-crate-950 ml-1.5">Rs. {grandTotal.toFixed(2)}</span>
+            </div>
+            <p className="text-[10px] text-crate-800/35 mt-0.5">
+              Uses each line's agreed price where set, otherwise this supplier's current listed price.
+            </p>
           </div>
         )}
 
