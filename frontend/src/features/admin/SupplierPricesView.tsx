@@ -185,14 +185,13 @@ export default function SupplierPricesView() {
     return list.sort(compareProductDisplayOrder);
   }, [rows, q]);
 
-  // The winning (lowest-price) supplier cell per product, for the summary
+  // The winning (lowest-price) supplier cell(s) per product, for the summary
   // column — reuses the is_lowest_for_product flag the backend already
-  // computes rather than re-deriving it here.
-  function bestCellFor(p: { cells: Map<number, AdminSupplierPrice> }): AdminSupplierPrice | undefined {
-    for (const cell of p.cells.values()) {
-      if (cell.is_lowest_for_product) return cell;
-    }
-    return undefined;
+  // computes rather than re-deriving it here. The backend flags every
+  // supplier tied at the lowest price, so this can return more than one
+  // cell — all of them share the same price.
+  function bestCellsFor(p: { cells: Map<number, AdminSupplierPrice> }): AdminSupplierPrice[] {
+    return Array.from(p.cells.values()).filter((cell) => cell.is_lowest_for_product);
   }
 
   // Same idea, for the next distinct price tier below the lowest — see
@@ -458,15 +457,17 @@ export default function SupplierPricesView() {
                     className="sticky z-10 bg-yellow-100 px-3 py-1.5 border-l border-sage-100"
                   >
                     {(() => {
-                      const best = bestCellFor(p);
-                      if (!best) return <span className="text-sm text-crate-800/20">—</span>;
+                      const bestCells = bestCellsFor(p);
+                      if (bestCells.length === 0) return <span className="text-sm text-crate-800/20">—</span>;
+                      const best = bestCells[0];
                       const keells = referenceDrafts[p.product_id] ? Number(referenceDrafts[p.product_id]) : null;
                       const diff = keells !== null ? best.price - keells : null;
                       const secondBest = secondLowestCellFor(p);
+                      const supplierNames = bestCells.map((c) => c.supplier_name).join(", ");
                       return (
                         <div className="flex flex-col items-center gap-0.5">
                           <span className="text-sm font-semibold text-crate-800">Rs. {best.price.toFixed(2)}</span>
-                          <span className="text-[10px] text-crate-800/50">{best.supplier_name}</span>
+                          <span className="text-[10px] text-crate-800/50 text-center">{supplierNames}</span>
                           {diff !== null && (
                             <span
                               className={`text-[10px] font-medium ${
