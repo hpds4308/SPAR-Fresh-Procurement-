@@ -264,6 +264,28 @@ export default function SupplierOrderBuilder() {
     });
   }
 
+  // The tick's other half: clears every branch cell for one item — its
+  // quantities, any agreed price/notes on them, and the open price/notes
+  // panel — without touching any other row.
+  function clearRowQty(productId: number) {
+    if (!matrix) return;
+    setQty((prev) => {
+      const next = { ...prev };
+      for (const b of matrix.branches) delete next[cellKey(productId, b.branch_id)];
+      return next;
+    });
+    setExtra((prev) => {
+      const next = { ...prev };
+      for (const b of matrix.branches) delete next[cellKey(productId, b.branch_id)];
+      return next;
+    });
+    setShowPricesFor((prev) => {
+      const next = new Set(prev);
+      for (const b of matrix.branches) next.delete(cellKey(productId, b.branch_id));
+      return next;
+    });
+  }
+
   // Turns a total-only Product Assignment ("200kg avocado to this
   // supplier") into a starting set of branch-level lines, since
   // SupplierAssignment itself carries no branch breakdown. Splits each
@@ -513,18 +535,11 @@ export default function SupplierOrderBuilder() {
                   const totalDemand = Object.values(demand).reduce((sum, v) => sum + (v ?? 0), 0);
                   const alreadyAssigned = assignedElsewhere[productId] ?? 0;
                   const requiredQty = Math.max(0, totalDemand - alreadyAssigned);
-                  // Tick shows filled (green) once every branch cell that still
-                  // needs quantity for this item has one — matches what
-                  // fillRowFromDemand would fill in, so it stops looking
-                  // "unfilled" the moment there's nothing left for it to do.
-                  const rowFilled =
-                    requiredQty > 0 &&
-                    branches.every((b) => {
-                      const key = cellKey(productId, b.branch_id);
-                      const branchOrdered = demand[String(b.branch_id)] ?? 0;
-                      const branchRemaining = Math.max(0, branchOrdered - (assignedElsewhereByBranch[key] ?? 0));
-                      return branchRemaining === 0 || qty[key]?.trim();
-                    });
+                  // Tick doubles as a checkbox: empty row → click fills it from
+                  // demand; anything typed in the row → tick shows checked and
+                  // click clears the whole row instead, so a second click
+                  // undoes the first.
+                  const rowFilled = branches.some((b) => qty[cellKey(productId, b.branch_id)]?.trim());
                   return (
                     <tr key={productId}>
                       <td className="pr-4 py-2 text-crate-950 whitespace-nowrap sticky left-0 bg-white">
@@ -534,9 +549,13 @@ export default function SupplierOrderBuilder() {
                       <td className="px-2 py-2 text-center border-l border-sage-100">
                         <button
                           type="button"
-                          onClick={() => fillRowFromDemand(productId)}
-                          disabled={requiredQty === 0}
-                          title="Fill this item's remaining required quantity into each branch column below"
+                          onClick={() => (rowFilled ? clearRowQty(productId) : fillRowFromDemand(productId))}
+                          disabled={requiredQty === 0 && !rowFilled}
+                          title={
+                            rowFilled
+                              ? "Clear this item's quantities across all branches"
+                              : "Fill this item's remaining required quantity into each branch column below"
+                          }
                           className={`w-5 h-5 rounded-md border flex items-center justify-center mx-auto transition-colors duration-150 ${
                             rowFilled
                               ? "bg-crate-700 border-crate-700 text-white"
