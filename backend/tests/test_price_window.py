@@ -47,6 +47,29 @@ def test_closed_at_and_after_cutoff():
     assert window2.is_open is False
 
 
+def test_closed_on_a_non_submission_day():
+    """Suppliers only submit on Monday/Wednesday/Friday — 2026-06-16 is a Tuesday."""
+    db = FakeDB()
+    cutoff = _cutoff()
+    well_before_cutoff = datetime.combine(
+        datetime(2026, 6, 16).date(), cutoff, tzinfo=BUSINESS_TZ
+    ) - timedelta(hours=1)
+    window = pricing_service.get_price_window(db, now=well_before_cutoff)
+    assert window.is_open is False
+
+
+def test_open_on_each_submission_day_before_cutoff():
+    """2026-06-15/17/19 are Monday/Wednesday/Friday."""
+    db = FakeDB()
+    cutoff = _cutoff()
+    for day in (15, 17, 19):
+        just_before = datetime.combine(
+            datetime(2026, 6, day).date(), cutoff, tzinfo=BUSINESS_TZ
+        ) - timedelta(minutes=1)
+        window = pricing_service.get_price_window(db, now=just_before)
+        assert window.is_open is True
+
+
 def test_pricing_and_order_delivery_dates_line_up():
     """
     Branch orders and supplier prices submitted on the same day both

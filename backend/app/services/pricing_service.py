@@ -31,6 +31,11 @@ from app.services import settings_service
 
 BUSINESS_TZ = ZoneInfo("Asia/Colombo")
 
+# Business rule (as agreed with the client): suppliers only submit prices on
+# Monday, Wednesday and Friday — date.weekday() has Monday=0 .. Sunday=6.
+SUBMISSION_WEEKDAYS = {0, 2, 4}
+SUBMISSION_DAYS_LABEL = "Monday, Wednesday and Friday"
+
 
 def _parse_cutoff(cutoff_str: str) -> time:
     hh, mm = cutoff_str.split(":")
@@ -57,7 +62,7 @@ def get_price_window(db: Session, now: datetime | None = None) -> PriceWindowOut
     """Delivery date is always 2 days after the submission date — gives suppliers lead time."""
     now = now.astimezone(BUSINESS_TZ) if now else datetime.now(BUSINESS_TZ)
     cutoff_str = settings_service.get_setting(db, settings_service.SUPPLIER_PRICE_DEADLINE)
-    is_open = now.time() < _parse_cutoff(cutoff_str)
+    is_open = now.weekday() in SUBMISSION_WEEKDAYS and now.time() < _parse_cutoff(cutoff_str)
     delivery_date = now.date() + timedelta(days=2)
     return PriceWindowOut(
         is_open=is_open,
@@ -75,7 +80,8 @@ def submit_prices(db: Session, supplier_user: User, payload: PriceSubmitRequest)
     if not window.is_open:
         raise ValidationFailedError(
             f"Price submission for {window.delivery_date.isoformat()} is closed. "
-            f"Daily cutoff is {window.cutoff_time}."
+            f"Suppliers can submit prices on {SUBMISSION_DAYS_LABEL} only, "
+            f"before the daily cutoff of {window.cutoff_time}."
         )
 
     product_ids = [p.product_id for p in payload.prices]
