@@ -245,6 +245,25 @@ export default function SupplierOrderBuilder() {
     });
   }
 
+  // Same fill as "Fill quantities from branch orders" above, but scoped to
+  // one row — the per-item tick next to it. Same non-destructive rule:
+  // never overwrites a branch cell that already has a quantity typed in.
+  function fillRowFromDemand(productId: number) {
+    if (!matrix) return;
+    const demand = demandByProduct.get(productId) ?? {};
+    setQty((prev) => {
+      const next = { ...prev };
+      for (const b of matrix.branches) {
+        const key = cellKey(productId, b.branch_id);
+        const ordered = demand[String(b.branch_id)] ?? 0;
+        const givenElsewhere = assignedElsewhereByBranch[key] ?? 0;
+        const d = Math.max(0, ordered - givenElsewhere);
+        if (d && !next[key]) next[key] = String(d);
+      }
+      return next;
+    });
+  }
+
   // Turns a total-only Product Assignment ("200kg avocado to this
   // supplier") into a starting set of branch-level lines, since
   // SupplierAssignment itself carries no branch breakdown. Splits each
@@ -464,6 +483,9 @@ export default function SupplierOrderBuilder() {
               <thead>
                 <tr className="text-crate-800/40 text-left text-xs uppercase tracking-wide border-b border-sage-100">
                   <th className="pr-4 py-2 font-medium sticky left-0 bg-white">Item</th>
+                  <th className="px-2 py-2 font-medium text-center border-l border-sage-100 normal-case tracking-normal whitespace-nowrap">
+                    Fill
+                  </th>
                   <th className="px-3 py-2 font-semibold text-crate-800 text-center border-l border-sage-100 normal-case tracking-normal whitespace-nowrap">
                     Supplier Price
                   </th>
@@ -491,11 +513,40 @@ export default function SupplierOrderBuilder() {
                   const totalDemand = Object.values(demand).reduce((sum, v) => sum + (v ?? 0), 0);
                   const alreadyAssigned = assignedElsewhere[productId] ?? 0;
                   const requiredQty = Math.max(0, totalDemand - alreadyAssigned);
+                  // Tick shows filled (green) once every branch cell that still
+                  // needs quantity for this item has one — matches what
+                  // fillRowFromDemand would fill in, so it stops looking
+                  // "unfilled" the moment there's nothing left for it to do.
+                  const rowFilled =
+                    requiredQty > 0 &&
+                    branches.every((b) => {
+                      const key = cellKey(productId, b.branch_id);
+                      const branchOrdered = demand[String(b.branch_id)] ?? 0;
+                      const branchRemaining = Math.max(0, branchOrdered - (assignedElsewhereByBranch[key] ?? 0));
+                      return branchRemaining === 0 || qty[key]?.trim();
+                    });
                   return (
                     <tr key={productId}>
                       <td className="pr-4 py-2 text-crate-950 whitespace-nowrap sticky left-0 bg-white">
                         {p.description}
                         <span className="text-crate-800/35 text-xs ml-1.5">{p.product_code}</span>
+                      </td>
+                      <td className="px-2 py-2 text-center border-l border-sage-100">
+                        <button
+                          type="button"
+                          onClick={() => fillRowFromDemand(productId)}
+                          disabled={requiredQty === 0}
+                          title="Fill this item's remaining required quantity into each branch column below"
+                          className={`w-5 h-5 rounded-md border flex items-center justify-center mx-auto transition-colors duration-150 ${
+                            rowFilled
+                              ? "bg-crate-700 border-crate-700 text-white"
+                              : "border-sage-300 text-transparent hover:border-crate-700 hover:bg-sage-50"
+                          } disabled:opacity-25 disabled:cursor-default`}
+                        >
+                          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M1 5l3 3 5-6" />
+                          </svg>
+                        </button>
                       </td>
                       <td className="px-3 py-2 text-center border-l border-sage-100 whitespace-nowrap">
                         {(() => {
