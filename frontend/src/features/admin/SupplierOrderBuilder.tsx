@@ -44,6 +44,15 @@ export default function SupplierOrderBuilder() {
   // supplier's order; admin can add more rows via the search box.
   const [rowProductIds, setRowProductIds] = useState<number[]>([]);
   const [addSearch, setAddSearch] = useState("");
+  // When on, hides every row this supplier hasn't priced at all — Admin
+  // asked to see only items the supplier has actually quoted, not every
+  // item some branch happened to order. Defaults on. `keepUnpriced` is the
+  // escape hatch: a product already saved on this order, already committed
+  // via Product Assignment, or manually added via "+ Add item" stays
+  // visible even without a price, since each of those was a deliberate
+  // choice rather than incidental branch demand.
+  const [onlyPriced, setOnlyPriced] = useState(true);
+  const [keepUnpriced, setKeepUnpriced] = useState<Set<number>>(new Set());
 
   // Grid quantities, keyed by "productId:branchId".
   const [qty, setQty] = useState<Record<string, string>>({});
@@ -98,6 +107,7 @@ export default function SupplierOrderBuilder() {
       setQty({});
       setExtra({});
       setRowProductIds([]);
+      setKeepUnpriced(new Set());
       setAssignedElsewhere({});
       setAssignedElsewhereByBranch({});
       setSupplierPrices({});
@@ -146,6 +156,7 @@ export default function SupplierOrderBuilder() {
         setQty(nextQty);
         setExtra(nextExtra);
         setRowProductIds(merged);
+        setKeepUnpriced(new Set([...savedProductIds, ...Object.keys(assignedMap).map(Number)]));
         setAssignedElsewhere(assigned);
         setAssignedElsewhereByBranch(assignedByBranch);
         setAssignedToSupplier(assignedMap);
@@ -182,8 +193,9 @@ export default function SupplierOrderBuilder() {
     return rowProductIds
       .map((id) => productById.get(id))
       .filter((p): p is Product => !!p)
+      .filter((p) => !onlyPriced || !!supplierPrices[p.id] || keepUnpriced.has(p.id))
       .sort(compareProductDisplayOrder);
-  }, [rowProductIds, productById]);
+  }, [rowProductIds, productById, onlyPriced, supplierPrices, keepUnpriced]);
 
   const searchResults = useMemo(() => {
     const q = addSearch.trim().toLowerCase();
@@ -199,6 +211,7 @@ export default function SupplierOrderBuilder() {
 
   function addRow(productId: number) {
     setRowProductIds((prev) => (prev.includes(productId) ? prev : [...prev, productId]));
+    setKeepUnpriced((prev) => (prev.has(productId) ? prev : new Set(prev).add(productId)));
     setAddSearch("");
   }
 
@@ -462,6 +475,17 @@ export default function SupplierOrderBuilder() {
       <div className="bg-white rounded-2xl shadow-[0_10px_30px_-12px_rgba(21,56,38,0.15)] border border-sage-100 p-5">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
           <p className="text-xs font-semibold text-crate-800/50 uppercase tracking-wide">Order lines</p>
+          <div className="flex items-center gap-3 flex-wrap">
+            <label className="flex items-center gap-1.5 text-xs text-crate-800/60 select-none">
+              <input
+                type="checkbox"
+                checked={onlyPriced}
+                onChange={(e) => setOnlyPriced(e.target.checked)}
+                disabled={!supplierId}
+                className="accent-crate-700 disabled:opacity-40"
+              />
+              Only items this supplier has priced
+            </label>
           <div className="relative">
             <input
               type="text"
@@ -486,6 +510,7 @@ export default function SupplierOrderBuilder() {
               </div>
             )}
           </div>
+          </div>
         </div>
 
         {!supplierId ? (
@@ -494,6 +519,12 @@ export default function SupplierOrderBuilder() {
           <SkeletonTable rows={5} columns={4} />
         ) : branches.length === 0 ? (
           <p className="text-sm text-crate-800/40 text-center py-6">No active branches to order for.</p>
+        ) : rows.length === 0 && onlyPriced && rowProductIds.length > 0 ? (
+          <p className="text-sm text-crate-800/40 text-center py-6">
+            This supplier hasn't priced any of the {rowProductIds.length} item
+            {rowProductIds.length === 1 ? "" : "s"} on this order yet. Uncheck "Only items this supplier has
+            priced" above to see them anyway, or use "+ Add item".
+          </p>
         ) : rows.length === 0 ? (
           <p className="text-sm text-crate-800/40 text-center py-6">
             No items yet. Use "+ Add item" above, or "Fill quantities from branch orders" to start from what
