@@ -57,7 +57,7 @@ export default function LoginPage() {
           style={{ transform: "scale(0.9)", transformOrigin: "center" }}
         >
           <div className="flex justify-center mb-3">
-            <img src="/images/spar-logo.svg" alt="SPAR" className="w-56 max-w-full h-auto" />
+            <img src="/images/spar-fresh-procurement-logo.png" alt="SPAR Fresh Procurement" className="h-[180px] w-auto" />
           </div>
 
           <h1 className="font-display font-extrabold text-2xl md:text-[1.7rem] text-center text-crate-950 leading-tight">
