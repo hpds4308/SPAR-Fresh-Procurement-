@@ -28,7 +28,7 @@ export default function Sidebar<T extends string>({
         collapsed ? "w-16" : "w-56"
       }`}
     >
-      <div className={`flex items-center justify-center h-16 shrink-0 bg-white border-b border-sage-200 ${collapsed ? "px-2" : "px-4"}`}>
+      <div className={`flex items-center justify-center h-16 shrink-0 border-b border-sage-200 ${collapsed ? "px-2" : "px-4"}`}>
         <img
           src={collapsed ? "/images/spar-icon.svg" : "/images/spar-logo.svg"}
           alt="SPAR"
