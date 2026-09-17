@@ -85,7 +85,7 @@ export default function PriceHistory({ refreshKey }: { refreshKey: number }) {
                   <span className="inline-flex items-center gap-1.5">
                     <span className="font-semibold text-crate-950">Rs. {p.adjusted_price.toFixed(2)}</span>
                     <span className="text-[10px] uppercase tracking-wide bg-crate-700 text-white rounded-full px-2 py-0.5 font-semibold">
-                      From Admin
+                      SPAR Fresh Procurement
                     </span>
                   </span>
                 ) : (
