@@ -352,6 +352,21 @@ export default function SupplierOrderBuilder() {
       .map(([key]) => key);
   }, [qty]);
 
+  // Cells with a quantity for a branch that never actually ordered this
+  // item. This grid only feeds the supplier's own order (SupplierOrderItem)
+  // — a separate ledger from the branch's own Order/OrderLine — so saving
+  // one of these never appears on that branch's "My Orders". Surfaced as a
+  // warning, not a block: sending a branch stock it didn't ask for is a
+  // legitimate call for Admin to make, it just needs the Order Matrix too
+  // if the branch should actually see it.
+  const offOrderCells = useMemo(() => {
+    return filledCells.filter((key) => {
+      const [productIdStr, branchIdStr] = key.split(":");
+      const demand = demandByProduct.get(Number(productIdStr)) ?? {};
+      return !((demand[branchIdStr] ?? 0) > 0);
+    });
+  }, [filledCells, demandByProduct]);
+
   // Agreed price per cell wins when set (it's what was actually negotiated);
   // otherwise falls back to this supplier's current listed price for the
   // item (the same value shown in the Supplier Price column) so the total
@@ -657,6 +672,14 @@ export default function SupplierOrderBuilder() {
                                 onChange={(e) => setCellQty(productId, b.branch_id, e.target.value)}
                                 className="w-16 border border-sage-300 bg-white rounded-lg px-1.5 py-1 text-center text-sm focus:outline-none focus:ring-2 focus:ring-crate-700/30 focus:border-crate-700 transition-colors duration-150"
                               />
+                              {hasQty && !hadDemand && (
+                                <span
+                                  className="text-[9px] text-mango-700 leading-tight text-center"
+                                  title="This branch didn't order this item — it won't show on their My Orders unless it's also added via Admin → Order Matrix."
+                                >
+                                  not on their order
+                                </span>
+                              )}
                               {hasQty && (
                                 <button
                                   onClick={() =>
@@ -731,6 +754,15 @@ export default function SupplierOrderBuilder() {
               Uses each line's agreed price where set, otherwise this supplier's current listed price.
             </p>
           </div>
+        )}
+
+        {offOrderCells.length > 0 && (
+          <p className="text-xs text-mango-700 bg-mango-500/10 border border-mango-500/25 rounded-lg px-3 py-2 mt-3">
+            {offOrderCells.length} line{offOrderCells.length === 1 ? "" : "s"} above{" "}
+            {offOrderCells.length === 1 ? "isn't" : "aren't"} on that branch's own order — saving here sends it
+            to the supplier, but the branch won't see it on their My Orders. If they need to see it, also add it
+            via Admin → Order Matrix.
+          </p>
         )}
 
         {error && <p className="text-tomato-600 text-sm mt-3">{error}</p>}
