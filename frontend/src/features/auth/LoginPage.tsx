@@ -53,7 +53,7 @@ export default function LoginPage() {
         {/* card, scaled down 10% as a unit */}
         <form
           onSubmit={handleSubmit}
-          className="relative z-0 bg-white rounded-[2rem] shadow-[0_30px_60px_-15px_rgba(21,56,38,0.25)] overflow-hidden pb-6 px-8 md:px-10"
+          className="relative z-0 bg-sage-50 rounded-[2rem] shadow-[0_30px_60px_-15px_rgba(21,56,38,0.25)] overflow-hidden pb-6 px-8 md:px-10"
           style={{ transform: "scale(0.9)", transformOrigin: "center" }}
         >
           <div className="-mx-8 md:-mx-10 mb-3">
