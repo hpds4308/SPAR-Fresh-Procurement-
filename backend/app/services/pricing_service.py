@@ -105,6 +105,20 @@ def submit_prices(db: Session, supplier_user: User, payload: PriceSubmitRequest)
         .all()
     }
 
+    # Each submission is the supplier's complete price list for this delivery
+    # date, not an incremental add — so any previously-submitted product left
+    # out of this payload has been withdrawn and its stale quote must go too,
+    # otherwise Admin keeps seeing a "live" price the supplier no longer offers.
+    cleared_count = (
+        db.query(SupplierPrice)
+        .filter(
+            SupplierPrice.supplier_id == supplier_user.supplier_id,
+            SupplierPrice.delivery_date == window.delivery_date,
+            SupplierPrice.product_id.notin_(product_ids),
+        )
+        .delete(synchronize_session=False)
+    )
+
     saved: list[SupplierPrice] = []
     for entry in payload.prices:
         product = products[entry.product_id]
@@ -139,6 +153,9 @@ def submit_prices(db: Session, supplier_user: User, payload: PriceSubmitRequest)
     for row in saved:
         db.refresh(row)
 
+    description = f"{len(payload.prices)} price(s) submitted for delivery {window.delivery_date.isoformat()}."
+    if cleared_count:
+        description += f" {cleared_count} previously-submitted price(s) not in this list were cleared."
     write_audit_log(
         db,
         user_id=supplier_user.id,
@@ -146,7 +163,7 @@ def submit_prices(db: Session, supplier_user: User, payload: PriceSubmitRequest)
         action="PRICES_SUBMITTED",
         entity_type="supplier_price",
         entity_id=supplier_user.supplier_id,
-        description=f"{len(payload.prices)} price(s) submitted for delivery {window.delivery_date.isoformat()}.",
+        description=description,
     )
     return saved
 

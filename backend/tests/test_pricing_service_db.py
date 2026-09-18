@@ -62,6 +62,23 @@ def test_resubmit_updates_not_duplicates(db_session, supplier_ctx):
     assert float(rows[0].price) == 175.0
 
 
+def test_resubmit_clears_prices_dropped_from_new_submission(db_session, supplier_ctx, make_product):
+    supplier_user, product_a = supplier_ctx
+    product_b = make_product()
+
+    pricing_service.submit_prices(
+        db_session,
+        supplier_user,
+        PriceSubmitRequest(prices=[PriceEntry(product_id=product_a.id, price=150), PriceEntry(product_id=product_b.id, price=200)]),
+    )
+    pricing_service.submit_prices(
+        db_session, supplier_user, PriceSubmitRequest(prices=[PriceEntry(product_id=product_b.id, price=210)])
+    )
+
+    rows = db_session.query(SupplierPrice).filter(SupplierPrice.supplier_id == supplier_user.supplier_id).all()
+    assert {r.product_id: float(r.price) for r in rows} == {product_b.id: 210.0}
+
+
 def test_missing_price_rejected_at_schema_level():
     with pytest.raises(ValidationError):
         PriceSubmitRequest(prices=[])
