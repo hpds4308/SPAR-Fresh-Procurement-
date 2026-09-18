@@ -186,7 +186,7 @@ export default function OrderHistory({ refreshKey }: { refreshKey: number }) {
           >
             <div>
               <p className="text-sm text-crate-950 group-hover:text-crate-800">
-                Order date {o.order_date} &middot; {o.line_count} item{o.line_count === 1 ? "" : "s"}
+                Delivery date {o.delivery_date} &middot; {o.line_count} item{o.line_count === 1 ? "" : "s"}
               </p>
               {o.has_admin_added_lines && (
                 <p className="text-[11px] text-[#8A5A0D] font-medium mt-0.5">
