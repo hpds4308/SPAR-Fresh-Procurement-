@@ -64,7 +64,7 @@ export default function SupplierPricesView() {
   useEffect(() => {
     fetchSuppliers().then(setSuppliers).catch(() => {});
     fetchPriceWindow()
-      .then((w) => setDeliveryDate(w.delivery_date))
+      .then((w) => setDeliveryDate(w.current_cycle_delivery_date))
       .catch(() => {});
     fetchLastReferencePrices()
       .then((data) => {

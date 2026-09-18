@@ -42,6 +42,31 @@ def _parse_cutoff(cutoff_str: str) -> time:
     return time(hour=int(hh), minute=int(mm))
 
 
+def _most_recent_submission_date(on_date: date) -> date:
+    """The most recent Monday/Wednesday/Friday on or before `on_date` — the
+    submission day whose prices are still the current ones to show. Walking
+    back at most 2 days always lands on a submission weekday."""
+    d = on_date
+    while d.weekday() not in SUBMISSION_WEEKDAYS:
+        d -= timedelta(days=1)
+    return d
+
+
+def _current_cycle_delivery_date(now: datetime) -> date:
+    """
+    The delivery date tied to the most recently opened submission cycle —
+    e.g. on a Tuesday this is still Monday's delivery date (Monday + 2),
+    not today + 2, because Monday's submission is the latest set of prices
+    suppliers have actually given. Unlike get_price_window's `delivery_date`
+    (always today + 2, used for the supplier's own submission window), this
+    is what Admin's browse views should default to so they land on the
+    cycle that's actually live instead of a delivery date nothing has been
+    submitted for yet.
+    """
+    submission_date = _most_recent_submission_date(now.date())
+    return submission_date + timedelta(days=2)
+
+
 def second_lowest_price(prices: list[float]) -> float | None:
     """
     The next DISTINCT price tier below the lowest of a set of supplier
@@ -69,6 +94,7 @@ def get_price_window(db: Session, now: datetime | None = None) -> PriceWindowOut
         delivery_date=delivery_date,
         cutoff_time=cutoff_str,
         server_time=now.isoformat(),
+        current_cycle_delivery_date=_current_cycle_delivery_date(now),
     )
 
 
@@ -213,11 +239,12 @@ def list_all_prices(
     """
     Admin-only view: every supplier's quoted price across the whole
     catalogue for one delivery date, so Admin can browse and compare
-    without going product-by-product. Defaults to the current price
-    window's delivery date (2 days out) when none is given.
+    without going product-by-product. Defaults to the current submission
+    cycle's delivery date (the most recent Mon/Wed/Fri submission's
+    delivery date) when none is given.
     """
     if delivery_date is None:
-        delivery_date = get_price_window(db).delivery_date
+        delivery_date = _current_cycle_delivery_date(datetime.now(BUSINESS_TZ))
 
     query = db.query(SupplierPrice).filter(SupplierPrice.delivery_date == delivery_date)
     if supplier_id:

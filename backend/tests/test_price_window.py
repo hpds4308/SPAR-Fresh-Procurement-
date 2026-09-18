@@ -70,6 +70,30 @@ def test_open_on_each_submission_day_before_cutoff():
         assert window.is_open is True
 
 
+def test_current_cycle_delivery_date_follows_latest_submission_day():
+    """
+    Admin's Supplier Prices view should default to whichever Mon/Wed/Fri
+    submission is the most recent one as of "today", not always today + 2
+    (which on a non-submission day points at a delivery date nobody has
+    submitted anything for yet). 2026-06-15/17/19/22 are Mon/Wed/Fri/Mon.
+    """
+    db = FakeDB()
+    expected_by_day = {
+        15: 17,  # Monday -> Monday's cycle -> delivery Wed 17th
+        16: 17,  # Tuesday -> still Monday's cycle -> delivery Wed 17th
+        17: 19,  # Wednesday -> Wednesday's cycle -> delivery Fri 19th
+        18: 19,  # Thursday -> still Wednesday's cycle -> delivery Fri 19th
+        19: 21,  # Friday -> Friday's cycle -> delivery Sun 21st
+        20: 21,  # Saturday -> still Friday's cycle -> delivery Sun 21st
+        21: 21,  # Sunday -> still Friday's cycle -> delivery Sun 21st
+        22: 24,  # Monday (next week) -> new Monday cycle -> delivery Wed 24th
+    }
+    for day, expected_delivery_day in expected_by_day.items():
+        now = datetime(2026, 6, day, 9, 0, tzinfo=BUSINESS_TZ)
+        window = pricing_service.get_price_window(db, now=now)
+        assert window.current_cycle_delivery_date == datetime(2026, 6, expected_delivery_day).date(), day
+
+
 def test_pricing_and_order_delivery_dates_line_up():
     """
     Branch orders and supplier prices submitted on the same day both
