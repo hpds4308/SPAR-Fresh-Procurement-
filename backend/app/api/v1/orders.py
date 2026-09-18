@@ -21,6 +21,7 @@ from app.schemas.order import (
     ExcelOrderPreviewOut,
     DeliveryConfirmRequest,
     AdminAddOrderLineRequest,
+    AdminRemoveOrderLineRequest,
 )
 from app.schemas.assignment import ProductComparisonOut, SetAssignmentsRequest
 from app.services import order_service, assignment_service
@@ -188,6 +189,24 @@ def admin_add_order_line(
         db, admin, payload.branch_id, payload.product_id, payload.delivery_date, payload.quantity
     )
     return _to_order_out(db, order)
+
+
+@router.post("/admin/lines/remove", response_model=OrderOut | None)
+def admin_remove_order_line(
+    payload: AdminRemoveOrderLineRequest,
+    admin: User = Depends(require_roles("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """
+    Undoes one line Admin previously added via /admin/lines — e.g. it was
+    added under the wrong delivery date by mistake. Only ever removes a
+    line Admin added; a branch's own submitted line is never touched.
+    Returns null if removing it also removed the (now-empty) order.
+    """
+    order = order_service.admin_remove_order_line(
+        db, admin, payload.branch_id, payload.product_id, payload.delivery_date
+    )
+    return _to_order_out(db, order) if order else None
 
 
 @router.get("/stock-in-hand", response_model=dict[int, float])

@@ -238,6 +238,9 @@ export default function OrderMatrixView() {
           unitCode={addItemTarget.unitCode}
           deliveryDate={selectedDate}
           currentQuantity={addItemTarget.currentQuantity}
+          hasExistingOrderForDate={
+            matrix?.rows.some((r) => r.quantities[String(addItemTarget.branchId)] !== undefined) ?? false
+          }
           onClose={() => setAddItemTarget(null)}
           onSaved={() => setRefreshKey((k) => k + 1)}
         />

@@ -180,6 +180,16 @@ class AdminAddOrderLineRequest(BaseModel):
         return round(v, 2)
 
 
+class AdminRemoveOrderLineRequest(BaseModel):
+    """Undoes one admin_add_order_line — e.g. it was added under the
+    wrong delivery date by mistake. Only ever removes a line Admin added
+    (added_by_admin=True); a branch's own line is never touched."""
+
+    branch_id: int
+    product_id: int
+    delivery_date: date
+
+
 class OrderDeadlineExceptionRequest(BaseModel):
     """Which order_date to grant (or revoke) the exception for — almost
     always today, but not assumed, so Admin can act on a date after the

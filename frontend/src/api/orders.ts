@@ -152,6 +152,21 @@ export function adminAddOrderLine(payload: {
   });
 }
 
+// Undoes a previous adminAddOrderLine call — e.g. it was added under the
+// wrong delivery date by mistake. Only works on a line Admin added; the
+// backend rejects it for a branch's own line. Returns null if removing it
+// also removed the (now-empty) order.
+export function adminRemoveOrderLine(payload: {
+  branch_id: number;
+  product_id: number;
+  delivery_date: string;
+}): Promise<Order | null> {
+  return apiFetch("/orders/admin/lines/remove", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function orderMatrixExportUrl(deliveryDate?: string): string {
   const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
   const qs = deliveryDate ? `?delivery_date=${deliveryDate}` : "";

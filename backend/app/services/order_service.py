@@ -604,6 +604,70 @@ def admin_add_order_line(
     return order
 
 
+def admin_remove_order_line(db: Session, admin: User, branch_id: int, product_id: int, delivery_date: date) -> Order | None:
+    """
+    Undoes one line Admin previously added via admin_add_order_line —
+    e.g. it was added under the wrong delivery date by mistake. Only ever
+    removes a line with added_by_admin=True; a branch's own submitted
+    line is never touched here, so this can't be used to silently erase
+    what a branch actually ordered. Deletes the whole order if this was
+    its only line (a bare, mistakenly-created order with nothing left in
+    it isn't worth keeping around), returning None in that case.
+    """
+    branch = db.get(Branch, branch_id)
+    if not branch:
+        raise NotFoundError("Branch not found.")
+
+    order = (
+        db.query(Order)
+        .filter(Order.branch_id == branch_id, Order.delivery_date == delivery_date)
+        .first()
+    )
+    if not order:
+        raise NotFoundError("No order found for this branch on this delivery date.")
+
+    line = (
+        db.query(OrderLine)
+        .filter(OrderLine.order_id == order.id, OrderLine.product_id == product_id)
+        .first()
+    )
+    if not line:
+        raise NotFoundError("This product is not on that order.")
+    if not line.added_by_admin:
+        raise ValidationFailedError(
+            "This line was submitted by the branch itself and can't be removed here."
+        )
+
+    product = db.get(Product, product_id)
+    order_id = order.id
+    remaining = db.query(OrderLine).filter(OrderLine.order_id == order.id).count()
+    db.delete(line)
+
+    result: Order | None = order
+    if remaining <= 1:
+        db.delete(order)
+        result = None
+
+    db.commit()
+    if result:
+        db.refresh(result)
+
+    write_audit_log(
+        db,
+        user_id=admin.id,
+        role="ADMIN",
+        action="ORDER_LINE_REMOVED_BY_ADMIN",
+        entity_type="order",
+        entity_id=order_id,
+        description=(
+            f"'{product.description if product else product_id}' removed for '{branch.branch_name}', "
+            f"delivery {delivery_date.isoformat()}."
+            + (" Order deleted (no lines left)." if result is None else "")
+        ),
+    )
+    return result
+
+
 def get_order_detail(db: Session, current_user: User, order_id: int, roles: list[str]) -> Order:
     order = db.get(Order, order_id)
     if not order:

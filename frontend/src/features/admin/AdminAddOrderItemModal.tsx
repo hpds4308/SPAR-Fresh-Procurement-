@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ApiError } from "../../api/client";
-import { adminAddOrderLine } from "../../api/orders";
+import { adminAddOrderLine, adminRemoveOrderLine } from "../../api/orders";
 import { useToast } from "../shared/ui/Toast";
 
 export default function AdminAddOrderItemModal({
@@ -11,6 +11,7 @@ export default function AdminAddOrderItemModal({
   unitCode,
   deliveryDate,
   currentQuantity,
+  hasExistingOrderForDate,
   onClose,
   onSaved,
 }: {
@@ -21,18 +22,50 @@ export default function AdminAddOrderItemModal({
   unitCode: string;
   deliveryDate: string;
   currentQuantity: number | null;
+  // Whether this branch already has ANY item ordered for this delivery
+  // date (not just this product) — i.e. saving will append to a real,
+  // existing order. False means there's nothing at all for this branch on
+  // this date yet, so saving creates a brand-new order containing only
+  // this one item — easy to do by mistake if the wrong date is selected,
+  // so that path needs an explicit confirmation, not a silent success.
+  hasExistingOrderForDate: boolean;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const { show } = useToast();
   const [quantity, setQuantity] = useState(currentQuantity !== null ? String(currentQuantity) : "");
+  const [confirmNewOrder, setConfirmNewOrder] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [removing, setRemoving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  async function handleRemove() {
+    setError(null);
+    setRemoving(true);
+    try {
+      await adminRemoveOrderLine({ branch_id: branchId, product_id: productId, delivery_date: deliveryDate });
+      onSaved();
+      onClose();
+      show("success", `${productDescription} removed from ${branchName}'s order for delivery ${deliveryDate}.`);
+    } catch (err) {
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : "Could not remove this item — it may have been submitted by the branch itself."
+      );
+    } finally {
+      setRemoving(false);
+    }
+  }
 
   async function handleSave() {
     const parsed = parseFloat(quantity);
     if (!Number.isFinite(parsed) || parsed <= 0) {
       setError("Enter a quantity greater than zero.");
+      return;
+    }
+    if (!hasExistingOrderForDate && !confirmNewOrder) {
+      setError("Please confirm above before creating a new order for this branch.");
       return;
     }
     setError(null);
@@ -70,11 +103,30 @@ export default function AdminAddOrderItemModal({
         </div>
 
         <div className="p-5 space-y-3">
-          <p className="text-xs text-crate-800/50">
-            {currentQuantity !== null
-              ? "This branch already has a quantity for this item — saving here will replace it."
-              : "This branch hasn't ordered this item — this adds it to their order."}
-          </p>
+          {!hasExistingOrderForDate ? (
+            <div className="rounded-xl bg-tomato-500/10 border border-tomato-500/25 p-3 space-y-2">
+              <p className="text-xs text-tomato-600 font-medium">
+                {branchName} has no order at all for delivery {deliveryDate} yet. Saving will create a brand-new
+                order for them containing only this item — if you meant to add this to an order they've already
+                submitted, cancel and switch to that delivery date first.
+              </p>
+              <label className="flex items-center gap-2 text-xs text-crate-800/70">
+                <input
+                  type="checkbox"
+                  checked={confirmNewOrder}
+                  onChange={(e) => setConfirmNewOrder(e.target.checked)}
+                  className="accent-crate-700"
+                />
+                Yes, create a new order for {branchName} on {deliveryDate}.
+              </label>
+            </div>
+          ) : (
+            <p className="text-xs text-crate-800/50">
+              {currentQuantity !== null
+                ? "This branch already has a quantity for this item — saving here will replace it."
+                : "This branch hasn't ordered this item — this adds it to their existing order for this date."}
+            </p>
+          )}
           <div className="flex items-center gap-2">
             <input
               type="number"
@@ -91,20 +143,34 @@ export default function AdminAddOrderItemModal({
           {error && <p className="text-tomato-600 text-sm">{error}</p>}
         </div>
 
-        <div className="p-5 border-t border-sage-100 flex justify-end gap-3">
-          <button
-            onClick={onClose}
-            className="text-sm text-crate-700 border border-sage-300 rounded-full px-4 py-2 hover:bg-sage-50 transition-colors duration-150"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="text-sm bg-gradient-to-b from-crate-700 to-crate-800 text-white rounded-full px-4 py-2 font-semibold hover:brightness-110 active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 shadow-md shadow-crate-800/20 transition-all duration-150"
-          >
-            {saving ? "Saving…" : "Save"}
-          </button>
+        <div className="p-5 border-t border-sage-100 flex items-center justify-between gap-3">
+          {currentQuantity !== null ? (
+            <button
+              onClick={handleRemove}
+              disabled={removing || saving}
+              className="text-sm text-tomato-600 hover:text-tomato-700 font-medium disabled:opacity-50 transition-colors duration-150"
+              title="Only removable if Admin added this line — a branch's own item can't be removed here."
+            >
+              {removing ? "Removing…" : "Remove item"}
+            </button>
+          ) : (
+            <span />
+          )}
+          <div className="flex gap-3">
+            <button
+              onClick={onClose}
+              className="text-sm text-crate-700 border border-sage-300 rounded-full px-4 py-2 hover:bg-sage-50 transition-colors duration-150"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving || removing || (!hasExistingOrderForDate && !confirmNewOrder)}
+              className="text-sm bg-gradient-to-b from-crate-700 to-crate-800 text-white rounded-full px-4 py-2 font-semibold hover:brightness-110 active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 shadow-md shadow-crate-800/20 transition-all duration-150"
+            >
+              {saving ? "Saving…" : hasExistingOrderForDate ? "Save" : "Create New Order"}
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -219,3 +219,41 @@ def test_admin_add_order_line_unknown_branch_rejected(db_session, admin_user, ma
     product = make_product()
     with pytest.raises(NotFoundError):
         order_service.admin_add_order_line(db_session, admin_user, 999999, product.id, date.today(), 1)
+
+
+def test_admin_remove_order_line_deletes_line_and_keeps_order(db_session, branch_ctx, admin_user, make_product):
+    branch_user, product = branch_ctx
+    order = order_service.create_order(
+        db_session, branch_user, OrderCreate(lines=[OrderLineCreate(product_id=product.id, quantity=10)])
+    )
+    other_product = make_product()
+    order_service.admin_add_order_line(db_session, admin_user, order.branch_id, other_product.id, order.delivery_date, 4)
+
+    result = order_service.admin_remove_order_line(db_session, admin_user, order.branch_id, other_product.id, order.delivery_date)
+
+    assert result is not None
+    assert result.id == order.id
+    lines = _lines(db_session, order)
+    assert len(lines) == 1
+    assert lines[0].product_id == product.id
+
+
+def test_admin_remove_order_line_deletes_order_when_last_line(db_session, admin_user, make_branch, make_product):
+    branch = make_branch()
+    product = make_product()
+    delivery_date = date.today() + timedelta(days=2)
+    order = order_service.admin_add_order_line(db_session, admin_user, branch.id, product.id, delivery_date, 7)
+
+    result = order_service.admin_remove_order_line(db_session, admin_user, branch.id, product.id, delivery_date)
+
+    assert result is None
+    assert db_session.get(type(order), order.id) is None
+
+
+def test_admin_remove_order_line_rejects_branch_own_line(db_session, branch_ctx, admin_user):
+    branch_user, product = branch_ctx
+    order = order_service.create_order(
+        db_session, branch_user, OrderCreate(lines=[OrderLineCreate(product_id=product.id, quantity=10)])
+    )
+    with pytest.raises(ValidationFailedError):
+        order_service.admin_remove_order_line(db_session, admin_user, order.branch_id, product.id, order.delivery_date)
