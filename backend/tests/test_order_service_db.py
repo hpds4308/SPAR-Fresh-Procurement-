@@ -9,7 +9,7 @@ from datetime import date, timedelta
 import pytest
 from pydantic import ValidationError
 
-from app.core.errors import ValidationFailedError, PermissionDeniedError
+from app.core.errors import ValidationFailedError, PermissionDeniedError, NotFoundError
 from app.models.order import OrderLine
 from app.models.system import SystemSetting
 from app.schemas.order import OrderCreate, OrderLineCreate
@@ -166,3 +166,56 @@ def test_delivery_date_is_order_date_plus_two_days(db_session, branch_ctx):
         db_session, branch_user, OrderCreate(lines=[OrderLineCreate(product_id=product.id, quantity=1)])
     )
     assert order.delivery_date == order.order_date + timedelta(days=2)
+
+
+def test_admin_add_order_line_creates_order_when_branch_has_none(db_session, admin_user, make_branch, make_product):
+    branch = make_branch()
+    product = make_product()
+    delivery_date = date.today() + timedelta(days=2)
+
+    order = order_service.admin_add_order_line(db_session, admin_user, branch.id, product.id, delivery_date, 7)
+
+    assert order.status == "SUBMITTED"
+    assert order.delivery_date == delivery_date
+    lines = _lines(db_session, order)
+    assert len(lines) == 1
+    assert float(lines[0].quantity) == 7.0
+    assert lines[0].added_by_admin is True
+
+
+def test_admin_add_order_line_appends_without_touching_branch_lines(db_session, branch_ctx, admin_user, make_product):
+    branch_user, product = branch_ctx
+    order = order_service.create_order(
+        db_session, branch_user, OrderCreate(lines=[OrderLineCreate(product_id=product.id, quantity=10)])
+    )
+    other_product = make_product()
+
+    updated = order_service.admin_add_order_line(
+        db_session, admin_user, order.branch_id, other_product.id, order.delivery_date, 4
+    )
+
+    assert updated.id == order.id
+    lines = {ln.product_id: ln for ln in _lines(db_session, updated)}
+    assert len(lines) == 2
+    assert float(lines[product.id].quantity) == 10.0
+    assert lines[product.id].added_by_admin is False
+    assert float(lines[other_product.id].quantity) == 4.0
+    assert lines[other_product.id].added_by_admin is True
+
+
+def test_admin_add_order_line_updates_existing_admin_line(db_session, branch_ctx, admin_user):
+    branch_user, product = branch_ctx
+    order = order_service.create_order(
+        db_session, branch_user, OrderCreate(lines=[OrderLineCreate(product_id=product.id, quantity=10)])
+    )
+    order_service.admin_add_order_line(db_session, admin_user, order.branch_id, product.id, order.delivery_date, 15)
+
+    lines = _lines(db_session, order)
+    assert len(lines) == 1
+    assert float(lines[0].quantity) == 15.0
+
+
+def test_admin_add_order_line_unknown_branch_rejected(db_session, admin_user, make_product):
+    product = make_product()
+    with pytest.raises(NotFoundError):
+        order_service.admin_add_order_line(db_session, admin_user, 999999, product.id, date.today(), 1)

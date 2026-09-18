@@ -518,6 +518,92 @@ def create_order(db: Session, branch_user: User, payload: OrderCreate) -> Order:
     return order
 
 
+def admin_add_order_line(
+    db: Session, admin: User, branch_id: int, product_id: int, delivery_date: date, quantity: float
+) -> Order:
+    """
+    Admin adds (or updates) one product/quantity directly onto a branch's
+    order for a delivery date — e.g. topping up what the branch itself
+    ordered. Only touches that one line, unlike _replace_lines (a full
+    per-order overwrite used by the branch's own save/submit).
+
+    Reuses the branch's existing order for that delivery date if there is
+    one (promoting a still-open DRAFT to SUBMITTED, since Admin is now
+    putting real data on it); otherwise creates a fresh SUBMITTED order.
+    """
+    branch = db.get(Branch, branch_id)
+    if not branch:
+        raise NotFoundError("Branch not found.")
+    product = db.get(Product, product_id)
+    if not product or product.status != "ACTIVE":
+        raise ValidationFailedError("Unknown or inactive product.")
+
+    order = (
+        db.query(Order)
+        .filter(Order.branch_id == branch_id, Order.delivery_date == delivery_date)
+        .first()
+    )
+    if order is None:
+        # Same branch/order_date may already have a row (e.g. an
+        # in-progress draft) even without a delivery_date match above —
+        # reuse it instead of risking uq_orders_branch_order_date.
+        order_date = delivery_date - timedelta(days=2)
+        order = (
+            db.query(Order)
+            .filter(Order.branch_id == branch_id, Order.order_date == order_date)
+            .first()
+        )
+    if order is None:
+        order = Order(
+            branch_id=branch_id,
+            submitted_by=admin.id,
+            order_date=delivery_date - timedelta(days=2),
+            delivery_date=delivery_date,
+            status="SUBMITTED",
+        )
+        db.add(order)
+        db.flush()  # get order.id before adding the line
+    elif order.status == "DRAFT":
+        order.status = "SUBMITTED"
+
+    units = {u.id: u.code for u in db.query(ProductUnit).all()}
+    line = (
+        db.query(OrderLine)
+        .filter(OrderLine.order_id == order.id, OrderLine.product_id == product_id)
+        .first()
+    )
+    if line:
+        line.quantity = quantity
+        line.added_by_admin = True
+    else:
+        db.add(
+            OrderLine(
+                order_id=order.id,
+                product_id=product_id,
+                quantity=quantity,
+                unit_code=units.get(product.unit_id, "?"),
+                added_by_admin=True,
+            )
+        )
+
+    db.commit()
+    db.refresh(order)
+
+    write_audit_log(
+        db,
+        user_id=admin.id,
+        role="ADMIN",
+        action="ORDER_LINE_ADDED_BY_ADMIN",
+        entity_type="order",
+        entity_id=order.id,
+        description=(
+            f"{quantity:g} {units.get(product.unit_id, '?')} of '{product.description}' added for "
+            f"'{branch.branch_name}', delivery {delivery_date.isoformat()}."
+        ),
+    )
+    return order
+
+
 def get_order_detail(db: Session, current_user: User, order_id: int, roles: list[str]) -> Order:
     order = db.get(Order, order_id)
     if not order:

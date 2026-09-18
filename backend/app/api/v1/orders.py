@@ -20,6 +20,7 @@ from app.schemas.order import (
     OrderMatrixOut,
     ExcelOrderPreviewOut,
     DeliveryConfirmRequest,
+    AdminAddOrderLineRequest,
 )
 from app.schemas.assignment import ProductComparisonOut, SetAssignmentsRequest
 from app.services import order_service, assignment_service
@@ -60,6 +61,7 @@ def _to_order_out(db: Session, order) -> OrderOut:
                 notes=ln.notes,
                 received_quantity=float(ln.received_quantity) if ln.received_quantity is not None else None,
                 receipt_notes=ln.receipt_notes,
+                added_by_admin=ln.added_by_admin,
             )
             for ln in lines
         ],
@@ -168,6 +170,24 @@ def set_product_assignments(
     Recomputes affected branch orders' status (SUBMITTED <-> ASSIGNED).
     """
     return assignment_service.set_assignments(db, admin, product_id, delivery_date, payload)
+
+
+@router.post("/admin/lines", response_model=OrderOut)
+def admin_add_order_line(
+    payload: AdminAddOrderLineRequest,
+    admin: User = Depends(require_roles("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """
+    Admin adds (or updates) one product/quantity directly onto a branch's
+    order for a delivery date, e.g. from the Order Matrix. Creates the
+    branch's order for that date if it doesn't exist yet. The branch sees
+    this line highlighted in their own "My Orders" as admin-added.
+    """
+    order = order_service.admin_add_order_line(
+        db, admin, payload.branch_id, payload.product_id, payload.delivery_date, payload.quantity
+    )
+    return _to_order_out(db, order)
 
 
 @router.get("/stock-in-hand", response_model=dict[int, float])

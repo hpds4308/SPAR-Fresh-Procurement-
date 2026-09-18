@@ -2,7 +2,17 @@ import { useEffect, useMemo, useState } from "react";
 import { ApiError } from "../../api/client";
 import { OrderMatrix, fetchOrderMatrix, downloadOrderMatrix } from "../../api/orders";
 import ProductAssignmentPanel from "./ProductAssignmentPanel";
+import AdminAddOrderItemModal from "./AdminAddOrderItemModal";
 import { CategoryBadge } from "../shared/ui/CategoryBadge";
+
+type AddItemTarget = {
+  branchId: number;
+  branchName: string;
+  productId: number;
+  productDescription: string;
+  unitCode: string;
+  currentQuantity: number | null;
+};
 
 function formatDate(iso: string): string {
   const d = new Date(iso + "T00:00:00");
@@ -17,6 +27,7 @@ export default function OrderMatrixView() {
   const [downloading, setDownloading] = useState(false);
   const [hideEmpty, setHideEmpty] = useState(true);
   const [openProductId, setOpenProductId] = useState<number | null>(null);
+  const [addItemTarget, setAddItemTarget] = useState<AddItemTarget | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
@@ -108,7 +119,9 @@ export default function OrderMatrixView() {
             />
             Hide products with no orders
           </label>
-          <span className="text-xs text-crate-800/35 ml-1">Click a product row to assign suppliers</span>
+          <span className="text-xs text-crate-800/35 ml-1">
+            Click a product row to assign suppliers &middot; click a branch's quantity to add or edit an item for that branch
+          </span>
         </div>
         <button
           onClick={handleDownload}
@@ -178,7 +191,22 @@ export default function OrderMatrixView() {
                 {matrix?.branches.map((b) => {
                   const qty = row.quantities[String(b.branch_id)];
                   return (
-                    <td key={b.branch_id} className="px-3 py-2 text-right text-crate-800/80">
+                    <td
+                      key={b.branch_id}
+                      className="px-3 py-2 text-right text-crate-800/80 hover:bg-mango-500/15 cursor-pointer transition-colors duration-100"
+                      title={`Click to ${qty !== undefined ? "edit" : "add"} ${b.branch_name}'s quantity`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setAddItemTarget({
+                          branchId: b.branch_id,
+                          branchName: b.branch_name,
+                          productId: row.product_id,
+                          productDescription: row.description,
+                          unitCode: row.unit_code,
+                          currentQuantity: qty !== undefined ? qty : null,
+                        });
+                      }}
+                    >
                       {qty !== undefined ? qty : ""}
                     </td>
                   );
@@ -197,6 +225,20 @@ export default function OrderMatrixView() {
           productId={openProductId}
           deliveryDate={selectedDate}
           onClose={() => setOpenProductId(null)}
+          onSaved={() => setRefreshKey((k) => k + 1)}
+        />
+      )}
+
+      {addItemTarget && selectedDate && (
+        <AdminAddOrderItemModal
+          branchId={addItemTarget.branchId}
+          branchName={addItemTarget.branchName}
+          productId={addItemTarget.productId}
+          productDescription={addItemTarget.productDescription}
+          unitCode={addItemTarget.unitCode}
+          deliveryDate={selectedDate}
+          currentQuantity={addItemTarget.currentQuantity}
+          onClose={() => setAddItemTarget(null)}
           onSaved={() => setRefreshKey((k) => k + 1)}
         />
       )}

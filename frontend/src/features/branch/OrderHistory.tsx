@@ -216,8 +216,15 @@ export default function OrderHistory({ refreshKey }: { refreshKey: number }) {
                         const mismatch =
                           ln.received_quantity !== null && Math.abs(ln.received_quantity - ln.quantity) > 0.01;
                         return (
-                          <tr key={ln.id} className="text-crate-800/80">
-                            <td className="py-0.5">{ln.product_description}</td>
+                          <tr key={ln.id} className={`text-crate-800/80 ${ln.added_by_admin ? "bg-mango-500/15" : ""}`}>
+                            <td className="py-0.5">
+                              {ln.product_description}
+                              {ln.added_by_admin && (
+                                <span className="block text-[10px] text-[#8A5A0D] font-medium">
+                                  Ordered by SPAR Fresh Procurement
+                                </span>
+                              )}
+                            </td>
                             <td className="py-0.5 text-right">{ln.quantity}</td>
                             {selected.status === "CONFIRMED" && (
                               <td className={`py-0.5 text-right ${mismatch ? "text-tomato-600 font-semibold" : ""}`}>

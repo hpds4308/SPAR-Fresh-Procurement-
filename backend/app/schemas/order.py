@@ -37,6 +37,7 @@ class OrderLineOut(BaseModel):
     notes: str | None = None
     received_quantity: float | None = None
     receipt_notes: str | None = None
+    added_by_admin: bool = False
 
     class Config:
         from_attributes = True
@@ -160,6 +161,23 @@ class ExcelOrderPreviewOut(BaseModel):
     lines: list[ExcelOrderLinePreview]
     valid_line_count: int
     error_count: int
+
+
+class AdminAddOrderLineRequest(BaseModel):
+    """Admin adding (or updating) one product/quantity directly onto a
+    branch's order for a delivery date — e.g. topping up what the branch
+    itself ordered. Creates the branch's order for that date if it
+    doesn't exist yet."""
+
+    branch_id: int
+    product_id: int
+    delivery_date: date
+    quantity: float = Field(gt=0, le=MAX_NUMERIC_10_2, description="Must be greater than zero.")
+
+    @field_validator("quantity")
+    @classmethod
+    def round_quantity(cls, v: float) -> float:
+        return round(v, 2)
 
 
 class OrderDeadlineExceptionRequest(BaseModel):

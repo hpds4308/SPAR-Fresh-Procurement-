@@ -1,6 +1,6 @@
 from datetime import datetime, date
 
-from sqlalchemy import String, Numeric, Date, DateTime, ForeignKey, Text, func
+from sqlalchemy import String, Numeric, Date, DateTime, ForeignKey, Text, Boolean, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -60,3 +60,8 @@ class OrderLine(Base):
     # shortages/overages get caught and recorded.
     received_quantity: Mapped[float | None] = mapped_column(Numeric(10, 2))
     receipt_notes: Mapped[str | None] = mapped_column(Text)
+    # True when Admin added/set this line directly (rather than the branch
+    # itself) — e.g. topping up a branch's order after the fact. Shown to
+    # the branch as a highlighted, view-only line so it's clear the item
+    # wasn't something they ordered themselves.
+    added_by_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")

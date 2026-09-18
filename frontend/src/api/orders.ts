@@ -46,6 +46,7 @@ export type OrderLine = {
   notes: string | null;
   received_quantity: number | null;
   receipt_notes: string | null;
+  added_by_admin: boolean;
 };
 
 export type Order = {
@@ -133,6 +134,22 @@ export type OrderMatrix = {
 export function fetchOrderMatrix(deliveryDate?: string): Promise<OrderMatrix> {
   const qs = deliveryDate ? `?delivery_date=${deliveryDate}` : "";
   return apiFetch(`/orders/admin/matrix${qs}`);
+}
+
+// Admin adds (or updates) one product/quantity directly on a branch's
+// order for a delivery date — e.g. topping up what the branch itself
+// ordered. Creates the branch's order for that date if it doesn't exist
+// yet. Shows up highlighted on the branch's own "My Orders" as admin-added.
+export function adminAddOrderLine(payload: {
+  branch_id: number;
+  product_id: number;
+  delivery_date: string;
+  quantity: number;
+}): Promise<Order> {
+  return apiFetch("/orders/admin/lines", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export function orderMatrixExportUrl(deliveryDate?: string): string {
