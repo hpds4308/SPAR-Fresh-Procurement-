@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from app.core.audit import write_audit_log
 from app.core.errors import ValidationFailedError, NotFoundError, PermissionDeniedError
 from app.models.branch import Branch
+from app.models.order import Order, OrderLine
 from app.models.pricing import SupplierPrice
 from app.models.product import Product, ProductCategory, ProductUnit
 from app.models.supplier import Supplier
@@ -33,6 +34,7 @@ from app.schemas.supplier_order import (
     BranchOrderGroup,
     MySupplierOrdersOut,
 )
+from app.services import order_service
 
 
 def list_suppliers(db: Session) -> list[Supplier]:
@@ -371,7 +373,53 @@ def set_supplier_order(
         ),
     )
 
+    _sync_branch_orders_for_unordered_items(db, admin_user, delivery_date, payload, branch_ids, product_ids)
+
     return get_supplier_order(db, supplier_id, delivery_date)
+
+
+def _sync_branch_orders_for_unordered_items(
+    db: Session,
+    admin_user: User,
+    delivery_date: date,
+    payload: SetSupplierOrderRequest,
+    branch_ids: set[int],
+    product_ids: set[int],
+) -> None:
+    """
+    A line entered here only records what's being sent to a supplier — it
+    never touches a branch's own order (see the module docstring). That
+    surprised Admin in practice: an item picked for a branch that hadn't
+    ordered it themselves never showed up on that branch's "My Orders".
+
+    So: whenever a branch has NO existing order line for a product at all,
+    saving it here also creates it on that branch's real order (via
+    order_service.admin_add_order_line, same as using Branch Orders'
+    per-cell "add item"), so the branch actually sees it. A line the
+    branch already has and previously placed itself is never touched —
+    only a missing line, or one an earlier run of this same sync already
+    added (added_by_admin=True), gets created/kept in sync here. This
+    runs after the supplier order's own commit above, so that save always
+    succeeds even if a particular branch sync hits a rare edge case.
+    """
+    existing_order_lines = {
+        (order.branch_id, line.product_id): line
+        for line, order in db.query(OrderLine, Order)
+        .join(Order, Order.id == OrderLine.order_id)
+        .filter(
+            Order.branch_id.in_(branch_ids),
+            Order.delivery_date == delivery_date,
+            OrderLine.product_id.in_(product_ids),
+        )
+        .all()
+    }
+
+    for entry in payload.items:
+        existing_line = existing_order_lines.get((entry.branch_id, entry.product_id))
+        if existing_line is None or existing_line.added_by_admin:
+            order_service.admin_add_order_line(
+                db, admin_user, entry.branch_id, entry.product_id, delivery_date, entry.quantity
+            )
 
 
 def get_my_orders_by_branch(

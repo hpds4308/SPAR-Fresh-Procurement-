@@ -353,12 +353,12 @@ export default function SupplierOrderBuilder() {
   }, [qty]);
 
   // Cells with a quantity for a branch that never actually ordered this
-  // item. This grid only feeds the supplier's own order (SupplierOrderItem)
-  // — a separate ledger from the branch's own Order/OrderLine — so saving
-  // one of these never appears on that branch's "My Orders". Surfaced as a
-  // warning, not a block: sending a branch stock it didn't ask for is a
-  // legitimate call for Admin to make, it just needs the Order Matrix too
-  // if the branch should actually see it.
+  // item. This grid feeds the supplier's own order (SupplierOrderItem) —
+  // a separate ledger from the branch's own Order/OrderLine — but saving
+  // one of these also creates a line on that branch's real order (see
+  // supplier_order_service._sync_branch_orders_for_unordered_items), so
+  // it's flagged here as a heads-up on what saving will do, not a warning
+  // that it silently won't show anywhere.
   const offOrderCells = useMemo(() => {
     return filledCells.filter((key) => {
       const [productIdStr, branchIdStr] = key.split(":");
@@ -419,6 +419,14 @@ export default function SupplierOrderBuilder() {
     try {
       await setSupplierOrderAdmin(supplierId as number, deliveryDate, parsed);
       setSavedMessage("Order saved.");
+      // A line for a branch that hadn't ordered the item may have just
+      // been added to that branch's own order (see the backend sync) —
+      // re-fetch so "Required Qty"/branch demand and the "not on their
+      // order" warning reflect that immediately, not just after the next
+      // date change.
+      fetchOrderMatrix(deliveryDate)
+        .then(setMatrix)
+        .catch(() => {});
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not save the order.");
     } finally {
@@ -675,9 +683,9 @@ export default function SupplierOrderBuilder() {
                               {hasQty && !hadDemand && (
                                 <span
                                   className="text-[9px] text-mango-700 leading-tight text-center"
-                                  title="This branch didn't order this item — it won't show on their My Orders unless it's also added via Admin → Order Matrix."
+                                  title="This branch didn't order this item themselves — saving will also add it to their own order, so they'll see it on My Orders."
                                 >
-                                  not on their order
+                                  adds to their order
                                 </span>
                               )}
                               {hasQty && (
@@ -759,9 +767,9 @@ export default function SupplierOrderBuilder() {
         {offOrderCells.length > 0 && (
           <p className="text-xs text-mango-700 bg-mango-500/10 border border-mango-500/25 rounded-lg px-3 py-2 mt-3">
             {offOrderCells.length} line{offOrderCells.length === 1 ? "" : "s"} above{" "}
-            {offOrderCells.length === 1 ? "isn't" : "aren't"} on that branch's own order — saving here sends it
-            to the supplier, but the branch won't see it on their My Orders. If they need to see it, also add it
-            via Admin → Order Matrix.
+            {offOrderCells.length === 1 ? "isn't" : "aren't"} on that branch's own order yet — saving will add{" "}
+            {offOrderCells.length === 1 ? "it" : "them"} to that branch's own order too, so they'll see{" "}
+            {offOrderCells.length === 1 ? "it" : "them"} on My Orders.
           </p>
         )}
 

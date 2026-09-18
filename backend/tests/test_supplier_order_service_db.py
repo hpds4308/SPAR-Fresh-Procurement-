@@ -9,8 +9,11 @@ from datetime import date, timedelta
 import pytest
 
 from app.core.errors import ValidationFailedError, NotFoundError
+from app.models.order import Order, OrderLine
+from app.models.system import SystemSetting
+from app.schemas.order import OrderCreate, OrderLineCreate
 from app.schemas.supplier_order import SetSupplierOrderRequest, SupplierOrderItemIn
-from app.services import supplier_order_service
+from app.services import order_service, supplier_order_service
 
 DELIVERY_DATE = date.today() + timedelta(days=2)
 
@@ -75,6 +78,95 @@ def test_set_supplier_order_replaces_full_set_not_a_diff(
     )
     product_ids = {it.product_id for it in result.items}
     assert product_ids == {p2.id}
+
+
+def test_set_supplier_order_adds_unordered_item_to_branchs_own_order(
+    db_session, make_branch, make_user, make_supplier, make_product, admin_user
+):
+    """
+    A Supplier Order line only records what's being sent to a supplier —
+    it never touches a branch's own Order/OrderLine. That's surprising in
+    practice when the item is one the branch never ordered itself: Admin
+    picks a supplier and a quantity for that branch here, expecting the
+    branch to see it, but "My Orders" reads from a completely separate
+    table. So saving a line for a branch with NO existing line for that
+    product must also create one on the branch's real order (added_by_admin),
+    while a product the branch already ordered itself is left untouched.
+    """
+    db_session.add(SystemSetting(key="branch_order_deadline", value="23:59", updated_by=admin_user.id))
+    db_session.commit()
+
+    supplier = make_supplier()
+    branch = make_branch()
+    branch_user = make_user(role="BRANCH", branch=branch)
+    ordered_product = make_product()
+    unordered_product = make_product()
+
+    own_order = order_service.create_order(
+        db_session, branch_user, OrderCreate(lines=[OrderLineCreate(product_id=ordered_product.id, quantity=12)])
+    )
+
+    supplier_order_service.set_supplier_order(
+        db_session,
+        admin_user,
+        supplier.id,
+        own_order.delivery_date,
+        SetSupplierOrderRequest(
+            items=[
+                SupplierOrderItemIn(branch_id=branch.id, product_id=ordered_product.id, quantity=12, agreed_price=50),
+                SupplierOrderItemIn(branch_id=branch.id, product_id=unordered_product.id, quantity=5, agreed_price=None),
+            ]
+        ),
+    )
+
+    lines = {
+        ln.product_id: ln
+        for ln in db_session.query(OrderLine).filter(OrderLine.order_id == own_order.id).all()
+    }
+    assert float(lines[ordered_product.id].quantity) == 12.0
+    assert lines[ordered_product.id].added_by_admin is False  # the branch's own line, untouched
+
+    assert unordered_product.id in lines  # now visible on the branch's own order
+    assert float(lines[unordered_product.id].quantity) == 5.0
+    assert lines[unordered_product.id].added_by_admin is True
+
+
+def test_set_supplier_order_resyncs_a_previously_added_line(
+    db_session, make_branch, make_supplier, make_product, admin_user
+):
+    """Saving again with a different quantity for a line this same sync
+    already created (added_by_admin) updates it -- it's still under
+    Admin's control until the branch orders it themselves."""
+    supplier = make_supplier()
+    branch = make_branch()
+    product = make_product()
+
+    supplier_order_service.set_supplier_order(
+        db_session,
+        admin_user,
+        supplier.id,
+        DELIVERY_DATE,
+        SetSupplierOrderRequest(
+            items=[SupplierOrderItemIn(branch_id=branch.id, product_id=product.id, quantity=5, agreed_price=None)]
+        ),
+    )
+    supplier_order_service.set_supplier_order(
+        db_session,
+        admin_user,
+        supplier.id,
+        DELIVERY_DATE,
+        SetSupplierOrderRequest(
+            items=[SupplierOrderItemIn(branch_id=branch.id, product_id=product.id, quantity=8, agreed_price=None)]
+        ),
+    )
+
+    line = (
+        db_session.query(OrderLine)
+        .join(Order, Order.id == OrderLine.order_id)
+        .filter(Order.branch_id == branch.id, OrderLine.product_id == product.id)
+        .first()
+    )
+    assert float(line.quantity) == 8.0
 
 
 def test_assigned_quantities_exclude_own_supplier(
