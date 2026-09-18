@@ -60,7 +60,7 @@ export default function LoginPage() {
             <img src="/images/spar-fresh-procurement-logo.png" alt="SPAR Fresh Procurement" className="w-full h-auto block" />
           </div>
 
-          <h1 className="font-display font-extrabold text-xl md:text-2xl text-center text-crate-950 leading-tight mt-3 mb-4">
+          <h1 className="font-display font-extrabold text-sm md:text-base text-center text-crate-950 leading-tight mt-3 mb-4">
             Welcome SPAR Fresh Procurements
           </h1>
 
