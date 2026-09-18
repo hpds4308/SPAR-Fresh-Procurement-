@@ -53,17 +53,13 @@ export default function LoginPage() {
         {/* card, scaled down 10% as a unit */}
         <form
           onSubmit={handleSubmit}
-          className="relative z-0 bg-white rounded-[2rem] shadow-[0_30px_60px_-15px_rgba(21,56,38,0.25)] pt-6 pb-6 px-8 md:px-10"
+          className="relative z-0 bg-white rounded-[2rem] shadow-[0_30px_60px_-15px_rgba(21,56,38,0.25)] overflow-hidden pb-6 px-8 md:px-10"
           style={{ transform: "scale(0.9)", transformOrigin: "center" }}
         >
-          <div className="flex justify-center mb-3">
-            <img src="/images/spar-fresh-procurement-logo.png" alt="SPAR Fresh Procurement" className="h-[180px] w-auto" />
+          <div className="-mx-8 md:-mx-10 mb-3">
+            <img src="/images/spar-fresh-procurement-logo.png" alt="SPAR Fresh Procurement" className="w-full h-auto block" />
           </div>
 
-          <h1 className="font-display font-extrabold text-2xl md:text-[1.7rem] text-center text-crate-950 leading-tight">
-            Welcome to SPAR
-            Fresh Procurement
-          </h1>
           <p className="text-center text-sm mt-1.5 mb-4" style={{ color: "#5B6E5F" }}>
             Sign in to source fresh, simplified.
           </p>
