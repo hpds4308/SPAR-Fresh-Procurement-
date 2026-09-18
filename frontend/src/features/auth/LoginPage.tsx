@@ -60,9 +60,9 @@ export default function LoginPage() {
             <img src="/images/spar-fresh-procurement-logo.png" alt="SPAR Fresh Procurement" className="w-full h-auto block" />
           </div>
 
-          <p className="text-center text-sm mt-1.5 mb-4" style={{ color: "#5B6E5F" }}>
-            Sign in to source fresh, simplified.
-          </p>
+          <h1 className="font-display font-extrabold text-xl md:text-2xl text-center text-crate-950 leading-tight mt-3 mb-4">
+            Welcome SPAR Fresh Procurements
+          </h1>
 
           <label htmlFor="username" className="block text-xs font-semibold uppercase tracking-wide text-crate-800/70 mb-1.5 ml-1">
             Username
