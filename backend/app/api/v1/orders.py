@@ -300,6 +300,19 @@ def list_orders(
     roles = get_user_roles(db, current_user.id)
     orders = order_service.list_orders(db, current_user, roles, delivery_date)
 
+    order_ids = [o.id for o in orders]
+    admin_added_order_ids = (
+        {
+            row[0]
+            for row in db.query(OrderLine.order_id)
+            .filter(OrderLine.order_id.in_(order_ids), OrderLine.added_by_admin.is_(True))
+            .distinct()
+            .all()
+        }
+        if order_ids
+        else set()
+    )
+
     result = []
     for o in orders:
         branch = db.get(Branch, o.branch_id)
@@ -313,6 +326,7 @@ def list_orders(
                 delivery_date=o.delivery_date,
                 status=o.status,
                 line_count=line_count,
+                has_admin_added_lines=o.id in admin_added_order_ids,
             )
         )
     return result

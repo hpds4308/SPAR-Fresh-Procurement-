@@ -562,7 +562,19 @@ def admin_add_order_line(
             status="SUBMITTED",
         )
         db.add(order)
-        db.flush()  # get order.id before adding the line
+        try:
+            db.flush()  # get order.id before adding the line
+        except IntegrityError:
+            # Belt-and-braces, same as create_order: a concurrent request
+            # (e.g. the branch submitting, or another admin action) could
+            # still race past the lookups above and hit
+            # uq_orders_branch_order_date. Surface a clear, retryable
+            # error instead of a raw 500 — trying again will find the
+            # now-existing row via the lookups above.
+            db.rollback()
+            raise ValidationFailedError(
+                "This branch's order for that date changed while saving — please try again."
+            )
     elif order.status == "DRAFT":
         order.status = "SUBMITTED"
 

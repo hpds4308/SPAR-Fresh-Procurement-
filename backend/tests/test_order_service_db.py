@@ -257,3 +257,34 @@ def test_admin_remove_order_line_rejects_branch_own_line(db_session, branch_ctx,
     )
     with pytest.raises(ValidationFailedError):
         order_service.admin_remove_order_line(db_session, admin_user, order.branch_id, product.id, order.delivery_date)
+
+
+def test_admin_added_order_is_visible_in_branchs_own_order_list(db_session, admin_user, make_branch, make_user, make_product):
+    """An order Admin created for a branch that hadn't ordered anything itself
+    (e.g. topping up an unordered item) must still show up in that branch's
+    own "My Orders" list — not just in the Admin-side views."""
+    branch = make_branch()
+    branch_user = make_user(role="BRANCH", branch=branch)
+    product = make_product()
+    delivery_date = date.today() + timedelta(days=2)
+
+    order_service.admin_add_order_line(db_session, admin_user, branch.id, product.id, delivery_date, 7)
+
+    orders = order_service.list_orders(db_session, branch_user, ["BRANCH"])
+    assert len(orders) == 1
+    assert orders[0].branch_id == branch.id
+
+
+def test_admin_added_line_on_top_of_branchs_own_order_is_visible(db_session, branch_ctx, admin_user, make_product):
+    """Same as above, but topping up a branch's already-submitted order —
+    the branch must still see its own order (now with the extra line) in
+    its own order list."""
+    branch_user, product = branch_ctx
+    order = order_service.create_order(
+        db_session, branch_user, OrderCreate(lines=[OrderLineCreate(product_id=product.id, quantity=10)])
+    )
+    other_product = make_product()
+    order_service.admin_add_order_line(db_session, admin_user, order.branch_id, other_product.id, order.delivery_date, 4)
+
+    orders = order_service.list_orders(db_session, branch_user, ["BRANCH"])
+    assert [o.id for o in orders] == [order.id]

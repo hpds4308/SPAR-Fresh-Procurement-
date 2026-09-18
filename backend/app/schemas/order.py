@@ -68,6 +68,10 @@ class OrderSummary(BaseModel):
     delivery_date: date
     status: str
     line_count: int
+    # True if any line on this order was added by Admin rather than the
+    # branch itself — lets "My Orders" flag this at a glance, without the
+    # branch having to expand every order to notice an admin top-up.
+    has_admin_added_lines: bool = False
 
     class Config:
         from_attributes = True

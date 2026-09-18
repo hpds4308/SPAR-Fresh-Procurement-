@@ -71,6 +71,7 @@ export type OrderSummary = {
   delivery_date: string;
   status: string;
   line_count: number;
+  has_admin_added_lines: boolean;
 };
 
 export function fetchProducts(): Promise<Product[]> {
