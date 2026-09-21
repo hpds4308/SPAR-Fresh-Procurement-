@@ -1,0 +1,9 @@
+node_modules/
+test-results/
+playwright-report/
+e2e/results/*.log
+e2e/results/full-run.json
+e2e/results/resp.json
+__pycache__/
+.pytest_cache/
+.coverage
