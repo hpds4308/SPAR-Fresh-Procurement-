@@ -51,6 +51,10 @@ next phases.
    ```
    This prints every username it created and the shared starting
    password. **Write these down** — this is the only time they're shown.
+   Every one of these accounts is flagged "must change password": at first
+   sign-in the app shows a "Choose your own password" screen and the API
+   refuses everything else until it is done. (For a throwaway dev/test
+   database only, add `--no-force-change` to skip that.)
 
 7. **Open the app in your browser**: http://localhost:5173
    You'll land on a login page. Sign in with any of the printed usernames

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from datetime import date
@@ -266,10 +267,12 @@ async def preview_order_excel(
     saves/submits through the normal /orders/draft or /orders endpoints,
     so this can never bypass the cutoff, lock, or once-a-day rules.
     """
-    contents = await file.read()
+    # Read at most one byte past the limit instead of the whole upload, then parse OFF the event loop:
+    # this handler is `async`, and parsing a large sheet inline froze every other request on the server.
+    contents = await file.read(MAX_ORDER_EXCEL_BYTES + 1)
     if len(contents) > MAX_ORDER_EXCEL_BYTES:
         raise ValidationFailedError("That file is too large — please upload the order template as-is, unmodified.")
-    return order_service.parse_order_excel(db, current_user, contents)
+    return await run_in_threadpool(order_service.parse_order_excel, db, current_user, contents)
 
 
 # NOTE: must stay registered before GET /{order_id} below, same reason as

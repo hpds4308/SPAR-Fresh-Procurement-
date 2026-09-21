@@ -8,6 +8,8 @@ scoped query re-checks the user's branch_id/supplier_id against the database
 on each request; nothing is trusted from the token beyond identity.
 """
 import hashlib
+import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends
@@ -18,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.errors import UnauthorizedError, PermissionDeniedError
+from app.core.errors import UnauthorizedError, PermissionDeniedError, PasswordChangeRequiredError
 from app.models.user import User, Role, UserRole
 
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
@@ -44,21 +46,38 @@ def hash_recovery_token(raw_token: str) -> str:
     return hashlib.sha256(raw_token.encode()).hexdigest()
 
 
-def _create_token(subject: str, expires_delta: timedelta, token_type: str) -> str:
+def _create_token(subject: str, expires_delta: timedelta, token_type: str, token_version: int) -> str:
     now = datetime.now(timezone.utc)
-    payload = {"sub": subject, "type": token_type, "iat": now, "exp": now + expires_delta}
+    payload = {
+        "sub": subject,
+        "type": token_type,
+        "iat": now,
+        "exp": now + expires_delta,
+        # tv: must equal users.token_version or the token is dead (bulk revocation).
+        # jti: unique id, lets a single refresh token be revoked at logout (revoked_tokens table).
+        "tv": token_version,
+        "jti": uuid.uuid4().hex,
+    }
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 
-def create_access_token(user_id: int) -> str:
-    return _create_token(str(user_id), timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES), "access")
+def create_access_token(user_id: int, token_version: int = 0) -> str:
+    return _create_token(str(user_id), timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES), "access", token_version)
 
 
-def create_refresh_token(user_id: int) -> str:
-    return _create_token(str(user_id), timedelta(minutes=settings.REFRESH_TOKEN_EXPIRE_MINUTES), "refresh")
+def create_refresh_token(user_id: int, token_version: int = 0) -> str:
+    return _create_token(str(user_id), timedelta(minutes=settings.REFRESH_TOKEN_EXPIRE_MINUTES), "refresh", token_version)
 
 
-def decode_token(token: str, expected_type: str = "access") -> int:
+@dataclass(frozen=True)
+class TokenClaims:
+    user_id: int
+    token_version: int
+    jti: str | None
+    expires_at: datetime
+
+
+def decode_token_claims(token: str, expected_type: str = "access") -> TokenClaims:
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
     except JWTError:
@@ -66,21 +85,43 @@ def decode_token(token: str, expected_type: str = "access") -> int:
     if payload.get("type") != expected_type:
         raise UnauthorizedError("Invalid token type.")
     try:
-        return int(payload["sub"])
-    except (KeyError, ValueError):
+        user_id = int(payload["sub"])
+        # Tokens issued before token versioning existed have no "tv": treat as version 0, which is
+        # what every existing user starts at - so deploying this does not sign anybody out.
+        token_version = int(payload.get("tv", 0))
+        expires_at = datetime.fromtimestamp(int(payload["exp"]), tz=timezone.utc)
+    except (KeyError, ValueError, TypeError):
         raise UnauthorizedError("Invalid token payload.")
+    return TokenClaims(user_id=user_id, token_version=token_version, jti=payload.get("jti"), expires_at=expires_at)
 
 
-def get_current_user(
+def decode_token(token: str, expected_type: str = "access") -> int:
+    return decode_token_claims(token, expected_type).user_id
+
+
+def get_current_user_allow_pending(
     token: str | None = Depends(oauth2_scheme),
     db: Session = Depends(get_db),
 ) -> User:
+    """
+    Authenticates the caller WITHOUT enforcing must_change_password. Only the few endpoints a user
+    needs in order to get out of that state (/auth/me, /auth/change-password, /auth/logout) use this;
+    everything else goes through get_current_user below.
+    """
     if not token:
         raise UnauthorizedError("Authentication is required.")
-    user_id = decode_token(token, expected_type="access")
-    user = db.get(User, user_id)
+    claims = decode_token_claims(token, expected_type="access")
+    user = db.get(User, claims.user_id)
     if not user or not user.is_active:
         raise UnauthorizedError("Account is inactive or does not exist.")
+    if user.token_version != claims.token_version:
+        raise UnauthorizedError("Your session has ended. Please sign in again.")
+    return user
+
+
+def get_current_user(user: User = Depends(get_current_user_allow_pending)) -> User:
+    if user.must_change_password:
+        raise PasswordChangeRequiredError()
     return user
 
 

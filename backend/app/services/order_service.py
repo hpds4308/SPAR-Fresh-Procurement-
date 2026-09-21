@@ -15,6 +15,7 @@ Asia/Colombo as the business timezone regardless of server locale — never
 scattered across routes or the frontend, so the rule can't drift.
 """
 import io
+import zipfile
 from datetime import datetime, date, timedelta, time
 from zoneinfo import ZoneInfo
 
@@ -210,6 +211,26 @@ _EXCEL_COLUMN_ALIASES = {
 }
 _EXCEL_REQUIRED_COLUMNS = {"product_code", "quantity"}
 
+# Limits for an uploaded order template. The real template is a few hundred KB with one row per product
+# (~190 today). Without these, a 63 KB file that unpacks to a million rows kept a worker busy for ~57 s
+# and produced a million-line response (QA finding SEC-02). Generous for legitimate use, tiny for abuse.
+MAX_EXCEL_UNCOMPRESSED_BYTES = 8 * 1024 * 1024  # total unpacked size of the .xlsx (a real template is well under 1 MB)
+MAX_EXCEL_ROWS_SCANNED = 20_000  # physical rows read, blank-but-formatted rows included
+MAX_EXCEL_ORDER_ROWS = 2_000  # rows that actually carry a product code
+_EXCEL_TOO_BIG_MESSAGE = "This file is too large or has too many rows — please upload the order template as-is, unmodified."
+
+
+def _reject_oversized_workbook(file_bytes: bytes) -> None:
+    """An .xlsx is a zip; deflate can squeeze a huge sheet into a few KB, so the upload-size check alone
+    says nothing about the work parsing will cost. Judge by the declared unpacked size, before any parsing."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(file_bytes)) as archive:
+            unpacked = sum(info.file_size for info in archive.infolist())
+    except zipfile.BadZipFile:
+        return  # not a zip at all - the normal "could not read this file" error below covers it
+    if unpacked > MAX_EXCEL_UNCOMPRESSED_BYTES:
+        raise ValidationFailedError(_EXCEL_TOO_BIG_MESSAGE)
+
 
 def _parse_excel_quantity(raw) -> tuple[float | None, str | None]:
     if raw is None or (isinstance(raw, str) and not raw.strip()):
@@ -246,6 +267,8 @@ def parse_order_excel(db: Session, branch_user: User, file_bytes: bytes) -> Exce
     if not branch_user.branch_id:
         raise PermissionDeniedError("Only branch accounts can upload an order.")
 
+    _reject_oversized_workbook(file_bytes)
+
     try:
         workbook = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
         sheet = workbook.active
@@ -275,10 +298,14 @@ def parse_order_excel(db: Session, branch_user: User, file_bytes: bytes) -> Exce
     lines: list[ExcelOrderLinePreview] = []
     seen_codes: set[str] = set()
     for row_number, raw_row in enumerate(rows, start=2):  # row 1 is the header
+        if row_number - 1 > MAX_EXCEL_ROWS_SCANNED:
+            raise ValidationFailedError(_EXCEL_TOO_BIG_MESSAGE)
         values = {header_map[i]: raw_row[i] for i in range(len(raw_row)) if i in header_map}
         product_code = str(values.get("product_code") or "").strip()
         if not product_code:
             continue  # a genuinely blank trailing row — common in exported sheets, silently skipped, not an error
+        if len(lines) >= MAX_EXCEL_ORDER_ROWS:
+            raise ValidationFailedError(_EXCEL_TOO_BIG_MESSAGE)
 
         description = str(values["description"]).strip() if values.get("description") is not None else None
         unit_from_file = str(values["unit"]).strip() if values.get("unit") is not None else None
@@ -355,6 +382,7 @@ def get_stock_in_hand_for_branch(db: Session, branch_user: User) -> dict[int, fl
     branch = db.get(Branch, branch_user.branch_id)
     if not branch or not branch.pos_location_code:
         return {}
+    pos_location_code = branch.pos_location_code
 
     from app.services import pos_stock_service
 
@@ -367,8 +395,14 @@ def get_stock_in_hand_for_branch(db: Session, branch_user: User) -> dict[int, fl
     if not pos_code_to_product_id:
         return {}
 
+    # Hand the database connection back to the pool BEFORE the outbound call. A session keeps its
+    # connection checked out until the transaction ends, so a slow POS used to pin one of the ~15 pool
+    # connections per waiting request and starve the whole API (QA finding SEC-03). Everything needed
+    # below is already in plain local variables.
+    db.rollback()
+
     stock_by_pos_code = pos_stock_service.get_stock_in_hand(
-        list(pos_code_to_product_id.keys()), branch.pos_location_code
+        list(pos_code_to_product_id.keys()), pos_location_code
     )
     return {
         pos_code_to_product_id[code]: quantity

@@ -36,6 +36,10 @@ class PermissionDeniedError(AppError):
     message = "You do not have permission to perform this action."
 
 
+class PasswordChangeRequiredError(PermissionDeniedError):
+    message = "You must change your password before continuing."
+
+
 class UnauthorizedError(AppError):
     status_code = 401
     message = "Authentication is required."

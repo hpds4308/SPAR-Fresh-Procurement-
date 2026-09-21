@@ -3,7 +3,12 @@ Central application configuration.
 All values are read from environment variables (see /.env.example).
 Never hard-code secrets here.
 """
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Values that ship in this repo / .env.example as placeholders. Anyone can read them,
+# and a JWT only needs a user id to be forged once the signing key is known.
+_PLACEHOLDER_SECRET_PREFIXES = ("changeme",)
 
 
 class Settings(BaseSettings):
@@ -49,6 +54,21 @@ class Settings(BaseSettings):
 
     # CORS
     CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:8080"]
+
+    @model_validator(mode="after")
+    def _refuse_placeholder_secret_in_production(self) -> "Settings":
+        """
+        Fail fast at startup instead of quietly signing tokens with a publicly
+        known key. Only the repo's own placeholder values are refused (not merely
+        "short" keys), so a deployment that already uses its own key keeps booting.
+        Generate one with:  openssl rand -hex 32
+        """
+        if self.APP_ENV == "production" and self.SECRET_KEY.strip().lower().startswith(_PLACEHOLDER_SECRET_PREFIXES):
+            raise ValueError(
+                "SECRET_KEY is still the placeholder value from .env.example. Set a real random SECRET_KEY "
+                "(e.g. `openssl rand -hex 32`) before starting with APP_ENV=production."
+            )
+        return self
 
 
 settings = Settings()

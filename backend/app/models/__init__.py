@@ -4,6 +4,7 @@ for Alembic autogenerate and for create_all() in local/dev scripts.
 """
 from app.models.user import Role, User, UserRole  # noqa: F401
 from app.models.password_reset_token import PasswordResetToken  # noqa: F401
+from app.models.revoked_token import RevokedToken  # noqa: F401
 from app.models.branch import Branch  # noqa: F401
 from app.models.supplier import Supplier  # noqa: F401
 from app.models.product import ProductCategory, ProductUnit, Product  # noqa: F401

@@ -5,6 +5,9 @@ export type CurrentUser = {
   id: number;
   username: string;
   role: "ADMIN" | "BRANCH" | "SUPPLIER" | string;
+  // True while the account still has a starting/temporary password: the API then refuses everything
+  // except changing it, and the router shows ForcedPasswordChange instead of the dashboard.
+  must_change_password: boolean;
   branch_id: number | null;
   branch_name: string | null;
   supplier_id: number | null;
@@ -16,6 +19,7 @@ type AuthContextValue = {
   loading: boolean;
   login: (username: string, password: string) => Promise<string>; // returns redirect path
   logout: () => Promise<void>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -65,7 +69,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function logout() {
     try {
-      await apiFetch("/auth/logout", { method: "POST" });
+      // Send this session's refresh token so the server revokes it - otherwise it would stay usable for
+      // days after "logging out". Other devices sharing the same branch/supplier login are unaffected.
+      await apiFetch("/auth/logout", {
+        method: "POST",
+        body: JSON.stringify({ refresh_token: localStorage.getItem("spar_refresh_token") }),
+      });
     } catch (e) {
       // Even if the call fails (e.g. token already expired), still clear locally.
     }
@@ -73,8 +82,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }
 
+  // Changing the password revokes every older token (including this session's), so the API answers with a
+  // fresh pair; store it and reload the user so must_change_password clears and the dashboard appears.
+  async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+    const data = await apiFetch("/auth/change-password", {
+      method: "POST",
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+    });
+    setStoredTokens(data.access_token, data.refresh_token);
+    await loadCurrentUser();
+  }
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>{children}</AuthContext.Provider>
+    <AuthContext.Provider value={{ user, loading, login, logout, changePassword }}>{children}</AuthContext.Provider>
   );
 }
 

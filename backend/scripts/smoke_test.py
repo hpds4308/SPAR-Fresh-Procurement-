@@ -16,6 +16,11 @@ scroll up for which one and why.
 Assumes the standard seed scripts have been run (seed_master_data.py,
 seed_users.py) against a database this script is allowed to write test
 data into — do not point this at a real production database.
+
+Seed the throwaway database with `python -m scripts.seed_users --no-force-change`:
+by default every seeded account must choose its own password at first sign-in
+and the API refuses everything else until it does, which this script (it signs
+in with the seeded password) cannot do.
 """
 import argparse
 import json

@@ -9,13 +9,23 @@ code yet — resolves to "just don't show stock for these items," never
 an error surfaced to the branch user and never anything that blocks
 saving or submitting an order.
 
+That contract is enforced on three levels (QA findings BUG-07 / SEC-03):
+  * every network/protocol failure is caught, not just the URLError family - a reset connection, a
+    truncated body or a hang-up used to escape as an HTTP 500;
+  * short timeouts plus a circuit breaker: after one failure the POS is left alone for a minute, so a
+    dead POS costs one slow request per minute instead of one per page load;
+  * a small cap on simultaneous POS calls, so even a slow-but-alive POS can never tie up more than a
+    handful of workers (and, with them, database connections).
+
 Field ownership: the POS system's own product code is products.pos_code,
 and its own location code is branches.pos_location_code — both distinct
 from and never assumed to match our own product_code/branch_code (see
 the models for why).
 """
+import http.client
 import json
 import logging
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -25,7 +35,18 @@ from app.core.config import settings
 
 logger = logging.getLogger("spar.pos_stock")
 
-REQUEST_TIMEOUT = 15
+# Seconds allowed for each socket operation (connect / read). Was 15: with two calls per lookup a dead POS
+# held a worker for 30 s. A healthy POS answers in well under a second.
+REQUEST_TIMEOUT = 5
+# After a failed call, skip the POS entirely for this long instead of retrying on every page load.
+FAILURE_COOLDOWN_SECONDS = 60
+# At most this many POS calls in flight at once; further requests just show no stock figures.
+MAX_CONCURRENT_POS_CALLS = 4
+
+# Everything that can go wrong talking to a remote HTTP server: URLError/HTTPError/TimeoutError/
+# ConnectionResetError/ConnectionAbortedError are all OSError; truncated or malformed HTTP is
+# http.client.HTTPException (IncompleteRead, RemoteDisconnected, BadStatusLine); bad JSON is ValueError.
+_NETWORK_ERRORS = (OSError, http.client.HTTPException, ValueError)
 # The vendor's doc states a token is valid for 20 minutes; re-authenticate
 # a little early so a request never starts on a token that expires mid-flight.
 _TOKEN_LIFETIME_SECONDS = 18 * 60
@@ -34,6 +55,17 @@ _TOKEN_LIFETIME_SECONDS = 18 * 60
 # like Redis for a single bearer token.
 _cached_token: str | None = None
 _cached_token_expires_at: float = 0.0
+
+# Circuit breaker state (monotonic clock) and the in-flight cap.
+_breaker_open_until: float = 0.0
+_slots = threading.BoundedSemaphore(MAX_CONCURRENT_POS_CALLS)
+
+
+def _trip_breaker(reason: object) -> None:
+    global _breaker_open_until, _cached_token, _cached_token_expires_at
+    _breaker_open_until = time.monotonic() + FAILURE_COOLDOWN_SECONDS
+    _cached_token, _cached_token_expires_at = None, 0.0  # the failure may have been an expired token
+    logger.warning("POS unavailable (%s); skipping stock lookups for %ss", reason, FAILURE_COOLDOWN_SECONDS)
 
 
 def _is_configured() -> bool:
@@ -74,7 +106,7 @@ def _get_token() -> str | None:
     try:
         with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
             body = json.loads(resp.read())
-    except (urllib.error.URLError, TimeoutError, ValueError) as e:
+    except _NETWORK_ERRORS as e:
         logger.warning("could not authenticate with the POS system: %s", e)
         return None
 
@@ -99,20 +131,30 @@ def get_stock_in_hand(pos_product_codes: list[str], pos_location_code: str) -> d
     if not pos_product_codes or not pos_location_code or not _is_configured():
         return {}
 
-    token = _get_token()
-    if not token:
-        return {}
+    if time.monotonic() < _breaker_open_until:
+        return {}  # POS recently failed - don't make this request wait for it too
+    if not _slots.acquire(blocking=False):
+        return {}  # POS is already busy serving other requests - degrade instead of queueing
 
-    base = settings.POS_API_BASE_URL.rstrip("/")
     try:
-        body = _post_json(
-            f"{base}/api/SIH/getSIH",
-            {"Products": pos_product_codes, "Locations": [pos_location_code]},
-            token=token,
-        )
-    except (urllib.error.URLError, TimeoutError, ValueError) as e:
-        logger.warning("could not fetch stock-in-hand from the POS system: %s", e)
-        return {}
+        token = _get_token()
+        if not token:
+            _trip_breaker("authentication failed")
+            return {}
+
+        base = settings.POS_API_BASE_URL.rstrip("/")
+        try:
+            body = _post_json(
+                f"{base}/api/SIH/getSIH",
+                {"Products": pos_product_codes, "Locations": [pos_location_code]},
+                token=token,
+            )
+        except _NETWORK_ERRORS as e:
+            logger.warning("could not fetch stock-in-hand from the POS system: %s", e)
+            _trip_breaker(type(e).__name__)
+            return {}
+    finally:
+        _slots.release()
 
     result: dict[str, float] = {}
     for location in body.get("Data") or []:

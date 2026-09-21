@@ -18,10 +18,14 @@ def _import_app_with_env(app_env):
     the module cache afterward so this doesn't leak into other tests.
     """
     original_env = os.environ.get("APP_ENV")
+    original_secret = os.environ.get("SECRET_KEY")
     modules_to_clear = ["app.main", "app.core.config"]
     saved_modules = {name: sys.modules.get(name) for name in modules_to_clear}
     try:
         os.environ["APP_ENV"] = app_env
+        # A production start-up now refuses the placeholder SECRET_KEY (SEC-10), so give this
+        # simulated production boot a real-looking key. Restored below like APP_ENV.
+        os.environ["SECRET_KEY"] = "test-only-secret-that-is-not-a-placeholder-0123456789abcdef"
         for name in modules_to_clear:
             sys.modules.pop(name, None)
         main = importlib.import_module("app.main")
@@ -31,6 +35,10 @@ def _import_app_with_env(app_env):
             os.environ.pop("APP_ENV", None)
         else:
             os.environ["APP_ENV"] = original_env
+        if original_secret is None:
+            os.environ.pop("SECRET_KEY", None)
+        else:
+            os.environ["SECRET_KEY"] = original_secret
         for name, mod in saved_modules.items():
             if mod is not None:
                 sys.modules[name] = mod

@@ -1,10 +1,9 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Body, Depends, Request
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.security import get_current_user, get_user_roles, decode_token, create_access_token
+from app.core.security import get_current_user_allow_pending, get_user_roles
 from app.core.audit import write_audit_log
-from app.core.errors import UnauthorizedError
 from app.core.rate_limit import limiter
 from app.models.user import User
 from app.models.branch import Branch
@@ -13,7 +12,9 @@ from app.schemas.auth import (
     LoginRequest,
     TokenResponse,
     RefreshRequest,
+    LogoutRequest,
     ChangePasswordRequest,
+    ChangePasswordResponse,
     RedeemRecoveryTokenRequest,
     CurrentUserResponse,
 )
@@ -25,7 +26,7 @@ router = APIRouter(prefix="/auth")
 @router.post("/login", response_model=TokenResponse)
 @limiter.limit("10/minute")
 def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)):
-    access_token, refresh_token, role, redirect_to = auth_service.authenticate(
+    access_token, refresh_token, role, redirect_to, must_change = auth_service.authenticate(
         db, payload.username, payload.password, ip_address=request.client.host if request.client else None
     )
     return TokenResponse(
@@ -33,29 +34,43 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
         refresh_token=refresh_token,
         role=role,
         redirect_to=redirect_to,
+        must_change_password=must_change,
     )
 
 
 @router.post("/refresh", response_model=TokenResponse)
 def refresh(payload: RefreshRequest, db: Session = Depends(get_db)):
-    user_id = decode_token(payload.refresh_token, expected_type="refresh")
-    user = db.get(User, user_id)
-    if not user or not user.is_active:
-        raise UnauthorizedError("Account is inactive or does not exist.")
-    roles = get_user_roles(db, user.id)
-    primary_role = roles[0] if roles else ""
-    access_token = create_access_token(user.id)
+    access_token, refresh_token, role, redirect_to, must_change = auth_service.refresh_session(db, payload.refresh_token)
     return TokenResponse(
         access_token=access_token,
-        refresh_token=payload.refresh_token,
-        role=primary_role,
-        redirect_to=auth_service.ROLE_REDIRECTS.get(primary_role, "/"),
+        refresh_token=refresh_token,
+        role=role,
+        redirect_to=redirect_to,
+        must_change_password=must_change,
     )
 
 
 @router.post("/logout")
-def logout(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    write_audit_log(db, user_id=current_user.id, role=None, action="LOGOUT", entity_type="user", entity_id=current_user.id)
+def logout(
+    payload: LogoutRequest | None = Body(default=None),
+    current_user: User = Depends(get_current_user_allow_pending),
+    db: Session = Depends(get_db),
+):
+    """
+    Ends this session: the refresh token the client sends is revoked, so it cannot mint new access
+    tokens. (The short-lived access token simply runs out.) Other sessions on the same shared
+    branch/supplier login are untouched. Older clients that send no body still log out locally.
+    """
+    revoked = auth_service.revoke_refresh_token(db, current_user, payload.refresh_token if payload else None)
+    write_audit_log(
+        db,
+        user_id=current_user.id,
+        role=None,
+        action="LOGOUT",
+        entity_type="user",
+        entity_id=current_user.id,
+        description=None if revoked else "No refresh token supplied/valid - session not server-revoked.",
+    )
     return {"detail": "Logged out."}
 
 
@@ -75,18 +90,20 @@ def redeem_recovery_token(payload: RedeemRecoveryTokenRequest, request: Request,
     return {"detail": "Password reset. You can now log in with your new password."}
 
 
-@router.post("/change-password")
+@router.post("/change-password", response_model=ChangePasswordResponse)
 def change_password(
     payload: ChangePasswordRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_allow_pending),
     db: Session = Depends(get_db),
 ):
-    auth_service.change_password(db, current_user, payload.current_password, payload.new_password)
-    return {"detail": "Password changed successfully."}
+    access_token, refresh_token = auth_service.change_password(
+        db, current_user, payload.current_password, payload.new_password
+    )
+    return ChangePasswordResponse(access_token=access_token, refresh_token=refresh_token)
 
 
 @router.get("/me", response_model=CurrentUserResponse)
-def me(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def me(current_user: User = Depends(get_current_user_allow_pending), db: Session = Depends(get_db)):
     roles = get_user_roles(db, current_user.id)
     role = roles[0] if roles else ""
     branch_name = None
@@ -101,6 +118,7 @@ def me(current_user: User = Depends(get_current_user), db: Session = Depends(get
         id=current_user.id,
         username=current_user.username,
         role=role,
+        must_change_password=current_user.must_change_password,
         branch_id=current_user.branch_id,
         branch_name=branch_name,
         supplier_id=current_user.supplier_id,

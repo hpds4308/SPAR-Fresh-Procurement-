@@ -143,6 +143,7 @@ def create_user(
         branch_id=branch_id,
         supplier_id=supplier_id,
         is_active=True,
+        must_change_password=True,  # the admin has seen this temporary password
     )
     db.add(user)
     db.commit()
@@ -189,6 +190,8 @@ def reset_password(
     user.password_hash = hash_password(temp_password)
     user.failed_login_attempts = 0
     user.locked_until = None
+    user.token_version += 1  # every session opened with the old password is now dead
+    user.must_change_password = True  # ...and the new one is only a temporary password
     db.commit()
 
     write_audit_log(
@@ -239,6 +242,9 @@ def update_user(
         user.password_hash = hash_password(payload.password)
         user.failed_login_attempts = 0
         user.locked_until = None
+        user.token_version += 1
+        if user.id != admin.id:  # someone else knows it -> they must pick their own; an admin setting their own is fine
+            user.must_change_password = True
         changes.append("password set")
 
     db.commit()
@@ -281,6 +287,7 @@ def deactivate_user(user_id: int, admin: User = Depends(require_roles("ADMIN")),
     if not user:
         raise NotFoundError("User not found.")
     user.is_active = False
+    user.token_version += 1  # so re-activating later does not bring old sessions back to life
     db.commit()
     write_audit_log(db, user_id=admin.id, role="ADMIN", action="USER_DISABLED", entity_type="user", entity_id=user_id)
     return {"detail": "User deactivated."}
