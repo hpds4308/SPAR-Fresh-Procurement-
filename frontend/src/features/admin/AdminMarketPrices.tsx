@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ApiError } from "../../api/client";
 import { compareProductDisplayOrder, fetchProducts, Product } from "../../api/orders";
-import { fetchLastReferencePrices, fetchPriceWindow, fetchReferencePrices, setReferencePrice } from "../../api/pricing";
+import { fetchLastReferencePrices, fetchReferencePrices, setReferencePrice } from "../../api/pricing";
 import EmptyState from "../shared/EmptyState";
 import { SkeletonTable } from "../shared/ui/Skeleton";
 import { CategoryBadge } from "../shared/ui/CategoryBadge";
@@ -14,6 +14,14 @@ type CellState = "idle" | "saving" | "saved" | "error";
 function formatDate(iso: string): string {
   const d = new Date(iso + "T00:00:00");
   return d.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+}
+
+function todayIso(): string {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
 }
 
 export default function AdminMarketPrices() {
@@ -33,9 +41,7 @@ export default function AdminMarketPrices() {
     fetchProducts()
       .then(setProducts)
       .catch((err) => setError(err instanceof ApiError ? err.message : "Could not load products."));
-    fetchPriceWindow()
-      .then((w) => setDeliveryDate(w.delivery_date))
-      .catch(() => {});
+    setDeliveryDate(todayIso());
     fetchLastReferencePrices(SOURCE)
       .then((data) => {
         const next: Record<number, { price: number; delivery_date: string }> = {};
