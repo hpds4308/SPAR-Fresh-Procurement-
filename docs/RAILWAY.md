@@ -131,6 +131,18 @@ the `*.up.railway.app` ones, and redeploy both services.
   service, and **Settings → Deploy → Custom Start Command**:
   `python -m scripts.import_harti_prices`. No public domain needed for
   this one.
+- **`keells-price-import`** (the daily automated Keells retail-price
+  scrape) is also optional — without it, Admin can still fill Keells
+  prices by hand or with the "Sync from Keells Now" button on the Keells
+  Price tab, which runs the same scrape on demand from the backend
+  service itself. To add the scheduled version: **+ New** → **GitHub
+  Repo** → this repo, **Root Directory**: `backend`, **Settings → Build →
+  Dockerfile Path**: `Dockerfile.keells-scrape` (this one needs a real
+  headless Chromium baked in, unlike `harti-price-import` — don't reuse
+  the plain backend Dockerfile), same `DATABASE_URL`/`APP_ENV` variables
+  as the backend service. No public domain, and no Custom Start Command
+  needed — the Dockerfile's own `CMD` runs
+  `python -m scripts.import_keells_prices`.
 
 ## Updating later
 

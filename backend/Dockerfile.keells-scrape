@@ -1,0 +1,19 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq-dev gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Chromium + its OS-level dependencies for headless scraping — kept in this
+# dedicated Dockerfile (not the main backend/Dockerfile) so the API image
+# stays lean; only this worker needs a real browser.
+RUN playwright install --with-deps chromium
+
+COPY . .
+
+CMD ["python", "-m", "scripts.import_keells_prices"]
