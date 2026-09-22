@@ -1,9 +1,11 @@
 from datetime import date
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.errors import ValidationFailedError
 from app.core.security import get_current_user, require_roles
 from app.models.product import Product
 from app.models.user import User
@@ -14,6 +16,7 @@ from app.schemas.pricing import (
     AdminSupplierPriceOut,
     AdjustPriceRequest,
     LastPriceOut,
+    KeellsImportResultOut,
     ReferencePriceOut,
     ReferencePriceSetRequest,
 )
@@ -210,3 +213,28 @@ def set_reference_price(
     if row is None:
         return None
     return ReferencePriceOut(product_id=row.product_id, source=row.source, price=float(row.price), delivery_date=row.delivery_date)
+
+
+# Generous ceiling for the Keells import spreadsheet — the real file is a
+# few hundred KB for ~60 rows; this only rejects something clearly wrong,
+# same reasoning as MAX_ORDER_EXCEL_BYTES in orders.py.
+MAX_KEELLS_EXCEL_BYTES = 2 * 1024 * 1024
+
+
+@router.post("/reference/keells-import", response_model=KeellsImportResultOut)
+async def import_keells_prices(
+    delivery_date: date,
+    file: UploadFile = File(...),
+    admin: User = Depends(require_roles("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """
+    Bulk-imports KEELLS reference prices from the .xlsx produced by the
+    external Keells scraper (DC Code + Numeric Price columns), upserting
+    into the same market_reference_prices table manual entry on
+    AdminKeellsPrices.tsx uses. Never touches any other price source.
+    """
+    contents = await file.read(MAX_KEELLS_EXCEL_BYTES + 1)
+    if len(contents) > MAX_KEELLS_EXCEL_BYTES:
+        raise ValidationFailedError("That file is too large — please upload the scraper's output file as-is.")
+    return await run_in_threadpool(pricing_service.import_keells_prices, db, admin, delivery_date, contents)
