@@ -1,14 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ApiError } from "../../api/client";
 import { compareProductDisplayOrder, fetchProducts, Product } from "../../api/orders";
-import {
-  fetchLastReferencePrices,
-  fetchPriceWindow,
-  fetchReferencePrices,
-  importKeellsPrices,
-  KeellsImportResult,
-  setReferencePrice,
-} from "../../api/pricing";
+import { fetchLastReferencePrices, fetchPriceWindow, fetchReferencePrices, setReferencePrice } from "../../api/pricing";
 import EmptyState from "../shared/EmptyState";
 import { SkeletonTable } from "../shared/ui/Skeleton";
 import { CategoryBadge } from "../shared/ui/CategoryBadge";
@@ -34,38 +27,6 @@ export default function AdminKeellsPrices() {
   const [lastPrices, setLastPrices] = useState<Record<number, { price: number; delivery_date: string }>>({});
   const [carriedForwardIds, setCarriedForwardIds] = useState<Set<number>>(new Set());
 
-  const [importing, setImporting] = useState(false);
-  const [importResult, setImportResult] = useState<KeellsImportResult | null>(null);
-  const [importError, setImportError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  function reloadLastPrices() {
-    return fetchLastReferencePrices().then((data) => {
-      const next: Record<number, { price: number; delivery_date: string }> = {};
-      for (const r of data) next[r.product_id] = { price: r.price, delivery_date: r.delivery_date };
-      setLastPrices(next);
-    });
-  }
-
-  async function handleImportFile(file: File) {
-    setImporting(true);
-    setImportError(null);
-    setImportResult(null);
-    try {
-      const result = await importKeellsPrices(file, deliveryDate);
-      setImportResult(result);
-      // Reloading lastPrices (rather than deliveryDate) re-triggers the
-      // effect below regardless of whether the imported rows landed on
-      // today's deliveryDate, since that effect depends on both.
-      await reloadLastPrices();
-    } catch (err) {
-      setImportError(err instanceof ApiError ? err.message : "Could not import that file.");
-    } finally {
-      setImporting(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    }
-  }
-
   useEffect(() => {
     fetchProducts()
       .then(setProducts)
@@ -73,7 +34,13 @@ export default function AdminKeellsPrices() {
     fetchPriceWindow()
       .then((w) => setDeliveryDate(w.delivery_date))
       .catch(() => {});
-    reloadLastPrices().catch(() => {});
+    fetchLastReferencePrices()
+      .then((data) => {
+        const next: Record<number, { price: number; delivery_date: string }> = {};
+        for (const r of data) next[r.product_id] = { price: r.price, delivery_date: r.delivery_date };
+        setLastPrices(next);
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -186,45 +153,11 @@ export default function AdminKeellsPrices() {
             ))}
           </select>
           <span className="text-xs text-crate-800/40">{filteredProducts.length} items</span>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".xlsx"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) handleImportFile(file);
-            }}
-          />
-          <button
-            type="button"
-            disabled={importing || !deliveryDate}
-            onClick={() => fileInputRef.current?.click()}
-            className="border border-sage-300 bg-sage-50/60 hover:bg-sage-100 rounded-full px-4 py-1.5 text-sm text-crate-800/80 transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {importing ? "Importing…" : "Import from Excel"}
-          </button>
         </div>
         {deliveryDate && (
           <p className="text-xs text-crate-800/40 mt-3">
             Prices entered here for {formatDate(deliveryDate)} show up automatically on the Supplier Prices page's
-            Keells Price column — no separate step needed. You can also import the scraper's .xlsx output above to
-            fill in prices for {formatDate(deliveryDate)} in bulk.
-          </p>
-        )}
-        {importError && <p className="text-xs text-tomato-600 mt-2">{importError}</p>}
-        {importResult && (
-          <p className="text-xs text-crate-700 mt-2">
-            Imported {importResult.saved} price{importResult.saved === 1 ? "" : "s"} for{" "}
-            {formatDate(importResult.delivery_date)}
-            {importResult.unmatched.length > 0 && (
-              <>
-                {" "}
-                — {importResult.unmatched.length} item{importResult.unmatched.length === 1 ? "" : "s"} from the file
-                didn't match a known product: {importResult.unmatched.map((u) => u.system_name || u.dc_code).join(", ")}
-              </>
-            )}
-            .
+            Keells Price column — no separate step needed.
           </p>
         )}
       </div>

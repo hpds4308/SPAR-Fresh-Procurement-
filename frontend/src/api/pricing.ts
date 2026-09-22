@@ -83,26 +83,6 @@ export function setReferencePrice(
   });
 }
 
-export type KeellsImportResult = {
-  delivery_date: string;
-  matched: number;
-  saved: number;
-  skipped_rows: number;
-  unmatched: { dc_code: string; system_name: string | null }[];
-};
-
-// Uploads the .xlsx produced by the external Keells scraper (DC Code +
-// Numeric Price columns) and bulk-upserts KEELLS reference prices for
-// deliveryDate — an alternative to typing each price by hand.
-export function importKeellsPrices(file: File, deliveryDate: string): Promise<KeellsImportResult> {
-  const formData = new FormData();
-  formData.append("file", file);
-  return apiFetch(`/pricing/reference/keells-import?delivery_date=${deliveryDate}`, {
-    method: "POST",
-    body: formData,
-  });
-}
-
 export type AdminSupplierPrice = {
   id: number;
   supplier_id: number;
