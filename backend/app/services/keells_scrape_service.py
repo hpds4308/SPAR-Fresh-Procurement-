@@ -302,12 +302,17 @@ def _find_an_admin(db: Session) -> User | None:
 def run_scrape(db: Session, admin: User | None = None, delivery_date: date | None = None) -> dict:
     """
     Launches a headless Chromium, scrapes both Keells category pages,
-    matches against REQUIRED_PRODUCTS, and upserts a KEELLS reference
-    price for every match — for `delivery_date`, or the current price
-    window's delivery date if not given (same default used everywhere
-    else reference prices are set). Raises KeellsScrapeError if nothing
-    could be matched at all; individual unmatched/unparsable rows are
-    just skipped and reported back, same as the Excel-import path.
+    matches against REQUIRED_PRODUCTS, and REPLACES the day's KEELLS
+    reference prices with what it found — for `delivery_date`, or the
+    current price window's delivery date if not given (same default used
+    everywhere else reference prices are set). "Replaces" means every
+    existing KEELLS price for that date is cleared first (see
+    pricing_service.clear_reference_prices) and only what this run
+    actually matches is written back, so nothing stale (a manual entry,
+    an item dropped from Keells, a previous day's carried-forward value)
+    lingers after a sync — the Keells Price page is sync-only, not
+    hand-editable. Raises KeellsScrapeError if nothing could be matched
+    at all, in which case existing prices are left untouched.
     """
     from playwright.sync_api import sync_playwright  # imported lazily — only the scrape worker needs this
 
@@ -334,6 +339,8 @@ def run_scrape(db: Session, admin: User | None = None, delivery_date: date | Non
     products_by_code = {p.product_code: p for p in db.query(Product).all()}
     if delivery_date is None:
         delivery_date = pricing_service.get_price_window(db).delivery_date
+
+    pricing_service.clear_reference_prices(db, delivery_date, SOURCE)
 
     saved = 0
     skipped_no_price = 0

@@ -1,20 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ApiError } from "../../api/client";
 import { compareProductDisplayOrder, fetchProducts, Product } from "../../api/orders";
-import {
-  fetchLastReferencePrices,
-  fetchReferencePrices,
-  importKeellsPrices,
-  KeellsImportResult,
-  setReferencePrice,
-  syncKeellsPrices,
-} from "../../api/pricing";
+import { fetchReferencePrices, KeellsSyncResult, ReferencePrice, syncKeellsPrices } from "../../api/pricing";
 import EmptyState from "../shared/EmptyState";
 import { SkeletonTable } from "../shared/ui/Skeleton";
 import { CategoryBadge } from "../shared/ui/CategoryBadge";
 import { IconTag } from "../shared/Icons";
-
-type CellState = "idle" | "saving" | "saved" | "error";
 
 function formatDate(iso: string): string {
   const d = new Date(iso + "T00:00:00");
@@ -29,64 +20,43 @@ function todayIso(): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+// This page is sync-only, not hand-editable: prices come exclusively from
+// "Sync from Keells Now" (or the daily scheduled scrape), which replaces
+// the whole day's KEELLS prices in one shot — see
+// keells_scrape_service.run_scrape / pricing_service.clear_reference_prices.
+// A product with no synced price for the selected date is left out of the
+// list entirely rather than shown as a blank row.
 export default function AdminKeellsPrices() {
   const [products, setProducts] = useState<Product[]>([]);
-  const [deliveryDate, setDeliveryDate] = useState<string>("");
+  const [prices, setPrices] = useState<ReferencePrice[]>([]);
+  const [deliveryDate, setDeliveryDate] = useState<string>(todayIso());
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [drafts, setDrafts] = useState<Record<number, string>>({});
-  const [cellState, setCellState] = useState<Record<number, CellState>>({});
-  const [lastPrices, setLastPrices] = useState<Record<number, { price: number; delivery_date: string }>>({});
-  const [carriedForwardIds, setCarriedForwardIds] = useState<Set<number>>(new Set());
-
-  const [importing, setImporting] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [importResult, setImportResult] = useState<KeellsImportResult | null>(null);
-  const [importError, setImportError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [syncResult, setSyncResult] = useState<KeellsSyncResult | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
-  function reloadLastPrices() {
-    return fetchLastReferencePrices().then((data) => {
-      const next: Record<number, { price: number; delivery_date: string }> = {};
-      for (const r of data) next[r.product_id] = { price: r.price, delivery_date: r.delivery_date };
-      setLastPrices(next);
-    });
+  function reloadPrices() {
+    return fetchReferencePrices(deliveryDate).then(setPrices);
   }
 
   async function handleSyncNow() {
     setSyncing(true);
-    setImportError(null);
-    setImportResult(null);
+    setSyncError(null);
+    setSyncResult(null);
     try {
       const result = await syncKeellsPrices(deliveryDate);
-      setImportResult(result);
-      await reloadLastPrices();
+      setSyncResult(result);
+      if (result.delivery_date === deliveryDate) {
+        await reloadPrices();
+      }
     } catch (err) {
-      setImportError(err instanceof ApiError ? err.message : "Could not sync prices from Keells.");
+      setSyncError(err instanceof ApiError ? err.message : "Could not sync prices from Keells.");
     } finally {
       setSyncing(false);
-    }
-  }
-
-  async function handleImportFile(file: File) {
-    setImporting(true);
-    setImportError(null);
-    setImportResult(null);
-    try {
-      const result = await importKeellsPrices(file, deliveryDate);
-      setImportResult(result);
-      // Reloading lastPrices (rather than deliveryDate) re-triggers the
-      // effect below regardless of whether the imported rows landed on
-      // today's deliveryDate, since that effect depends on both.
-      await reloadLastPrices();
-    } catch (err) {
-      setImportError(err instanceof ApiError ? err.message : "Could not import that file.");
-    } finally {
-      setImporting(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
 
@@ -94,8 +64,6 @@ export default function AdminKeellsPrices() {
     fetchProducts()
       .then(setProducts)
       .catch((err) => setError(err instanceof ApiError ? err.message : "Could not load products."));
-    setDeliveryDate(todayIso());
-    reloadLastPrices().catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -105,23 +73,7 @@ export default function AdminKeellsPrices() {
     fetchReferencePrices(deliveryDate)
       .then((data) => {
         if (cancelled) return;
-        const next: Record<number, string> = {};
-        const confirmedIds = new Set<number>();
-        for (const r of data) {
-          next[r.product_id] = String(r.price);
-          confirmedIds.add(r.product_id);
-        }
-        const nextCarried = new Set<number>();
-        for (const [productIdStr, last] of Object.entries(lastPrices)) {
-          const productId = Number(productIdStr);
-          if (!confirmedIds.has(productId)) {
-            next[productId] = String(last.price);
-            nextCarried.add(productId);
-          }
-        }
-        setDrafts(next);
-        setCarriedForwardIds(nextCarried);
-        setCellState({});
+        setPrices(data);
         setError(null);
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : "Could not load Keells prices."))
@@ -131,43 +83,25 @@ export default function AdminKeellsPrices() {
     return () => {
       cancelled = true;
     };
-  }, [deliveryDate, lastPrices]);
+  }, [deliveryDate]);
+
+  const priceByProductId = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const p of prices) map.set(p.product_id, p.price);
+    return map;
+  }, [prices]);
 
   const categories = useMemo(() => Array.from(new Set(products.map((p) => p.category_name))).sort(), [products]);
 
+  // Only products with an actual synced price show up — no blank/empty rows.
   const filteredProducts = useMemo(() => {
     const q = search.trim().toLowerCase();
     return products
+      .filter((p) => priceByProductId.has(p.id))
       .filter((p) => (category ? p.category_name === category : true))
       .filter((p) => (q ? p.description.toLowerCase().includes(q) || p.product_code.toLowerCase().includes(q) : true))
       .sort(compareProductDisplayOrder);
-  }, [products, search, category]);
-
-  async function saveField(productId: number, raw: string) {
-    const trimmed = raw.trim();
-    const value = trimmed === "" ? null : Number(trimmed);
-    if (value !== null && (Number.isNaN(value) || value <= 0)) {
-      setCellState((s) => ({ ...s, [productId]: "error" }));
-      return;
-    }
-    setCellState((s) => ({ ...s, [productId]: "saving" }));
-    try {
-      await setReferencePrice(productId, deliveryDate, value);
-      setCellState((s) => ({ ...s, [productId]: "saved" }));
-      setCarriedForwardIds((prev) => {
-        if (!prev.has(productId)) return prev;
-        const next = new Set(prev);
-        next.delete(productId);
-        return next;
-      });
-      if (value !== null) {
-        setLastPrices((prev) => ({ ...prev, [productId]: { price: value, delivery_date: deliveryDate } }));
-      }
-      setTimeout(() => setCellState((s) => (s[productId] === "saved" ? { ...s, [productId]: "idle" } : s)), 1500);
-    } catch {
-      setCellState((s) => ({ ...s, [productId]: "error" }));
-    }
-  }
+  }, [products, priceByProductId, search, category]);
 
   if (error && products.length === 0) {
     return (
@@ -208,51 +142,32 @@ export default function AdminKeellsPrices() {
             ))}
           </select>
           <span className="text-xs text-crate-800/40">{filteredProducts.length} items</span>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".xlsx"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) handleImportFile(file);
-            }}
-          />
           <button
             type="button"
-            disabled={syncing || importing || !deliveryDate}
+            disabled={syncing || !deliveryDate}
             onClick={handleSyncNow}
             className="border border-crate-700/30 bg-crate-700 hover:bg-crate-800 rounded-full px-4 py-1.5 text-sm text-white transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {syncing ? "Syncing from Keells…" : "Sync from Keells Now"}
           </button>
-          <button
-            type="button"
-            disabled={importing || syncing || !deliveryDate}
-            onClick={() => fileInputRef.current?.click()}
-            className="border border-sage-300 bg-sage-50/60 hover:bg-sage-100 rounded-full px-4 py-1.5 text-sm text-crate-800/80 transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {importing ? "Importing…" : "Import from Excel"}
-          </button>
         </div>
         {deliveryDate && (
           <p className="text-xs text-crate-800/40 mt-3">
-            Prices entered here for {formatDate(deliveryDate)} show up automatically on the Supplier Prices page's
-            Keells Price column — no separate step needed. "Sync from Keells Now" scrapes keellssuper.com directly
-            (also runs automatically once a day) and fills in prices for {formatDate(deliveryDate)}; "Import from
-            Excel" does the same from a spreadsheet you already have.
+            Keells prices are sync-only — there's nothing to type in here. "Sync from Keells Now" scrapes
+            keellssuper.com directly (this also runs automatically once a day), replacing every price below for{" "}
+            {formatDate(deliveryDate)} with what it finds. A product with no current match from Keells simply won't
+            appear in the list.
           </p>
         )}
-        {importError && <p className="text-xs text-tomato-600 mt-2">{importError}</p>}
-        {importResult && (
+        {syncError && <p className="text-xs text-tomato-600 mt-2">{syncError}</p>}
+        {syncResult && (
           <p className="text-xs text-crate-700 mt-2">
-            {importResult.matched > 0 ? "Matched" : "Found"} {importResult.saved} price
-            {importResult.saved === 1 ? "" : "s"} for {formatDate(importResult.delivery_date)}
-            {importResult.unmatched.length > 0 && (
+            Synced {syncResult.saved} price{syncResult.saved === 1 ? "" : "s"} for {formatDate(syncResult.delivery_date)}
+            {syncResult.unmatched.length > 0 && (
               <>
                 {" "}
-                — {importResult.unmatched.length} item{importResult.unmatched.length === 1 ? "" : "s"} didn't match a
-                known product: {importResult.unmatched.map((u) => u.system_name || u.dc_code).join(", ")}
+                — {syncResult.unmatched.length} item{syncResult.unmatched.length === 1 ? "" : "s"} didn't match a
+                known product: {syncResult.unmatched.map((u) => u.system_name || u.dc_code).join(", ")}
               </>
             )}
             .
@@ -264,62 +179,26 @@ export default function AdminKeellsPrices() {
         {loading ? (
           <SkeletonTable rows={8} columns={2} />
         ) : filteredProducts.length === 0 ? (
-          <EmptyState icon={<IconTag width={20} height={20} />} title="No products match your filters" />
+          <EmptyState
+            icon={<IconTag width={20} height={20} />}
+            title={prices.length === 0 ? "No Keells prices synced for this date yet" : "No products match your filters"}
+          />
         ) : (
           <div className="divide-y divide-sage-100">
-            {filteredProducts.map((p) => {
-              const state = cellState[p.id] ?? "idle";
-              const isCarried = carriedForwardIds.has(p.id);
-              return (
-                <div key={p.id} className="flex items-center justify-between px-5 py-3 hover:bg-sage-50/50 transition-colors duration-100">
-                  <div className="min-w-0">
-                    <p className="text-sm text-crate-950 truncate">{p.description}</p>
-                    <div className="flex items-center gap-1.5 mt-0.5">
-                      <span className="text-xs text-crate-800/40">{p.product_code}</span>
-                      <CategoryBadge name={p.category_name} />
-                    </div>
-                  </div>
-                  <div className="flex flex-col items-end gap-0.5 shrink-0 ml-4">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs text-crate-800/40">Rs.</span>
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        placeholder="—"
-                        value={drafts[p.id] ?? ""}
-                        onChange={(e) => {
-                          setDrafts((d) => ({ ...d, [p.id]: e.target.value }));
-                          setCarriedForwardIds((prev) => {
-                            if (!prev.has(p.id)) return prev;
-                            const next = new Set(prev);
-                            next.delete(p.id);
-                            return next;
-                          });
-                        }}
-                        onBlur={(e) => saveField(p.id, e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
-                        className={`w-24 border rounded-full px-3 py-1.5 text-sm text-right focus:outline-none focus:ring-2 focus:ring-crate-700/30 focus:border-crate-700 focus:bg-white transition-colors duration-150 ${
-                          state === "error"
-                            ? "border-tomato-500 ring-1 ring-tomato-500/30 bg-sage-50/60"
-                            : isCarried
-                            ? "border-mango-500/40 bg-mango-500/5 text-crate-800/70"
-                            : "border-sage-300 bg-sage-50/60"
-                        }`}
-                      />
-                      {state === "saving" && <span className="text-[10px] text-crate-800/35">…</span>}
-                      {state === "saved" && <span className="text-[10px] text-crate-700">✓</span>}
-                      {state === "error" && <span className="text-[10px] text-tomato-600">!</span>}
-                    </div>
-                    {isCarried && lastPrices[p.id] && (
-                      <span className="text-[9px] text-mango-600/70 leading-none">
-                        from {new Date(lastPrices[p.id].delivery_date + "T00:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short" })}
-                      </span>
-                    )}
+            {filteredProducts.map((p) => (
+              <div key={p.id} className="flex items-center justify-between px-5 py-3 hover:bg-sage-50/50 transition-colors duration-100">
+                <div className="min-w-0">
+                  <p className="text-sm text-crate-950 truncate">{p.description}</p>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span className="text-xs text-crate-800/40">{p.product_code}</span>
+                    <CategoryBadge name={p.category_name} />
                   </div>
                 </div>
-              );
-            })}
+                <div className="shrink-0 ml-4 text-sm text-crate-950 tabular-nums">
+                  Rs. {priceByProductId.get(p.id)?.toFixed(2)}
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>

@@ -88,17 +88,17 @@ class ReferencePriceSetRequest(BaseModel):
         return round(v, 2)
 
 
-class KeellsImportUnmatched(BaseModel):
+class KeellsSyncUnmatched(BaseModel):
     dc_code: str
     system_name: str | None = None
 
 
-class KeellsImportResultOut(BaseModel):
+class KeellsSyncResultOut(BaseModel):
     delivery_date: date
     matched: int
     saved: int
     skipped_rows: int
-    unmatched: list[KeellsImportUnmatched]
+    unmatched: list[KeellsSyncUnmatched]
 
 
 class AdminSupplierPriceOut(BaseModel):
