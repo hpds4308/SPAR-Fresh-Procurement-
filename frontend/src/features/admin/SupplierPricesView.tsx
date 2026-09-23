@@ -20,11 +20,26 @@ function formatDate(iso: string): string {
   return d.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 }
 
+function todayIso(): string {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 type CellState = "idle" | "saving" | "saved" | "error";
 type SendState = "idle" | "sending" | "error";
 
 export default function SupplierPricesView() {
   const [deliveryDate, setDeliveryDate] = useState<string>("");
+  // Keells reference prices are entered/synced against TODAY's date (see
+  // AdminKeellsPrices.tsx), not the supplier submission cycle's delivery
+  // date above — these are two different, independent date conventions,
+  // so the Keells Price column below must look itself up by today's date
+  // rather than reusing `deliveryDate`, or it'll show nothing on any day
+  // that isn't also the current cycle's delivery date.
+  const [keellsDate] = useState<string>(todayIso());
   const [supplierId, setSupplierId] = useState<number | "">("");
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [rows, setRows] = useState<AdminSupplierPrice[]>([]);
@@ -107,9 +122,8 @@ export default function SupplierPricesView() {
   }, [deliveryDate, supplierId]);
 
   useEffect(() => {
-    if (!deliveryDate) return;
     let cancelled = false;
-    fetchReferencePrices(deliveryDate)
+    fetchReferencePrices(keellsDate)
       .then((data) => {
         if (cancelled) return;
         const next: Record<number, string> = {};
@@ -118,10 +132,9 @@ export default function SupplierPricesView() {
           next[r.product_id] = String(r.price);
           confirmedIds.add(r.product_id);
         }
-        // Pre-fill anything with no entry for this exact date, using the
-        // most recent value we know for that product — Admin sees a
-        // number immediately instead of a blank field, but nothing is
-        // written for this date until they actually interact with it.
+        // Pre-fill anything with no entry for today, using the most
+        // recent value we know for that product — Admin sees a number
+        // immediately instead of a blank field.
         const nextCarried = new Set<number>();
         for (const [productIdStr, last] of Object.entries(lastReferencePrices)) {
           const productId = Number(productIdStr);
@@ -139,7 +152,7 @@ export default function SupplierPricesView() {
     return () => {
       cancelled = true;
     };
-  }, [deliveryDate, lastReferencePrices]);
+  }, [keellsDate, lastReferencePrices]);
 
   const q = search.trim().toLowerCase();
 
