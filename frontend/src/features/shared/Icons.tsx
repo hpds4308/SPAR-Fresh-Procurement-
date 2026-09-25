@@ -119,6 +119,16 @@ export function IconChat(props: IconProps) {
   );
 }
 
+export function IconShield(props: IconProps) {
+  return base(
+    <>
+      <path d="M10 2.8 4 5v4.6c0 3.6 2.5 6.4 6 7.6 3.5-1.2 6-4 6-7.6V5l-6-2.2Z" />
+      <path d="m7.4 10 1.8 1.8 3.4-3.6" />
+    </>,
+    props
+  );
+}
+
 export function IconChevronLeft(props: IconProps) {
   return base(
     <>

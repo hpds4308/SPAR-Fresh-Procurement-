@@ -2,16 +2,17 @@ import { useEffect, useState } from "react";
 import { useAuth } from "../auth/AuthContext";
 import DashboardShell from "../shared/DashboardShell";
 import { SidebarItem } from "../shared/Sidebar";
-import { IconPlus, IconClock, IconChat, IconLog } from "../shared/Icons";
+import { IconPlus, IconClock, IconChat, IconLog, IconShield } from "../shared/Icons";
 import { fetchMyUnreadCount } from "../../api/messages";
 import OrderForm from "./OrderForm";
 import OrderHistory from "./OrderHistory";
 import BranchMessages from "./BranchMessages";
+import SafetyStock from "./SafetyStock";
 import BranchGuidelines from "./BranchGuidelines";
 import BranchWelcomeScreen from "./BranchWelcomeScreen";
 import { FadeSwitch } from "../shared/ui/FadeSwitch";
 
-type Tab = "new" | "history" | "messages" | "guidelines";
+type Tab = "new" | "history" | "safety" | "messages" | "guidelines";
 
 const iconProps = { width: 17, height: 17 };
 const UNREAD_POLL_MS = 15000;
@@ -62,6 +63,7 @@ export default function BranchDashboard() {
   const navItems: SidebarItem<Tab>[] = [
     { id: "new", label: "New Order", icon: <IconPlus {...iconProps} /> },
     { id: "history", label: "My Orders", icon: <IconClock {...iconProps} /> },
+    { id: "safety", label: "Safety Stock", icon: <IconShield {...iconProps} /> },
     { id: "messages", label: "Messages", icon: <IconChat {...iconProps} />, badge: unread },
     { id: "guidelines", label: "Branch Guidelines", icon: <IconLog {...iconProps} /> },
   ];
@@ -88,6 +90,7 @@ export default function BranchDashboard() {
       <FadeSwitch tabKey={tab}>
         {tab === "new" && <OrderForm onSubmitted={() => setRefreshKey((k) => k + 1)} />}
         {tab === "history" && <OrderHistory refreshKey={refreshKey} />}
+        {tab === "safety" && <SafetyStock />}
         {tab === "messages" && <BranchMessages />}
         {tab === "guidelines" && <BranchGuidelines />}
       </FadeSwitch>
