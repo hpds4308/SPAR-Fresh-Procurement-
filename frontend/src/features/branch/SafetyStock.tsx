@@ -3,6 +3,8 @@ import { ApiError } from "../../api/client";
 import { Product, compareProductDisplayOrder, fetchProducts } from "../../api/orders";
 import { fetchMySafetyStock, saveMySafetyStock } from "../../api/safetyStock";
 import { CategoryBadge } from "../shared/ui/CategoryBadge";
+import { PromotionBadge } from "../shared/ui/PromotionBadge";
+import { useActivePromotions } from "../shared/useActivePromotions";
 import { Modal } from "../shared/ui/Modal";
 import Button from "../shared/ui/Button";
 
@@ -21,6 +23,7 @@ export default function SafetyStock() {
   const [saved, setSaved] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const promotions = useActivePromotions();
 
   function applySaved(q: Record<number, number>, at: string | null) {
     const next: Record<number, string> = {};
@@ -147,7 +150,12 @@ export default function SafetyStock() {
         {filtered.map((p) => (
           <div key={p.id} className="flex items-center justify-between px-6 py-3 hover:bg-sage-50/50 transition-colors duration-100">
             <div className="min-w-0">
-              <p className="text-sm text-crate-950 truncate">{p.description}</p>
+              <div className="flex items-center gap-2 min-w-0">
+                <p className="text-sm text-crate-950 truncate">{p.description}</p>
+                {promotions[p.id] && (
+                  <PromotionBadge type={promotions[p.id].promotion_type} endDate={promotions[p.id].end_date} />
+                )}
+              </div>
               <div className="flex items-center gap-1.5 mt-0.5">
                 <span className="text-xs text-crate-800/40">{p.product_code}</span>
                 <CategoryBadge name={p.category_name} />

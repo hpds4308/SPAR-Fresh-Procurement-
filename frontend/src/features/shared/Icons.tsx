@@ -129,6 +129,17 @@ export function IconShield(props: IconProps) {
   );
 }
 
+export function IconPercent(props: IconProps) {
+  return base(
+    <>
+      <path d="m5 15 10-10" />
+      <circle cx="6" cy="6" r="1.8" />
+      <circle cx="14" cy="14" r="1.8" />
+    </>,
+    props
+  );
+}
+
 export function IconChevronLeft(props: IconProps) {
   return base(
     <>

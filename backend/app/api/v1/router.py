@@ -17,6 +17,7 @@ from app.api.v1 import (
     settings,
     branches,
     safety_stock,
+    promotions,
 )
 
 api_router = APIRouter()
@@ -36,3 +37,4 @@ api_router.include_router(audit_logs.router, tags=["audit-logs"])
 api_router.include_router(settings.router, tags=["settings"])
 api_router.include_router(branches.router, tags=["branches"])
 api_router.include_router(safety_stock.router, tags=["safety-stock"])
+api_router.include_router(promotions.router, tags=["promotions"])

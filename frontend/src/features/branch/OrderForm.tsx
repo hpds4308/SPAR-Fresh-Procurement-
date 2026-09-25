@@ -14,6 +14,8 @@ import {
   saveDraftOrder,
 } from "../../api/orders";
 import { CategoryBadge } from "../shared/ui/CategoryBadge";
+import { PromotionBadge } from "../shared/ui/PromotionBadge";
+import { useActivePromotions } from "../shared/useActivePromotions";
 
 function formatDate(iso: string): string {
   const d = new Date(iso + "T00:00:00");
@@ -36,6 +38,7 @@ export default function OrderForm({ onSubmitted }: { onSubmitted: () => void }) 
   const [window_, setWindow] = useState<OrderWindow | null>(null);
   const [myOrder, setMyOrder] = useState<Order | null>(null);
   const [stockByProduct, setStockByProduct] = useState<Record<number, number>>({});
+  const promotions = useActivePromotions();
   // Product IDs a real photo was found for, discovered by silently
   // preloading every product's image once products are known (below) —
   // this decides whether hovering an item's name can pop anything up at
@@ -413,13 +416,18 @@ export default function OrderForm({ onSubmitted }: { onSubmitted: () => void }) 
         {filtered.map((p) => (
           <div key={p.id} className="flex items-center justify-between px-6 py-3 hover:bg-sage-50/50 transition-colors duration-100">
             <div className="min-w-0">
-              <p
-                className={`text-sm text-crate-950 truncate w-fit ${hasImage.has(p.id) ? "cursor-pointer" : ""}`}
-                onMouseEnter={(e) => hasImage.has(p.id) && showPreview(p.id, e.currentTarget)}
-                onMouseLeave={hidePreview}
-              >
-                {p.description}
-              </p>
+              <div className="flex items-center gap-2 min-w-0">
+                <p
+                  className={`text-sm text-crate-950 truncate w-fit ${hasImage.has(p.id) ? "cursor-pointer" : ""}`}
+                  onMouseEnter={(e) => hasImage.has(p.id) && showPreview(p.id, e.currentTarget)}
+                  onMouseLeave={hidePreview}
+                >
+                  {p.description}
+                </p>
+                {promotions[p.id] && (
+                  <PromotionBadge type={promotions[p.id].promotion_type} endDate={promotions[p.id].end_date} />
+                )}
+              </div>
               <div className="flex items-center gap-1.5 mt-0.5">
                 <span className="text-xs text-crate-800/40">
                   {p.product_code}
