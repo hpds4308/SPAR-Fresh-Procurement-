@@ -42,9 +42,9 @@ def auto_generate_selling_prices(
     admin: User = Depends(require_roles("ADMIN")),
     db: Session = Depends(get_db),
 ):
-    """Fills Selling Price for every active product that doesn't have one yet,
-    using GP = (selling - cost) / selling solved for selling price. Products
-    with a selling price already set are left exactly as they are."""
+    """Recalculates Selling Price for every active product with a cost price,
+    using GP = (selling - cost) / selling solved for selling price, then drops
+    decimals and rounds up to the next 10. Overwrites existing prices."""
     updated = master_data_service.auto_generate_selling_prices(db)
     return {"updated": updated}
 

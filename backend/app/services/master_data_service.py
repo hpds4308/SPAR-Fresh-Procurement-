@@ -139,20 +139,20 @@ def get_master_data_sheet(db: Session) -> MasterDataSheetOut:
 
 def auto_generate_selling_prices(db: Session) -> int:
     """
-    Fills in Selling Price for every active product that doesn't have one
-    yet, computed from the GP% formula solved for selling price:
+    Recalculates Selling Price for every active product, from the GP%
+    formula solved for selling price:
 
         GP = (selling_price - cost_price) / selling_price
         => selling_price = cost_price / (1 - target_gp_percent)
 
-    Uses each product's own target_gp_percent (defaulting to 30% the same
-    way the sheet already does). Products that already have a manually-set
-    selling_price are left untouched — this only fills gaps, never
-    overwrites Admin's own numbers. Products with no cost_price yet (no
-    supplier has submitted a price) are skipped; there's nothing to derive
-    a selling price from. Returns how many rows were actually updated.
+    then drops the decimals and rounds up to the next 10. Uses each
+    product's own target_gp_percent (defaulting to 30% the same way the
+    sheet already does). Overwrites any existing selling price, including
+    manually typed ones. Products with no cost_price yet (no supplier has
+    submitted a price) are skipped and keep whatever they had. Returns how
+    many rows actually changed.
     """
-    products = db.query(Product).filter(Product.status == "ACTIVE", Product.selling_price.is_(None)).all()
+    products = db.query(Product).filter(Product.status == "ACTIVE").all()
     if not products:
         return 0
 
@@ -171,7 +171,10 @@ def auto_generate_selling_prices(db: Session) -> int:
         if target_gp >= 1:
             continue  # can't solve (division by zero or negative) — leave blank rather than guess
 
-        p.selling_price = round_up_to_10(cost_price / (1 - target_gp))
+        new_price = round_up_to_10(cost_price / (1 - target_gp))
+        if p.selling_price is not None and float(p.selling_price) == new_price:
+            continue
+        p.selling_price = new_price
         updated += 1
 
     if updated:

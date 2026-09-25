@@ -35,6 +35,7 @@ export default function AdminMasterData() {
   const [clearing, setClearing] = useState(false);
   const [confirmClearOpen, setConfirmClearOpen] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [confirmGenerateOpen, setConfirmGenerateOpen] = useState(false);
   const [generateMessage, setGenerateMessage] = useState<string | null>(null);
 
   const [drafts, setDrafts] = useState<Record<CellKey, string>>({});
@@ -183,9 +184,9 @@ export default function AdminMasterData() {
     }
   }
 
-  // Fills Selling Price only for rows that don't have one yet, from
-  // Cost Price and each row's own Target GP% — never touches a row Admin
-  // already filled in manually.
+  // Recalculates Selling Price for every item with a Cost Price, from each
+  // row's own Target GP% (rounded up to the next 10 server-side) —
+  // overwrites existing prices, so it sits behind a confirm dialog.
   async function handleAutoGenerate() {
     setGenerating(true);
     setError(null);
@@ -197,14 +198,15 @@ export default function AdminMasterData() {
       seedDrafts(fresh.rows);
       setGenerateMessage(
         result.updated === 0
-          ? "Nothing to fill — every item either has a selling price already or no cost price yet."
-          : `Filled selling price for ${result.updated} item${result.updated === 1 ? "" : "s"}.`
+          ? "No changes — selling prices already match Target GP%, or items have no cost price yet."
+          : `Updated selling price for ${result.updated} item${result.updated === 1 ? "" : "s"}.`
       );
       setTimeout(() => setGenerateMessage((m) => (m ? null : m)), 5000);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not auto-generate selling prices. Please try again.");
     } finally {
       setGenerating(false);
+      setConfirmGenerateOpen(false);
     }
   }
 
@@ -261,9 +263,9 @@ export default function AdminMasterData() {
         </span>
         <div className="ml-auto flex items-center gap-2">
           <button
-            onClick={handleAutoGenerate}
+            onClick={() => setConfirmGenerateOpen(true)}
             disabled={generating}
-            title="Fills Selling Price (from Cost Price and Target GP%) only for items that don't have one yet"
+            title="Recalculates Selling Price for every item from Cost Price and Target GP%, rounded up to the next 10"
             className="text-sm border border-sage-300 text-crate-800/70 rounded-full px-4 py-2 font-medium hover:bg-sage-50 disabled:opacity-50 transition-colors duration-150"
           >
             {generating ? "Generating…" : "Auto-generate Selling Price"}
@@ -442,6 +444,16 @@ export default function AdminMasterData() {
         it's computed, not editable. Supplier columns mirror Supplier Prices and are read-only here; edit them
         there. Target GP% defaults to 30% until you set your own.
       </p>
+
+      <ConfirmDialog
+        open={confirmGenerateOpen}
+        onClose={() => setConfirmGenerateOpen(false)}
+        onConfirm={handleAutoGenerate}
+        title="Auto-generate selling prices?"
+        description="This recalculates Selling Price for every item that has a Cost Price, using its Target GP%, then removes decimals and rounds up to the next 10. Existing selling prices — including ones typed in manually — will be overwritten. Items with no Cost Price are left as they are."
+        confirmLabel="Generate"
+        loading={generating}
+      />
 
       <ConfirmDialog
         open={confirmClearOpen}
