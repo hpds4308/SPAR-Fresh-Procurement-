@@ -20,6 +20,8 @@ type AuthContextValue = {
   login: (username: string, password: string) => Promise<string>; // returns redirect path
   logout: () => Promise<void>;
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
+  // Re-reads /auth/me, e.g. after a supplier renames themselves on their Account page.
+  refreshUser: () => Promise<unknown>;
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -94,7 +96,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, changePassword }}>{children}</AuthContext.Provider>
+    <AuthContext.Provider value={{ user, loading, login, logout, changePassword, refreshUser: loadCurrentUser }}>{children}</AuthContext.Provider>
   );
 }
 

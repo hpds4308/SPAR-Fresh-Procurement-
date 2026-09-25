@@ -2,17 +2,18 @@ import { useEffect, useState } from "react";
 import { useAuth } from "../auth/AuthContext";
 import DashboardShell from "../shared/DashboardShell";
 import { SidebarItem } from "../shared/Sidebar";
-import { IconTag, IconClock, IconBranches, IconChat, IconLog } from "../shared/Icons";
+import { IconTag, IconClock, IconBranches, IconChat, IconLog, IconUser } from "../shared/Icons";
 import { fetchMyUnreadCount } from "../../api/messages";
 import PriceForm from "./PriceForm";
 import PriceHistory from "./PriceHistory";
 import OrdersByBranch from "./OrdersByBranch";
 import SupplierMessages from "./SupplierMessages";
 import SupplierGuidelines from "./SupplierGuidelines";
+import SupplierAccount from "./SupplierAccount";
 import WelcomeScreen from "./WelcomeScreen";
 import { FadeSwitch } from "../shared/ui/FadeSwitch";
 
-type Tab = "submit" | "history" | "byBranch" | "messages" | "guidelines";
+type Tab = "submit" | "history" | "byBranch" | "messages" | "guidelines" | "account";
 
 const iconProps = { width: 17, height: 17 };
 const UNREAD_POLL_MS = 15000;
@@ -66,6 +67,7 @@ export default function SupplierDashboard() {
     { id: "byBranch", label: "Orders by Branch", icon: <IconBranches {...iconProps} /> },
     { id: "messages", label: "Messages", icon: <IconChat {...iconProps} />, badge: unread },
     { id: "guidelines", label: "Supplier Guidelines", icon: <IconLog {...iconProps} /> },
+    { id: "account", label: "Account", icon: <IconUser {...iconProps} /> },
   ];
 
   if (showWelcome) {
@@ -93,6 +95,7 @@ export default function SupplierDashboard() {
         {tab === "byBranch" && <OrdersByBranch />}
         {tab === "messages" && <SupplierMessages />}
         {tab === "guidelines" && <SupplierGuidelines />}
+        {tab === "account" && <SupplierAccount />}
       </FadeSwitch>
     </DashboardShell>
   );

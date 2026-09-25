@@ -52,6 +52,7 @@ def list_users(db: Session = Depends(get_db)):
                 role=roles[0] if roles else "",
                 branch_name=branch_name,
                 supplier_name=supplier_name,
+                supplier_id=u.supplier_id,
                 is_active=u.is_active,
                 last_login_at=u.last_login_at.isoformat() if u.last_login_at else None,
             )
@@ -276,6 +277,7 @@ def update_user(
         role=roles[0] if roles else "",
         branch_name=branch_name,
         supplier_name=supplier_name,
+        supplier_id=user.supplier_id,
         is_active=user.is_active,
         last_login_at=user.last_login_at.isoformat() if user.last_login_at else None,
     )

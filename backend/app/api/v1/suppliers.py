@@ -7,9 +7,9 @@ from app.core.audit import write_audit_log
 from app.core.errors import ValidationFailedError
 from app.models.supplier import Supplier
 from app.models.user import User
-from app.schemas.supplier import SupplierCreate, SupplierOut as SupplierDetailOut
+from app.schemas.supplier import SupplierAccountUpdate, SupplierCreate, SupplierOut as SupplierDetailOut
 from app.schemas.supplier_order import SupplierOut
-from app.services import supplier_order_service
+from app.services import supplier_account_service, supplier_order_service
 
 router = APIRouter(prefix="/suppliers", dependencies=[Depends(get_current_user)])
 
@@ -32,6 +32,22 @@ def list_suppliers(admin: User = Depends(require_roles("ADMIN")), db: Session = 
 def list_all_suppliers(admin: User = Depends(require_roles("ADMIN")), db: Session = Depends(get_db)):
     """Every supplier (active or not) with full contact details — for the Accounts page."""
     return db.query(Supplier).order_by(Supplier.supplier_name).all()
+
+
+@router.get("/me/account", response_model=SupplierDetailOut)
+def get_my_account(supplier_user: User = Depends(require_roles("SUPPLIER")), db: Session = Depends(get_db)):
+    """The signed-in supplier's own Account details."""
+    return supplier_account_service.get_my_account(db, supplier_user)
+
+
+@router.put("/me/account", response_model=SupplierDetailOut)
+def update_my_account(
+    payload: SupplierAccountUpdate,
+    supplier_user: User = Depends(require_roles("SUPPLIER")),
+    db: Session = Depends(get_db),
+):
+    """Saves the supplier's name, company number, WhatsApp number and email — admins see them under Accounts."""
+    return supplier_account_service.update_my_account(db, supplier_user, payload)
 
 
 @router.post("", response_model=SupplierDetailOut)

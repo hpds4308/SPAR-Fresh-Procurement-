@@ -12,6 +12,16 @@ export type SupplierDetail = Supplier & {
   phone: string | null;
   email: string | null;
   address: string | null;
+  company_number: string | null;
+  whatsapp_number: string | null;
+  account_updated_at: string | null;
+};
+
+export type SupplierAccountUpdate = {
+  supplier_name: string;
+  company_number: string;
+  whatsapp_number: string;
+  email: string;
 };
 
 export function fetchSuppliers(): Promise<Supplier[]> {
@@ -32,6 +42,17 @@ export function createSupplier(payload: {
 }): Promise<SupplierDetail> {
   return apiFetch("/suppliers", {
     method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchMyAccount(): Promise<SupplierDetail> {
+  return apiFetch("/suppliers/me/account");
+}
+
+export function updateMyAccount(payload: SupplierAccountUpdate): Promise<SupplierDetail> {
+  return apiFetch("/suppliers/me/account", {
+    method: "PUT",
     body: JSON.stringify(payload),
   });
 }

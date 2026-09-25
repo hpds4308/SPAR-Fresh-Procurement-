@@ -7,6 +7,7 @@ class UserListItem(BaseModel):
     role: str
     branch_name: str | None = None
     supplier_name: str | None = None
+    supplier_id: int | None = None
     is_active: bool
     last_login_at: str | None = None
 

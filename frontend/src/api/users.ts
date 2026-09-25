@@ -6,6 +6,7 @@ export type UserListItem = {
   role: string;
   branch_name: string | null;
   supplier_name: string | null;
+  supplier_id: number | null;
   is_active: boolean;
   last_login_at: string | null;
 };

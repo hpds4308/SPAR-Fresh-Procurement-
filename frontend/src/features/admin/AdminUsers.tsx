@@ -12,7 +12,7 @@ import {
   updateUser,
 } from "../../api/users";
 import { createBranch } from "../../api/branches";
-import { createSupplier } from "../../api/suppliers";
+import { SupplierDetail, createSupplier, fetchAllSuppliers } from "../../api/suppliers";
 import Button from "../shared/ui/Button";
 import EmptyState from "../shared/EmptyState";
 import { IconUser } from "../shared/Icons";
@@ -27,6 +27,53 @@ const ROLE_COLORS: Record<string, string> = {
   BRANCH: "bg-blue-100 text-blue-700",
   SUPPLIER: "bg-teal-100 text-teal-700",
 };
+
+function SupplierAccountDetails({ supplierId }: { supplierId: number }) {
+  const [supplier, setSupplier] = useState<SupplierDetail | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchAllSuppliers()
+      .then((all) => setSupplier(all.find((s) => s.id === supplierId) ?? null))
+      .catch(() => setError("Could not load this supplier's account details."));
+  }, [supplierId]);
+
+  const rows: [string, string | null | undefined][] = [
+    ["Supplier Name", supplier?.supplier_name],
+    ["Company Number", supplier?.company_number],
+    ["WhatsApp Number", supplier?.whatsapp_number],
+    ["E-Mail", supplier?.email],
+  ];
+
+  return (
+    <div className="rounded-2xl border border-sage-100 bg-sage-50/60 p-4">
+      <p className="text-xs font-semibold uppercase tracking-wide text-crate-800/60 mb-3">
+        Supplier Account Details
+      </p>
+      {error ? (
+        <p className="text-tomato-600 text-sm">{error}</p>
+      ) : !supplier ? (
+        <p className="text-sm text-crate-800/50">Loading…</p>
+      ) : (
+        <>
+          <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
+            {rows.map(([label, value]) => (
+              <div key={label}>
+                <dt className="text-xs text-crate-800/50">{label}</dt>
+                <dd className="text-crate-950 break-words">{value || "—"}</dd>
+              </div>
+            ))}
+          </dl>
+          <p className="text-xs text-crate-800/40 mt-3">
+            {supplier.account_updated_at
+              ? `Updated by the supplier ${new Date(supplier.account_updated_at).toLocaleString()}`
+              : "The supplier hasn't filled in their Account page yet."}
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
 
 function RoleBadge({ role }: { role: string }) {
   return (
@@ -526,6 +573,10 @@ export default function AdminUsers() {
                 <p className="text-crate-950">{detailUser.is_active ? "Active" : "Deactivated"}</p>
               </div>
             </div>
+
+            {detailUser.role === "SUPPLIER" && detailUser.supplier_id && (
+              <SupplierAccountDetails supplierId={detailUser.supplier_id} />
+            )}
 
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wide text-crate-800/60 mb-1.5">
