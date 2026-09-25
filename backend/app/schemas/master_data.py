@@ -8,11 +8,14 @@ from app.schemas._limits import MAX_NUMERIC_10_2
 
 
 def round_up_to_10(price: float) -> float:
-    """Selling prices are always rounded UP to the next multiple of 10
-    (1342 -> 1350, 1350 stays 1350). Goes through the 2-dp string form
-    first so float noise like 1000.0000000001 doesn't bump it to 1010."""
-    d = Decimal(f"{price:.2f}")
-    return float((d / 10).to_integral_value(rounding=ROUND_CEILING) * 10)
+    """Selling prices drop their decimals, then round UP to the next
+    multiple of 10 (787.67 -> 787 -> 790, 201 -> 210, 1340.50 -> 1340).
+    Goes through the 2-dp string form first so float noise like
+    1000.0000000001 doesn't bump it to 1010. Never returns 0 for a
+    positive price (0.50 -> 10)."""
+    whole = int(Decimal(f"{price:.2f}"))
+    rounded = (Decimal(whole) / 10).to_integral_value(rounding=ROUND_CEILING) * 10
+    return float(max(rounded, Decimal(10)))
 
 
 class MasterDataSupplierColumn(BaseModel):

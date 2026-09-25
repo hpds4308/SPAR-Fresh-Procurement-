@@ -92,8 +92,12 @@ def test_master_data_selling_price_rejects_oversized_value():
 
 def test_master_data_selling_price_rounds_up_to_next_10():
     assert MasterDataFieldUpdateRequest(field="selling_price", value=1342).value == 1350
-    assert MasterDataFieldUpdateRequest(field="selling_price", value=1340.01).value == 1350
     assert MasterDataFieldUpdateRequest(field="selling_price", value=1350).value == 1350
+    # Decimals are dropped before rounding up.
+    assert MasterDataFieldUpdateRequest(field="selling_price", value=1340.99).value == 1340
+    assert MasterDataFieldUpdateRequest(field="selling_price", value=787.67).value == 790
+    for raw, expected in [(456, 460), (201, 210), (405, 410), (672, 680), (0.5, 10)]:
+        assert MasterDataFieldUpdateRequest(field="selling_price", value=raw).value == expected
 
 
 def test_master_data_target_gp_percent_was_already_safely_bounded():
