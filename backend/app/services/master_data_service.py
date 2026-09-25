@@ -36,6 +36,7 @@ from app.schemas.master_data import (
     MasterDataSheetOut,
     MasterDataSupplierColumn,
     MasterDataField,
+    round_up_to_10,
 )
 
 
@@ -170,7 +171,7 @@ def auto_generate_selling_prices(db: Session) -> int:
         if target_gp >= 1:
             continue  # can't solve (division by zero or negative) — leave blank rather than guess
 
-        p.selling_price = round(cost_price / (1 - target_gp), 2)
+        p.selling_price = round_up_to_10(cost_price / (1 - target_gp))
         updated += 1
 
     if updated:

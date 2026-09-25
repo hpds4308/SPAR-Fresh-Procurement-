@@ -83,9 +83,17 @@ def test_adjusted_price_custom_validator_rejects_oversized_value():
 
 
 def test_master_data_selling_price_rejects_oversized_value():
-    MasterDataFieldUpdateRequest(field="selling_price", value=MAX_NUMERIC_10_2)
+    # Selling price rounds up to the next 10, so the largest storable value
+    # is the last multiple of 10 under the column ceiling.
+    MasterDataFieldUpdateRequest(field="selling_price", value=99_999_990)
     with pytest.raises(ValidationError):
-        MasterDataFieldUpdateRequest(field="selling_price", value=MAX_NUMERIC_10_2 + 1)
+        MasterDataFieldUpdateRequest(field="selling_price", value=MAX_NUMERIC_10_2)
+
+
+def test_master_data_selling_price_rounds_up_to_next_10():
+    assert MasterDataFieldUpdateRequest(field="selling_price", value=1342).value == 1350
+    assert MasterDataFieldUpdateRequest(field="selling_price", value=1340.01).value == 1350
+    assert MasterDataFieldUpdateRequest(field="selling_price", value=1350).value == 1350
 
 
 def test_master_data_target_gp_percent_was_already_safely_bounded():

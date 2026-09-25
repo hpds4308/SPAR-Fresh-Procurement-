@@ -1,9 +1,18 @@
 from datetime import date
+from decimal import ROUND_CEILING, Decimal
 from typing import Literal
 
 from pydantic import BaseModel, field_validator
 
 from app.schemas._limits import MAX_NUMERIC_10_2
+
+
+def round_up_to_10(price: float) -> float:
+    """Selling prices are always rounded UP to the next multiple of 10
+    (1342 -> 1350, 1350 stays 1350). Goes through the 2-dp string form
+    first so float noise like 1000.0000000001 doesn't bump it to 1010."""
+    d = Decimal(f"{price:.2f}")
+    return float((d / 10).to_integral_value(rounding=ROUND_CEILING) * 10)
 
 
 class MasterDataSupplierColumn(BaseModel):
@@ -66,6 +75,7 @@ class MasterDataFieldUpdateRequest(BaseModel):
             fv = float(v)
             if fv <= 0:
                 raise ValueError("Price must be greater than zero.")
+            fv = round_up_to_10(fv)
             if fv > MAX_NUMERIC_10_2:
                 raise ValueError(f"Price can't exceed {MAX_NUMERIC_10_2:,.2f}.")
             return fv

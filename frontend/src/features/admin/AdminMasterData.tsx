@@ -118,6 +118,10 @@ export default function AdminMasterData() {
     try {
       const updated = await updateMasterDataField(productId, field, value);
       setSheet((prev) => (prev ? { ...prev, rows: prev.rows.map((r) => (r.product_id === productId ? updated : r)) } : prev));
+      // Server rounds selling price up to the next 10 — show what was actually saved.
+      if (field === "selling_price") {
+        setDrafts((d) => ({ ...d, [key]: updated.selling_price !== null ? String(updated.selling_price) : "" }));
+      }
       setCellState((s) => ({ ...s, [key]: "saved" }));
       setTimeout(() => setCellState((s) => (s[key] === "saved" ? { ...s, [key]: "idle" } : s)), 1500);
     } catch {
