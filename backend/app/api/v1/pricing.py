@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.errors import ValidationFailedError
 from app.core.security import get_current_user, require_roles
+from app.models.pricing import SupplierPrice
 from app.models.product import Product
 from app.models.user import User
 from app.schemas.pricing import (
@@ -21,9 +22,35 @@ from app.schemas.pricing import (
     ReferencePriceSetRequest,
 )
 from app.services import pricing_service
+from app.services import price_approval_service
 from app.services import keells_scrape_service
 
 router = APIRouter(prefix="/pricing", dependencies=[Depends(get_current_user)])
+
+
+def _supplier_price_out(db: Session, rows: list[SupplierPrice]) -> list[SupplierPriceOut]:
+    """A supplier only ever sees an adjusted price once it has been sent to them for approval."""
+    products = {p.id: p for p in db.query(Product).filter(Product.id.in_([r.product_id for r in rows])).all()}
+    statuses = price_approval_service.row_statuses(db, rows)
+    out = []
+    for r in rows:
+        sent = r.sent_to_supplier_at is not None and r.adjusted_price is not None
+        status, revision = statuses[r.id]
+        out.append(
+            SupplierPriceOut(
+                id=r.id,
+                product_id=r.product_id,
+                product_code=products[r.product_id].product_code,
+                product_description=products[r.product_id].description,
+                unit_code=r.unit_code,
+                price=float(r.price),
+                delivery_date=r.delivery_date,
+                adjusted_price=float(r.adjusted_price) if sent else None,
+                approval_status=status if sent else None,
+                revision_id=revision.id if sent and revision else None,
+            )
+        )
+    return out
 
 
 @router.get("/window", response_model=PriceWindowOut)
@@ -39,20 +66,7 @@ def submit_prices(
     db: Session = Depends(get_db),
 ):
     rows = pricing_service.submit_prices(db, current_user, payload)
-    products = {p.id: p for p in db.query(Product).filter(Product.id.in_([r.product_id for r in rows])).all()}
-    return [
-        SupplierPriceOut(
-            id=r.id,
-            product_id=r.product_id,
-            product_code=products[r.product_id].product_code,
-            product_description=products[r.product_id].description,
-            unit_code=r.unit_code,
-            price=float(r.price),
-            delivery_date=r.delivery_date,
-            adjusted_price=float(r.adjusted_price) if r.sent_to_supplier_at and r.adjusted_price is not None else None,
-        )
-        for r in rows
-    ]
+    return _supplier_price_out(db, rows)
 
 
 @router.get("/mine", response_model=list[SupplierPriceOut])
@@ -62,20 +76,7 @@ def my_prices(
     db: Session = Depends(get_db),
 ):
     rows = pricing_service.list_my_prices(db, current_user, delivery_date)
-    products = {p.id: p for p in db.query(Product).filter(Product.id.in_([r.product_id for r in rows])).all()}
-    return [
-        SupplierPriceOut(
-            id=r.id,
-            product_id=r.product_id,
-            product_code=products[r.product_id].product_code,
-            product_description=products[r.product_id].description,
-            unit_code=r.unit_code,
-            price=float(r.price),
-            delivery_date=r.delivery_date,
-            adjusted_price=float(r.adjusted_price) if r.sent_to_supplier_at and r.adjusted_price is not None else None,
-        )
-        for r in rows
-    ]
+    return _supplier_price_out(db, rows)
 
 
 @router.get("/mine/last", response_model=list[LastPriceOut])
@@ -112,41 +113,15 @@ def admin_adjust_price(
     admin: User = Depends(require_roles("ADMIN")),
     db: Session = Depends(get_db),
 ):
-    """Set (or clear, with adjusted_price: null) Admin's negotiated price for one supplier quote."""
+    """
+    Set (or clear, with adjusted_price: null) Admin's negotiated price for
+    one supplier quote. Stays a draft until sent for approval via
+    POST /price-approvals/admin.
+    """
     row = pricing_service.set_adjusted_price(db, admin, price_id, payload.adjusted_price)
     return {
         "id": row.id,
         "price": float(row.price),
-        "adjusted_price": float(row.adjusted_price) if row.adjusted_price is not None else None,
-        "sent_to_supplier": row.sent_to_supplier_at is not None,
-    }
-
-
-@router.post("/admin/{price_id}/send")
-def admin_send_price(
-    price_id: int,
-    admin: User = Depends(require_roles("ADMIN")),
-    db: Session = Depends(get_db),
-):
-    """Sends the current adjusted price to the supplier — it becomes visible on their price view."""
-    row = pricing_service.send_adjusted_price(db, admin, price_id)
-    return {
-        "id": row.id,
-        "adjusted_price": float(row.adjusted_price) if row.adjusted_price is not None else None,
-        "sent_to_supplier": row.sent_to_supplier_at is not None,
-    }
-
-
-@router.post("/admin/{price_id}/unsend")
-def admin_unsend_price(
-    price_id: int,
-    admin: User = Depends(require_roles("ADMIN")),
-    db: Session = Depends(get_db),
-):
-    """Withdraws a sent adjusted price so the supplier no longer sees it."""
-    row = pricing_service.unsend_adjusted_price(db, admin, price_id)
-    return {
-        "id": row.id,
         "adjusted_price": float(row.adjusted_price) if row.adjusted_price is not None else None,
         "sent_to_supplier": row.sent_to_supplier_at is not None,
     }

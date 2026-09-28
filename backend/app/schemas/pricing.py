@@ -33,9 +33,12 @@ class SupplierPriceOut(BaseModel):
     unit_code: str
     price: float
     delivery_date: date
-    # Only populated once Admin has explicitly sent an adjusted price —
+    # Only populated once Admin has sent an adjusted price for approval —
     # a draft adjustment Admin hasn't sent yet never appears here.
     adjusted_price: float | None = None
+    # PENDING / APPROVED / REJECTED / EXPIRED for a sent adjusted price, else None.
+    approval_status: str | None = None
+    revision_id: int | None = None
 
     class Config:
         from_attributes = True
@@ -114,6 +117,11 @@ class AdminSupplierPriceOut(BaseModel):
     price: float
     adjusted_price: float | None = None
     sent_to_supplier: bool = False
+    # None (no adjustment), DRAFT (not sent), or the price sheet's status:
+    # PENDING / APPROVED / REJECTED / EXPIRED — see price_approval_service.
+    approval_status: str | None = None
+    revision_id: int | None = None
+    rejection_reason: str | None = None
     delivery_date: date
     is_lowest_for_product: bool
     # The next distinct price tier below the lowest for this product (None

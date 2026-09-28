@@ -6,14 +6,15 @@ import {
   fetchLastReferencePrices,
   fetchPriceWindow,
   fetchReferencePrices,
-  sendAdjustedPrice,
   setAdjustedPrice,
-  unsendAdjustedPrice,
 } from "../../api/pricing";
+import { sendForApproval, withdrawSheet } from "../../api/priceApprovals";
 import { compareProductDisplayOrder } from "../../api/orders";
 import { Supplier, fetchSuppliers } from "../../api/suppliers";
 import { SkeletonTable } from "../shared/ui/Skeleton";
 import { IconTag } from "../shared/Icons";
+import { RowApprovalBadge } from "../shared/PriceSheetParts";
+import { ConfirmDialog } from "../shared/ui/Modal";
 
 function formatDate(iso: string): string {
   const d = new Date(iso + "T00:00:00");
@@ -51,8 +52,18 @@ export default function SupplierPricesView() {
   // so typing doesn't fight with the fetched value until it's saved.
   const [drafts, setDrafts] = useState<Record<number, string>>({});
   const [cellState, setCellState] = useState<Record<number, CellState>>({});
-  const [sendState, setSendState] = useState<Record<number, SendState>>({});
+  // Per supplier column: sending a sheet for approval / withdrawing one.
   const [sendAllState, setSendAllState] = useState<Record<number, SendState>>({});
+  const [sendError, setSendError] = useState<Record<number, string>>({});
+  // Bumped to refetch every row — after sending/withdrawing a sheet, or an
+  // edit that voided one (which changes other cells' status too).
+  const [reloadKey, setReloadKey] = useState(0);
+  // Adjusted-price saves still in flight, so "Send for approval" (clicking
+  // it blurs the input, which starts a save) waits for them first.
+  const savesInFlight = useRef<Set<Promise<void>>>(new Set());
+  // Editing a price the supplier has signed (or is about to) cancels that
+  // whole sheet — confirm first.
+  const [confirmEdit, setConfirmEdit] = useState<{ row: AdminSupplierPrice; raw: string } | null>(null);
 
   // Keells reference prices, keyed by product_id — independent of the
   // supplier/adjusted-price drafts above, and independent of which
@@ -107,7 +118,6 @@ export default function SupplierPricesView() {
         }
         setDrafts(nextDrafts);
         setCellState({});
-        setSendState({});
         setSendAllState({});
       })
       .catch((err) => {
@@ -119,7 +129,7 @@ export default function SupplierPricesView() {
     return () => {
       cancelled = true;
     };
-  }, [deliveryDate, supplierId]);
+  }, [deliveryDate, supplierId, reloadKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -234,7 +244,7 @@ export default function SupplierPricesView() {
     return () => window.removeEventListener("resize", measure);
   }, [productRows, supplierColumns]);
 
-  async function saveAdjustedPrice(row: AdminSupplierPrice, raw: string) {
+  async function saveAdjustedPrice(row: AdminSupplierPrice, raw: string, confirmed = false) {
     const trimmed = raw.trim();
     const value = trimmed === "" ? null : Number(trimmed);
     if (value !== null && (Number.isNaN(value) || value <= 0)) {
@@ -246,61 +256,98 @@ export default function SupplierPricesView() {
     if ((current === null && value === null) || (current !== null && value === current)) {
       return;
     }
-    setCellState((s) => ({ ...s, [row.id]: "saving" }));
-    try {
-      const result = await setAdjustedPrice(row.id, value);
-      setRows((prev) =>
-        prev.map((r) =>
-          r.id === row.id
-            ? { ...r, adjusted_price: result.adjusted_price, sent_to_supplier: result.sent_to_supplier }
-            : r
-        )
-      );
-      setCellState((s) => ({ ...s, [row.id]: "saved" }));
-      setTimeout(() => {
-        setCellState((s) => (s[row.id] === "saved" ? { ...s, [row.id]: "idle" } : s));
-      }, 1500);
-    } catch (err) {
-      setCellState((s) => ({ ...s, [row.id]: "error" }));
+    const onLiveSheet = row.approval_status === "APPROVED" || row.approval_status === "PENDING";
+    if (onLiveSheet && !confirmed) {
+      setConfirmEdit({ row, raw });
+      return;
     }
+    setCellState((s) => ({ ...s, [row.id]: "saving" }));
+    const save = (async () => {
+      try {
+        const result = await setAdjustedPrice(row.id, value);
+        if (onLiveSheet) {
+          // The whole sheet was voided, so other cells changed status too.
+          setReloadKey((k) => k + 1);
+        } else {
+          setRows((prev) =>
+            prev.map((r) =>
+              r.id === row.id
+                ? {
+                    ...r,
+                    adjusted_price: result.adjusted_price,
+                    sent_to_supplier: false,
+                    approval_status: result.adjusted_price === null ? null : "DRAFT",
+                    revision_id: null,
+                    rejection_reason: null,
+                  }
+                : r
+            )
+          );
+        }
+        setCellState((s) => ({ ...s, [row.id]: "saved" }));
+        setTimeout(() => {
+          setCellState((s) => (s[row.id] === "saved" ? { ...s, [row.id]: "idle" } : s));
+        }, 1500);
+      } catch (err) {
+        setCellState((s) => ({ ...s, [row.id]: "error" }));
+      }
+    })();
+    savesInFlight.current.add(save);
+    await save;
+    savesInFlight.current.delete(save);
   }
 
-  // Cells for a supplier that have a draft adjusted price typed in but
-  // haven't been sent yet — what "Send All" for that supplier acts on.
-  function pendingCellsForSupplier(supplierId: number): AdminSupplierPrice[] {
+  function cellsForSupplier(supplierId: number): AdminSupplierPrice[] {
     const out: AdminSupplierPrice[] = [];
     for (const p of productRows) {
       const cell = p.cells.get(supplierId);
-      if (cell && drafts[cell.id]?.trim() !== "" && !cell.sent_to_supplier) out.push(cell);
+      if (cell) out.push(cell);
     }
     return out;
   }
 
-  async function handleSendAll(supplierId: number) {
-    const pending = pendingCellsForSupplier(supplierId);
-    if (pending.length === 0) return;
-    setSendAllState((s) => ({ ...s, [supplierId]: "sending" }));
-    const results = await Promise.allSettled(pending.map((cell) => sendAdjustedPrice(cell.id)));
-    const sentIds = new Set<number>();
-    results.forEach((res, i) => {
-      if (res.status === "fulfilled") sentIds.add(pending[i].id);
+  // Adjusted prices for a supplier that aren't agreed or waiting yet — what
+  // "Send for approval" puts on the new sheet (the backend also folds in
+  // anything still awaiting signature). Counts a typed-but-unsaved value
+  // too, since clicking the button saves it first.
+  function unsentCellsForSupplier(supplierId: number): AdminSupplierPrice[] {
+    return cellsForSupplier(supplierId).filter((cell) => {
+      const typed = drafts[cell.id]?.trim() ?? "";
+      const changedLocally = typed !== "" && Number(typed) !== cell.adjusted_price;
+      return changedLocally || cell.approval_status === "DRAFT" || cell.approval_status === "REJECTED";
     });
-    setRows((prev) =>
-      prev.map((r) => (sentIds.has(r.id) ? { ...r, sent_to_supplier: true } : r))
-    );
-    setSendAllState((s) => ({ ...s, [supplierId]: sentIds.size === pending.length ? "idle" : "error" }));
   }
 
-  async function handleUnsend(row: AdminSupplierPrice) {
-    setSendState((s) => ({ ...s, [row.id]: "sending" }));
+  async function handleSendForApproval(supplierId: number) {
+    setSendAllState((s) => ({ ...s, [supplierId]: "sending" }));
+    setSendError((e) => ({ ...e, [supplierId]: "" }));
+    await Promise.allSettled(Array.from(savesInFlight.current));
     try {
-      const result = await unsendAdjustedPrice(row.id);
-      setRows((prev) =>
-        prev.map((r) => (r.id === row.id ? { ...r, sent_to_supplier: result.sent_to_supplier } : r))
-      );
-      setSendState((s) => ({ ...s, [row.id]: "idle" }));
+      await sendForApproval(supplierId, deliveryDate);
+      setSendAllState((s) => ({ ...s, [supplierId]: "idle" }));
+      setReloadKey((k) => k + 1);
     } catch (err) {
-      setSendState((s) => ({ ...s, [row.id]: "error" }));
+      setSendAllState((s) => ({ ...s, [supplierId]: "error" }));
+      setSendError((e) => ({
+        ...e,
+        [supplierId]: err instanceof ApiError ? err.message : "Could not send — try again.",
+      }));
+    }
+  }
+
+  async function handleWithdraw(supplierId: number, revisionId: number) {
+    setSendAllState((s) => ({ ...s, [supplierId]: "sending" }));
+    setSendError((e) => ({ ...e, [supplierId]: "" }));
+    try {
+      await withdrawSheet(revisionId);
+      setSendAllState((s) => ({ ...s, [supplierId]: "idle" }));
+      setReloadKey((k) => k + 1);
+    } catch (err) {
+      setSendAllState((s) => ({ ...s, [supplierId]: "error" }));
+      setSendError((e) => ({
+        ...e,
+        [supplierId]: err instanceof ApiError ? err.message : "Could not withdraw — try again.",
+      }));
     }
   }
 
@@ -359,9 +406,9 @@ export default function SupplierPricesView() {
         {deliveryDate && (
           <p className="text-xs text-crate-800/40 mt-3">
             Showing quotes for {formatDate(deliveryDate)}. Set an Adjusted Price for one or more items, then click{" "}
-            <span className="font-medium text-crate-700">Send All</span> at the top of that supplier's column to
-            push everything at once — until then it's a draft only you can see, and the supplier's original
-            quote is never changed.
+            <span className="font-medium text-crate-700">Send for approval</span> at the top of that supplier's
+            column — they get one price sheet to approve and e-sign, or reject. Until they sign, their own quote
+            is the price that applies, and it stays that way if they don't respond before the delivery date.
           </p>
         )}
       </div>
@@ -411,9 +458,13 @@ export default function SupplierPricesView() {
                   </p>
                 </th>
                 {supplierColumns.map((s) => {
-                  const pendingCount = pendingCellsForSupplier(s.id).length;
+                  const unsentCount = unsentCellsForSupplier(s.id).length;
                   const allState = sendAllState[s.id] ?? "idle";
-                  const sendingAll = allState === "sending";
+                  const busy = allState === "sending";
+                  const cells = cellsForSupplier(s.id);
+                  const pendingCell = cells.find((c) => c.approval_status === "PENDING");
+                  const approvedCount = cells.filter((c) => c.approval_status === "APPROVED").length;
+                  const rejectedCell = cells.find((c) => c.approval_status === "REJECTED");
                   return (
                     <th
                       key={s.id}
@@ -423,18 +474,45 @@ export default function SupplierPricesView() {
                       <div className="flex flex-col items-center gap-1.5">
                         <span className="font-semibold text-crate-800 text-sm">{s.name}</span>
                         <button
-                          onClick={() => handleSendAll(s.id)}
-                          disabled={pendingCount === 0 || sendingAll}
+                          onClick={() => handleSendForApproval(s.id)}
+                          disabled={unsentCount === 0 || busy}
                           className={`text-[11px] rounded-full px-3 py-1 font-semibold transition-colors duration-150 ${
-                            pendingCount === 0
+                            unsentCount === 0
                               ? "bg-sage-100 text-crate-800/30 cursor-default"
                               : "bg-crate-700 text-white hover:bg-crate-800"
                           } disabled:opacity-60`}
                         >
-                          {sendingAll ? "Sending…" : pendingCount === 0 ? "Send All" : `Send All (${pendingCount})`}
+                          {busy
+                            ? "Working…"
+                            : unsentCount === 0
+                            ? "Send for approval"
+                            : `Send for approval (${unsentCount})`}
                         </button>
-                        {allState === "error" && (
-                          <span className="text-[10px] text-tomato-600">Some failed — try again</span>
+                        {pendingCell && pendingCell.revision_id !== null && (
+                          <span className="text-[10px] text-[#8A5A0D] font-normal">
+                            Awaiting signature ·{" "}
+                            <button
+                              onClick={() => handleWithdraw(s.id, pendingCell.revision_id!)}
+                              disabled={busy}
+                              className="underline decoration-dotted hover:text-tomato-600 disabled:opacity-40"
+                            >
+                              Withdraw
+                            </button>
+                          </span>
+                        )}
+                        {approvedCount > 0 && (
+                          <span className="text-[10px] text-crate-700 font-normal">✓ {approvedCount} approved</span>
+                        )}
+                        {rejectedCell && (
+                          <span
+                            className="text-[10px] text-tomato-600 font-normal max-w-[14rem] truncate"
+                            title={rejectedCell.rejection_reason ?? undefined}
+                          >
+                            Rejected: {rejectedCell.rejection_reason}
+                          </span>
+                        )}
+                        {allState === "error" && sendError[s.id] && (
+                          <span className="text-[10px] text-tomato-600 font-normal max-w-[14rem]">{sendError[s.id]}</span>
                         )}
                       </div>
                     </th>
@@ -534,9 +612,6 @@ export default function SupplierPricesView() {
                       ];
                     }
                     const state = cellState[cell.id] ?? "idle";
-                    const sending = (sendState[cell.id] ?? "idle") === "sending";
-                    const sendErrored = (sendState[cell.id] ?? "idle") === "error";
-                    const hasDraft = drafts[cell.id]?.trim() !== "";
                     return [
                       <td
                         key={`${s.id}-price`}
@@ -571,24 +646,11 @@ export default function SupplierPricesView() {
                             {state === "error" && <span className="text-[10px] text-tomato-600">!</span>}
                           </div>
 
-                          {hasDraft && cell.sent_to_supplier && (
-                            <div className="flex items-center gap-1">
-                              <span className="text-[10px] uppercase tracking-wide bg-crate-700 text-white rounded-full px-2 py-0.5 font-semibold">
-                                Sent
-                              </span>
-                              <button
-                                onClick={() => handleUnsend(cell)}
-                                disabled={sending}
-                                className="text-[10px] text-crate-800/40 hover:text-tomato-600 underline decoration-dotted disabled:opacity-40 transition-colors duration-150"
-                              >
-                                Withdraw
-                              </button>
-                              {sendErrored && <span className="text-[10px] text-tomato-600">Failed</span>}
-                            </div>
-                          )}
-                          {hasDraft && !cell.sent_to_supplier && (
-                            <span className="text-[10px] text-crate-800/35">
-                              Draft — use "Send All" above
+                          {cell.adjusted_price !== null && (
+                            <span
+                              title={cell.approval_status === "REJECTED" ? cell.rejection_reason ?? undefined : undefined}
+                            >
+                              <RowApprovalBadge status={cell.approval_status} />
                             </span>
                           )}
                         </div>
@@ -601,6 +663,33 @@ export default function SupplierPricesView() {
           </table>
         )}
       </div>
+
+      <ConfirmDialog
+        open={confirmEdit !== null}
+        onClose={() => {
+          if (confirmEdit) {
+            const { row } = confirmEdit;
+            setDrafts((d) => ({ ...d, [row.id]: row.adjusted_price !== null ? String(row.adjusted_price) : "" }));
+          }
+          setConfirmEdit(null);
+        }}
+        onConfirm={() => {
+          if (confirmEdit) saveAdjustedPrice(confirmEdit.row, confirmEdit.raw, true);
+          setConfirmEdit(null);
+        }}
+        title={
+          confirmEdit?.row.approval_status === "APPROVED"
+            ? "Change a price the supplier has signed?"
+            : "Change a price awaiting signature?"
+        }
+        description={
+          confirmEdit
+            ? `${confirmEdit.row.supplier_name}'s whole price sheet for this date will be cancelled and its prices go back to draft. You'll need to send it for approval again — until they sign, their own quoted prices apply.`
+            : undefined
+        }
+        confirmLabel="Change price"
+        danger
+      />
     </div>
   );
 }

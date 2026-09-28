@@ -4,6 +4,7 @@ import { SupplierPrice, fetchMyPrices, fetchPriceWindow } from "../../api/pricin
 import EmptyState from "../shared/EmptyState";
 import { SkeletonTable } from "../shared/ui/Skeleton";
 import { IconTag } from "../shared/Icons";
+import { RowApprovalBadge } from "../shared/PriceSheetParts";
 
 export default function PriceHistory({ refreshKey }: { refreshKey: number }) {
   const [prices, setPrices] = useState<SupplierPrice[]>([]);
@@ -84,9 +85,7 @@ export default function PriceHistory({ refreshKey }: { refreshKey: number }) {
                 {p.adjusted_price !== null ? (
                   <span className="inline-flex items-center gap-1.5">
                     <span className="font-semibold text-crate-950">Rs. {p.adjusted_price.toFixed(2)}</span>
-                    <span className="text-[10px] uppercase tracking-wide bg-crate-700 text-white rounded-full px-2 py-0.5 font-semibold">
-                      SPAR Fresh Procurement
-                    </span>
+                    <RowApprovalBadge status={p.approval_status} />
                   </span>
                 ) : (
                   <span className="text-crate-800/25">—</span>

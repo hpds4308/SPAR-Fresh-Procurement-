@@ -170,15 +170,19 @@ def main():
             f"supplier saw adjusted_price={mine_row.get('adjusted_price') if mine_row else 'row missing'}",
         )
 
-        status, _ = api.post(f"/pricing/admin/{price_row['id']}/send", token=admin)
-        check("admin can send the adjusted price", status == 200, f"status={status}")
+        status, _ = api.post(
+            "/price-approvals/admin",
+            token=admin,
+            body={"supplier_id": 1, "delivery_date": expected_price_date},
+        )
+        check("admin can send the adjusted price for approval", status == 200, f"status={status}")
 
         status, mine = api.get(f"/pricing/mine?delivery_date={expected_price_date}", token=supplier)
         mine_row = next((r for r in mine if r["product_id"] == 1), None) if status == 200 else None
         check(
-            "sent adjusted price IS visible to supplier",
-            mine_row is not None and mine_row.get("adjusted_price") == 39,
-            f"supplier saw adjusted_price={mine_row.get('adjusted_price') if mine_row else 'row missing'}",
+            "sent adjusted price IS visible to supplier, awaiting their signature",
+            mine_row is not None and mine_row.get("adjusted_price") == 39 and mine_row.get("approval_status") == "PENDING",
+            f"supplier saw {mine_row if mine_row else 'row missing'}",
         )
 
     print("\n== Supplier Orders & Cost Price resolution ==")

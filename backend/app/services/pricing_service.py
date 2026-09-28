@@ -28,6 +28,7 @@ from app.models.supplier import Supplier
 from app.models.user import User
 from app.schemas.pricing import PriceSubmitRequest, PriceWindowOut
 from app.services import settings_service
+from app.services import price_approval_service
 
 BUSINESS_TZ = ZoneInfo("Asia/Colombo")
 
@@ -131,6 +132,13 @@ def submit_prices(db: Session, supplier_user: User, payload: PriceSubmitRequest)
         .all()
     }
 
+    # Any price sheet still waiting for this supplier's signature was built
+    # on the quotes being replaced now, so it's voided (see
+    # price_approval_service) — Admin re-sends once they've reviewed.
+    voided_sheets = price_approval_service.on_supplier_resubmitted(
+        db, supplier_user.supplier_id, window.delivery_date
+    )
+
     # Each submission is the supplier's complete price list for this delivery
     # date, not an incremental add — so any previously-submitted product left
     # out of this payload has been withdrawn and its stale quote must go too,
@@ -182,6 +190,8 @@ def submit_prices(db: Session, supplier_user: User, payload: PriceSubmitRequest)
     description = f"{len(payload.prices)} price(s) submitted for delivery {window.delivery_date.isoformat()}."
     if cleared_count:
         description += f" {cleared_count} previously-submitted price(s) not in this list were cleared."
+    if voided_sheets:
+        description += f" {voided_sheets} price sheet(s) waiting for approval were voided."
     write_audit_log(
         db,
         user_id=supplier_user.id,
@@ -269,6 +279,7 @@ def list_all_prices(
             lowest_by_product[r.product_id] = price
 
     second_lowest_by_product = {pid: second_lowest_price(prices) for pid, prices in prices_by_product.items()}
+    statuses = price_approval_service.row_statuses(db, rows)
 
     result = []
     for r in rows:
@@ -276,6 +287,7 @@ def list_all_prices(
         product = products.get(r.product_id)
         price = float(r.price)
         second_lowest = second_lowest_by_product.get(r.product_id)
+        approval_status, revision = statuses[r.id]
         result.append(
             {
                 "id": r.id,
@@ -290,6 +302,9 @@ def list_all_prices(
                 "price": price,
                 "adjusted_price": float(r.adjusted_price) if r.adjusted_price is not None else None,
                 "sent_to_supplier": r.sent_to_supplier_at is not None,
+                "approval_status": approval_status,
+                "revision_id": revision.id if revision else None,
+                "rejection_reason": revision.rejection_reason if revision else None,
                 "delivery_date": r.delivery_date,
                 "is_lowest_for_product": price == lowest_by_product.get(r.product_id),
                 "second_lowest_price": second_lowest,
@@ -314,20 +329,33 @@ def set_adjusted_price(db: Session, admin: User, price_id: int, adjusted_price: 
     Admin sets (or clears, with None) their negotiated price for one
     supplier's quote. The supplier's original `price` is left untouched —
     this only ever writes to `adjusted_price`. This is a draft: it does
-    NOT reach the supplier until Admin calls send_adjusted_price below, so
-    any prior "sent" state is cleared whenever the value changes.
+    NOT reach the supplier until Admin sends it for approval (see
+    price_approval_service.send_for_approval). If it was already on a
+    price sheet — waiting or even approved — that whole sheet is voided,
+    so the supplier is never held to a figure they didn't sign for.
     """
     row = db.query(SupplierPrice).filter(SupplierPrice.id == price_id).first()
     if not row:
         raise NotFoundError("That supplier price quote was not found.")
 
+    current = float(row.adjusted_price) if row.adjusted_price is not None else None
+    if current == adjusted_price:
+        return row
+
+    voided = price_approval_service.on_adjusted_price_changed(db, row)
     row.adjusted_price = adjusted_price
     row.adjusted_by = admin.id if adjusted_price is not None else None
     row.adjusted_at = datetime.now(BUSINESS_TZ) if adjusted_price is not None else None
-    row.sent_to_supplier_at = None  # any edit un-sends it — supplier must be sent the new value explicitly
     db.commit()
     db.refresh(row)
 
+    description = (
+        f"Adjusted price set to {adjusted_price} for supplier price #{row.id}."
+        if adjusted_price is not None
+        else f"Adjusted price cleared for supplier price #{row.id}."
+    )
+    if voided:
+        description += f" Price sheet #{voided.id} voided — it must be sent and signed again."
     write_audit_log(
         db,
         user_id=admin.id,
@@ -335,61 +363,7 @@ def set_adjusted_price(db: Session, admin: User, price_id: int, adjusted_price: 
         action="SUPPLIER_PRICE_ADJUSTED",
         entity_type="supplier_price",
         entity_id=row.id,
-        description=(
-            f"Adjusted price set to {adjusted_price} for supplier price #{row.id}."
-            if adjusted_price is not None
-            else f"Adjusted price cleared for supplier price #{row.id}."
-        ),
-    )
-    return row
-
-
-def send_adjusted_price(db: Session, admin: User, price_id: int) -> SupplierPrice:
-    """
-    Marks the current adjusted_price as sent — this is what makes it show
-    up on the supplier's own price view. Requires a draft adjusted_price
-    to already be set.
-    """
-    row = db.query(SupplierPrice).filter(SupplierPrice.id == price_id).first()
-    if not row:
-        raise NotFoundError("That supplier price quote was not found.")
-    if row.adjusted_price is None:
-        raise ValidationFailedError("Set an adjusted price before sending it to the supplier.")
-
-    row.sent_to_supplier_at = datetime.now(BUSINESS_TZ)
-    db.commit()
-    db.refresh(row)
-
-    write_audit_log(
-        db,
-        user_id=admin.id,
-        role="ADMIN",
-        action="SUPPLIER_PRICE_SENT",
-        entity_type="supplier_price",
-        entity_id=row.id,
-        description=f"Adjusted price {row.adjusted_price} sent to supplier for supplier price #{row.id}.",
-    )
-    return row
-
-
-def unsend_adjusted_price(db: Session, admin: User, price_id: int) -> SupplierPrice:
-    """Withdraws a sent adjusted price so the supplier no longer sees it (adjusted_price stays as a draft)."""
-    row = db.query(SupplierPrice).filter(SupplierPrice.id == price_id).first()
-    if not row:
-        raise NotFoundError("That supplier price quote was not found.")
-
-    row.sent_to_supplier_at = None
-    db.commit()
-    db.refresh(row)
-
-    write_audit_log(
-        db,
-        user_id=admin.id,
-        role="ADMIN",
-        action="SUPPLIER_PRICE_UNSENT",
-        entity_type="supplier_price",
-        entity_id=row.id,
-        description=f"Adjusted price withdrawn from supplier view for supplier price #{row.id}.",
+        description=description,
     )
     return row
 

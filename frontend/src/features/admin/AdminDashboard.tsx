@@ -1,13 +1,15 @@
 import { ReactNode, useEffect, useState } from "react";
 import DashboardShell from "../shared/DashboardShell";
 import { SidebarItem } from "../shared/Sidebar";
-import { IconBasket, IconTruck, IconTag, IconChart, IconChat, IconClock, IconGrid, IconStore, IconBranches, IconLog, IconSettings, IconUser, IconPercent } from "../shared/Icons";
+import { IconBasket, IconTruck, IconTag, IconChart, IconChat, IconClock, IconGrid, IconStore, IconBranches, IconLog, IconSettings, IconUser, IconPercent, IconShield } from "../shared/Icons";
 import { fetchAdminUnreadCount } from "../../api/messages";
+import { fetchAdminAttentionCount } from "../../api/priceApprovals";
 import OrderMatrixView from "./OrderMatrixView";
 import AdminOrderHistory from "./AdminOrderHistory";
 import ReportsView from "./ReportsView";
 import SupplierOrderBuilder from "./SupplierOrderBuilder";
 import SupplierPricesView from "./SupplierPricesView";
+import AdminPriceApprovals from "./AdminPriceApprovals";
 import AdminKeellsPrices from "./AdminKeellsPrices";
 import AdminMarketPrices from "./AdminMarketPrices";
 import AdminMarketPriceHistory from "./AdminMarketPriceHistory";
@@ -17,7 +19,7 @@ import AdminMessages from "./AdminMessages";
 import AdminAuditLog from "./AdminAuditLog";
 import AdminSettings from "./AdminSettings";
 import AdminUsers from "./AdminUsers";
-type Tab = "orders" | "orderHistory" | "supplierOrders" | "supplierPrices" | "keellsPrices" | "marketPrices" | "marketPriceHistory" | "masterData" | "promotions" | "messages" | "reports" | "auditLog" | "settings" | "users";
+type Tab = "orders" | "orderHistory" | "supplierOrders" | "supplierPrices" | "priceApprovals" | "keellsPrices" | "marketPrices" | "marketPriceHistory" | "masterData" | "promotions" | "messages" | "reports" | "auditLog" | "settings" | "users";
 
 const iconProps = { width: 17, height: 17 };
 const UNREAD_POLL_MS = 15000;
@@ -25,6 +27,8 @@ const UNREAD_POLL_MS = 15000;
 export default function AdminDashboard() {
   const [tab, setTab] = useState<Tab>("orders");
   const [unread, setUnread] = useState(0);
+  // Rejected price sheets for upcoming deliveries not yet followed up.
+  const [rejectedSheets, setRejectedSheets] = useState(0);
 
   // Every tab a user has opened this session stays mounted (just hidden)
   // instead of being torn down when they switch away — otherwise any
@@ -57,6 +61,11 @@ export default function AdminDashboard() {
           if (!cancelled) setUnread(r.count);
         })
         .catch(() => {});
+      fetchAdminAttentionCount()
+        .then((r) => {
+          if (!cancelled) setRejectedSheets(r.count);
+        })
+        .catch(() => {});
     }
     poll();
     const id = setInterval(poll, UNREAD_POLL_MS);
@@ -81,6 +90,7 @@ export default function AdminDashboard() {
     { id: "orderHistory", label: "Order History", icon: <IconClock {...iconProps} /> },
     { id: "supplierOrders", label: "Supplier Orders", icon: <IconTruck {...iconProps} /> },
     { id: "supplierPrices", label: "Supplier Prices", icon: <IconTag {...iconProps} /> },
+    { id: "priceApprovals", label: "Price Approvals", icon: <IconShield {...iconProps} />, badge: rejectedSheets },
     { id: "keellsPrices", label: "Keells Prices", icon: <IconStore {...iconProps} /> },
     { id: "marketPrices", label: "Local Market Prices", icon: <IconBranches {...iconProps} /> },
     { id: "marketPriceHistory", label: "Price History", icon: <IconChart {...iconProps} /> },
@@ -137,6 +147,21 @@ export default function AdminDashboard() {
             Supplier Prices
           </h2>
           <SupplierPricesView />
+        </>
+      )}
+      {keepAlive(
+        "priceApprovals",
+        <>
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-crate-800/60 mb-3">
+            Price Approvals
+          </h2>
+          <AdminPriceApprovals
+            onChanged={() =>
+              fetchAdminAttentionCount()
+                .then((r) => setRejectedSheets(r.count))
+                .catch(() => {})
+            }
+          />
         </>
       )}
       {keepAlive(

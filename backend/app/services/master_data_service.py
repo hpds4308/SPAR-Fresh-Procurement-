@@ -19,7 +19,7 @@ Field ownership:
   _latest_prices below for why that's a deliberate, separate figure).
   Computed live, never stored.
 - Supplier Adjusted CP columns: read-only mirror of Supplier Prices,
-  showing Admin's Adjusted Price where one exists. Edit there, not
+  showing Admin's Adjusted Price where the supplier has approved it. Edit there, not
   here — there is exactly one place a supplier's price can be changed,
   never two disagreeing UIs.
 """
@@ -31,6 +31,7 @@ from app.core.errors import NotFoundError
 from app.models.pricing import SupplierPrice
 from app.models.product import Product, ProductCategory
 from app.models.supplier import Supplier
+from app.services import price_approval_service
 from app.schemas.master_data import (
     MasterDataRowOut,
     MasterDataSheetOut,
@@ -48,10 +49,11 @@ def _latest_prices(
     product_id) pair, that supplier's most recent quote, regardless of
     delivery date:
 
-    - `adjusted_or_submitted`: Adjusted Price if Admin has ever set one,
-      otherwise the submitted price. Shown in the per-supplier "Adjusted
-      CP" columns — this sheet is Admin-only, so a draft adjustment is
-      useful to see here even before it's been sent to the supplier.
+    - `adjusted_or_submitted`: Adjusted Price if the supplier has
+      approved (e-signed) it, otherwise the submitted price. Shown in the
+      per-supplier "Adjusted CP" columns. A draft, unanswered, rejected or
+      expired adjustment isn't an agreed price, so the supplier's own
+      price applies until they sign (see price_approval_service.py).
     - `submitted_only`: (price, delivery_date) — always the supplier's own
       submitted price, never an adjustment, plus the date it was
       submitted for. Used for Cost Price specifically — Cost Price should
@@ -65,13 +67,15 @@ def _latest_prices(
         .order_by(SupplierPrice.supplier_id, SupplierPrice.product_id, SupplierPrice.delivery_date.desc(), SupplierPrice.id.desc())
         .all()
     )
+    approved = price_approval_service.approved_revision_ids(db, {r.revision_id for r in rows if r.revision_id})
     adjusted_or_submitted: dict[tuple[int, int], float] = {}
     submitted_only: dict[tuple[int, int], tuple[float, date]] = {}
     for r in rows:
         key = (r.supplier_id, r.product_id)
         if key in adjusted_or_submitted:
             continue
-        adjusted_or_submitted[key] = float(r.adjusted_price) if r.adjusted_price is not None else float(r.price)
+        agreed = r.adjusted_price is not None and r.revision_id in approved
+        adjusted_or_submitted[key] = float(r.adjusted_price) if agreed else float(r.price)
         submitted_only[key] = (float(r.price), r.delivery_date)
     return adjusted_or_submitted, submitted_only
 

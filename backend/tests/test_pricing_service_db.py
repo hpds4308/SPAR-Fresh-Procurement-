@@ -1,6 +1,6 @@
 """
 DB-backed tests for pricing_service — supplier price submission, admin
-adjustment, send/unsend, and supplier isolation. Covers H-4's "Supplier
+adjustment, and supplier isolation. Covers H-4's "Supplier
 Pricing" category.
 """
 from datetime import date, timedelta
@@ -147,7 +147,7 @@ def test_supplier_isolation_one_supplier_cannot_see_another(db_session, make_sup
     assert len(b_prices) == 1 and float(b_prices[0].price) == 200.0
 
 
-def test_admin_adjust_send_unsend_price_flow(db_session, supplier_ctx, admin_user):
+def test_admin_adjust_price_is_a_draft(db_session, supplier_ctx, admin_user):
     supplier_user, product = supplier_ctx
     saved = pricing_service.submit_prices(
         db_session, supplier_user, PriceSubmitRequest(prices=[PriceEntry(product_id=product.id, price=100)])
@@ -156,13 +156,9 @@ def test_admin_adjust_send_unsend_price_flow(db_session, supplier_ctx, admin_use
 
     adjusted = pricing_service.set_adjusted_price(db_session, admin_user, price_id, 90)
     assert float(adjusted.adjusted_price) == 90.0
-    assert adjusted.sent_to_supplier_at is None  # draft-only until explicitly sent
-
-    sent = pricing_service.send_adjusted_price(db_session, admin_user, price_id)
-    assert sent.sent_to_supplier_at is not None
-
-    unsent = pricing_service.unsend_adjusted_price(db_session, admin_user, price_id)
-    assert unsent.sent_to_supplier_at is None
+    assert adjusted.sent_to_supplier_at is None  # draft-only until sent for approval
+    assert adjusted.revision_id is None
+    # Sending and signing are covered in test_price_approval_db.py.
 
 
 # ---- Latest-previous-price fallback (Submit Prices auto-fill on a new

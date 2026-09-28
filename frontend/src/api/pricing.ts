@@ -1,4 +1,5 @@
 import { apiFetch } from "./client";
+import type { RowApprovalStatus } from "./priceApprovals";
 
 export type PriceWindow = {
   is_open: boolean;
@@ -19,7 +20,10 @@ export type SupplierPrice = {
   unit_code: string;
   price: number;
   delivery_date: string;
+  // Only set once SPAR has sent it for approval — never a draft.
   adjusted_price: number | null;
+  approval_status: RowApprovalStatus;
+  revision_id: number | null;
 };
 
 export function fetchPriceWindow(): Promise<PriceWindow> {
@@ -116,6 +120,11 @@ export type AdminSupplierPrice = {
   price: number;
   adjusted_price: number | null;
   sent_to_supplier: boolean;
+  // null (no adjustment), DRAFT (not sent yet), or the status of the price
+  // sheet it was sent on — only APPROVED counts as the agreed price.
+  approval_status: RowApprovalStatus;
+  revision_id: number | null;
+  rejection_reason: string | null;
   delivery_date: string;
   is_lowest_for_product: boolean;
   // Next distinct price tier below the lowest (null if fewer than two
@@ -146,16 +155,4 @@ export function setAdjustedPrice(
     method: "PATCH",
     body: JSON.stringify({ adjusted_price: adjustedPrice }),
   });
-}
-
-export function sendAdjustedPrice(
-  priceId: number
-): Promise<{ id: number; adjusted_price: number | null; sent_to_supplier: boolean }> {
-  return apiFetch(`/pricing/admin/${priceId}/send`, { method: "POST" });
-}
-
-export function unsendAdjustedPrice(
-  priceId: number
-): Promise<{ id: number; adjusted_price: number | null; sent_to_supplier: boolean }> {
-  return apiFetch(`/pricing/admin/${priceId}/unsend`, { method: "POST" });
 }

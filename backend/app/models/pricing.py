@@ -38,10 +38,16 @@ class SupplierPrice(Base):
     adjusted_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     adjusted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Null while the adjusted price is still a draft only Admin can see.
-    # Set when Admin explicitly sends it — only then does it appear on the
+    # Set when Admin sends it for approval — only then does it appear on the
     # supplier's own price view. Cleared automatically if adjusted_price is
     # cleared or changed, so the supplier never sees a stale sent price.
     sent_to_supplier_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The price sheet this adjusted price was last sent on. The adjusted
+    # price only counts as agreed once that sheet's status is APPROVED —
+    # until then the supplier's own `price` is the one that applies.
+    revision_id: Mapped[int | None] = mapped_column(
+        ForeignKey("supplier_price_revisions.id", ondelete="SET NULL")
+    )
     submitted_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
