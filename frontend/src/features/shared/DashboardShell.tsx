@@ -76,10 +76,19 @@ export default function DashboardShell<T extends string>({
           onMenuClick={() => setMobileNavOpen(true)}
         />
         {/* min-h-0 lets this flex child shrink so it — not the page — is the
-            scroll container for page content. */}
-        <main className="flex-1 min-h-0 overflow-y-auto">
-          <div className="px-4 md:px-6 py-6 md:py-8 animate-fade-up max-w-6xl w-full mx-auto">
-            {children}
+            scroll container for page content. The wallpaper uses the default
+            background-attachment (scroll), which on an overflow container
+            keeps it pinned while the content scrolls over it. */}
+        <main
+          className="flex-1 min-h-0 overflow-y-auto bg-crate-950 bg-cover bg-center"
+          style={{ backgroundImage: "url(/images/dashboard-bg.webp)" }}
+        >
+          <div className="px-3 md:px-6 py-4 md:py-8 animate-fade-up max-w-6xl w-full mx-auto">
+            {/* Frosted panel: page content was designed for a light surface,
+                so it sits on translucent white rather than on the photo. */}
+            <div className="rounded-2xl bg-white/80 backdrop-blur-sm ring-1 ring-white/50 shadow-modal p-4 md:p-6">
+              {children}
+            </div>
           </div>
         </main>
       </div>
