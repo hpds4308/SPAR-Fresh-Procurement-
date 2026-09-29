@@ -94,7 +94,12 @@ export default function BranchDashboard() {
         {tab === "new" && <OrderForm onSubmitted={() => setRefreshKey((k) => k + 1)} />}
         {tab === "history" && <OrderHistory refreshKey={refreshKey} />}
         {tab === "purchaseOrders" && (
-          <PurchaseOrderList fetchList={fetchBranchPurchaseOrders} fetchOne={fetchBranchPurchaseOrder} branchView />
+          <PurchaseOrderList
+            fetchList={fetchBranchPurchaseOrders}
+            fetchOne={fetchBranchPurchaseOrder}
+            branchView
+            searchable
+          />
         )}
         {tab === "safety" && <SafetyStock />}
         {tab === "messages" && <BranchMessages />}

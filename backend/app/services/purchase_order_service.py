@@ -242,18 +242,34 @@ def _for_branch(detail: PurchaseOrderDetailOut, branch_id: int) -> PurchaseOrder
     )
 
 
-def list_branch_purchase_orders(db: Session, branch_user: User) -> list[PurchaseOrderSummaryOut]:
+def list_branch_purchase_orders(db: Session, branch_user: User, q: str | None = None) -> list[PurchaseOrderSummaryOut]:
     """Every PO with lines for this branch, as that branch's own branch PO,
-    most recent delivery first."""
+    most recent delivery first. `q` searches ALL of the branch's POs (not
+    just the recent ones listed by default) by branch PO number or supplier
+    name; punctuation and case are ignored, so "261001sup01br02" finds
+    PO-261001-SUP01-BR02."""
     branch_id = _branch_id_of(branch_user)
-    pos = (
-        db.query(PurchaseOrder)
-        .order_by(PurchaseOrder.delivery_date.desc(), PurchaseOrder.id.desc())
-        .limit(1000)
-        .all()
-    )
-    # items is plain JSON (not JSONB), so the branch filter runs here.
-    pos = [po for po in pos if any(ln["branch_id"] == branch_id for ln in po.items)][:200]
+    needle = _code_part(q or "")
+    query = db.query(PurchaseOrder).order_by(PurchaseOrder.delivery_date.desc(), PurchaseOrder.id.desc())
+    if not needle:
+        query = query.limit(1000)
+    suppliers = {s.id: _code_part(s.supplier_name) for s in db.query(Supplier).all()} if needle else {}
+
+    matched = []
+    limit = 50 if needle else 200
+    for po in query.all():
+        # items is plain JSON (not JSONB), so the branch filter runs here.
+        own = next((ln for ln in po.items if ln["branch_id"] == branch_id), None)
+        if own is None:
+            continue
+        if needle:
+            branch_number = _code_part(_branch_po_number(po.po_number, own["branch_code"]))
+            if needle not in branch_number and needle not in suppliers.get(po.supplier_id, ""):
+                continue
+        matched.append(po)
+        if len(matched) >= limit:
+            break
+    pos = matched
     return [
         PurchaseOrderSummaryOut(**_for_branch(to_detail(db, po), branch_id).model_dump(include=set(PurchaseOrderSummaryOut.model_fields)))
         for po in pos

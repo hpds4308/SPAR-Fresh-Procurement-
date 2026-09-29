@@ -98,9 +98,11 @@ export function fetchMyPurchaseOrder(id: number): Promise<PurchaseOrder> {
   return apiFetch(`/purchase-orders/mine/${id}`);
 }
 
-/** A branch's own branch POs — each cut down to just that branch's lines. */
-export function fetchBranchPurchaseOrders(): Promise<PurchaseOrderSummary[]> {
-  return apiFetch("/purchase-orders/branch");
+/** A branch's own branch POs — each cut down to just that branch's lines.
+ *  `q` searches all of them by PO number or supplier name. */
+export function fetchBranchPurchaseOrders(q?: string): Promise<PurchaseOrderSummary[]> {
+  const qs = q ? `?q=${encodeURIComponent(q)}` : "";
+  return apiFetch(`/purchase-orders/branch${qs}`);
 }
 
 export function fetchBranchPurchaseOrder(id: number): Promise<PurchaseOrder> {

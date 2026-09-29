@@ -208,3 +208,26 @@ def test_branch_sees_only_its_own_branch_po(
     assert purchase_order_service.list_branch_purchase_orders(db_session, outsider) == []
     with pytest.raises(NotFoundError):
         purchase_order_service.get_branch_purchase_order(db_session, outsider, po.id)
+
+
+def test_branch_can_search_its_purchase_orders_by_number_or_supplier(
+    db_session, make_branch, make_supplier, make_product, make_user, admin_user
+):
+    branch = make_branch(branch_code="BR07")
+    product = make_product()
+    fresh = make_supplier(supplier_code="SUP11", supplier_name="Fresh Farms")
+    green = make_supplier(supplier_code="SUP12", supplier_name="Green Valley")
+    for s in (fresh, green):
+        _save_order(db_session, admin_user, s, [dict(branch_id=branch.id, product_id=product.id, quantity=1, agreed_price=1)])
+        purchase_order_service.issue_purchase_order(db_session, admin_user, s.id, DELIVERY_DATE)
+    user = make_user(role="BRANCH", branch=branch)
+
+    def search(q):
+        return [p.po_number for p in purchase_order_service.list_branch_purchase_orders(db_session, user, q)]
+
+    number = f"PO-{DELIVERY_DATE:%y%m%d}-SUP11-BR07"
+    assert search(number) == [number]
+    assert search(number.replace("-", "").lower()) == [number]  # punctuation/case ignored
+    assert search("green valley") == [f"PO-{DELIVERY_DATE:%y%m%d}-SUP12-BR07"]
+    assert search("SUP99") == []
+    assert len(search("")) == 2

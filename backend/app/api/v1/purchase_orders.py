@@ -3,7 +3,7 @@ Purchase orders Admin issues to suppliers — see purchase_order_service.py.
 """
 from datetime import date
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -76,9 +76,13 @@ def my_get(po_id: int, current_user: User = Depends(require_roles("SUPPLIER")), 
 
 
 @router.get("/branch", response_model=list[PurchaseOrderSummaryOut])
-def branch_list(current_user: User = Depends(require_roles("BRANCH")), db: Session = Depends(get_db)):
-    """This branch's own branch POs, from every supplier."""
-    return svc.list_branch_purchase_orders(db, current_user)
+def branch_list(
+    q: str | None = Query(default=None, max_length=60),
+    current_user: User = Depends(require_roles("BRANCH")),
+    db: Session = Depends(get_db),
+):
+    """This branch's own branch POs, from every supplier; `q` searches by PO number or supplier."""
+    return svc.list_branch_purchase_orders(db, current_user, q)
 
 
 @router.get("/branch/{po_id}", response_model=PurchaseOrderDetailOut)
