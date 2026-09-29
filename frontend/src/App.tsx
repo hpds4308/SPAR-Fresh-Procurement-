@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { useAuth } from "./features/auth/AuthContext";
 import LoginPage from "./features/auth/LoginPage";
@@ -7,6 +8,7 @@ import AdminDashboard from "./features/admin/AdminDashboard";
 import BranchDashboard from "./features/branch/BranchDashboard";
 import SupplierDashboard from "./features/supplier/SupplierDashboard";
 import { PageSpinner } from "./features/shared/ui/PageSpinner";
+import { hideBootSplash } from "./features/shared/bootSplash";
 
 function HomeRedirect() {
   const { user, loading } = useAuth();
@@ -21,6 +23,12 @@ function HomeRedirect() {
 }
 
 export default function App() {
+  const { loading } = useAuth();
+  // The index.html splash covers the initial auth check; drop it once that settles.
+  useEffect(() => {
+    if (!loading) hideBootSplash();
+  }, [loading]);
+
   return (
     <Routes>
       <Route path="/" element={<HomeRedirect />} />
