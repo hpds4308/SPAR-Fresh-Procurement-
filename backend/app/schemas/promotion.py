@@ -1,14 +1,36 @@
 from datetime import date
 from typing import Literal
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
-PromotionType = Literal["FRESH_CHOICE", "SPECIAL_WEEKEND", "SPECIAL"]
+# Label colors Admin can pick for a promotion; the frontend maps each one
+# to its badge classes.
+PromotionColor = Literal["blue", "green", "yellow", "red", "purple", "orange", "pink", "teal"]
+
+
+class PromotionTypeIn(BaseModel):
+    name: str = Field(max_length=60)
+    color: PromotionColor
+
+    @field_validator("name")
+    @classmethod
+    def clean_name(cls, v: str) -> str:
+        v = " ".join(v.split())
+        if not v:
+            raise ValueError("Enter a promotion name.")
+        return v
+
+
+class PromotionTypeOut(BaseModel):
+    id: int
+    name: str
+    color: PromotionColor
+    product_count: int  # products this promotion is currently set on
 
 
 class PromotionLineIn(BaseModel):
     product_id: int
-    promotion_type: PromotionType
+    promotion_type_id: int
     start_date: date
     end_date: date
 
@@ -27,6 +49,8 @@ class PromotionSave(BaseModel):
 
 class PromotionOut(BaseModel):
     product_id: int
-    promotion_type: PromotionType
+    promotion_type_id: int
+    promotion_name: str
+    color: PromotionColor
     start_date: date
     end_date: date

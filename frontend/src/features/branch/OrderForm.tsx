@@ -425,7 +425,11 @@ export default function OrderForm({ onSubmitted }: { onSubmitted: () => void }) 
                   {p.description}
                 </p>
                 {promotions[p.id] && (
-                  <PromotionBadge type={promotions[p.id].promotion_type} endDate={promotions[p.id].end_date} />
+                  <PromotionBadge
+                    name={promotions[p.id].promotion_name}
+                    color={promotions[p.id].color}
+                    endDate={promotions[p.id].end_date}
+                  />
                 )}
               </div>
               <div className="flex items-center gap-1.5 mt-0.5">
