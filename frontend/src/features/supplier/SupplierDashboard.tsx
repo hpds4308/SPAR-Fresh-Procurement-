@@ -2,20 +2,21 @@ import { useEffect, useState } from "react";
 import { useAuth } from "../auth/AuthContext";
 import DashboardShell from "../shared/DashboardShell";
 import { SidebarItem } from "../shared/Sidebar";
-import { IconTag, IconClock, IconBranches, IconChat, IconLog, IconUser, IconShield } from "../shared/Icons";
+import { IconTag, IconClock, IconBranches, IconChat, IconLog, IconUser, IconShield, IconReceipt } from "../shared/Icons";
 import { fetchMyUnreadCount } from "../../api/messages";
 import { fetchMyPendingCount } from "../../api/priceApprovals";
 import PriceForm from "./PriceForm";
 import PriceHistory from "./PriceHistory";
 import PriceApprovals from "./PriceApprovals";
 import OrdersByBranch from "./OrdersByBranch";
+import PurchaseOrders from "./PurchaseOrders";
 import SupplierMessages from "./SupplierMessages";
 import SupplierGuidelines from "./SupplierGuidelines";
 import SupplierAccount from "./SupplierAccount";
 import WelcomeScreen from "./WelcomeScreen";
 import { FadeSwitch } from "../shared/ui/FadeSwitch";
 
-type Tab = "submit" | "history" | "approvals" | "byBranch" | "messages" | "guidelines" | "account";
+type Tab = "submit" | "history" | "approvals" | "byBranch" | "purchaseOrders" | "messages" | "guidelines" | "account";
 
 const iconProps = { width: 17, height: 17 };
 const UNREAD_POLL_MS = 15000;
@@ -75,6 +76,7 @@ export default function SupplierDashboard() {
     { id: "history", label: "My Submitted Prices", icon: <IconClock {...iconProps} /> },
     { id: "approvals", label: "Price Approvals", icon: <IconShield {...iconProps} />, badge: pendingSheets },
     { id: "byBranch", label: "Orders by Branch", icon: <IconBranches {...iconProps} /> },
+    { id: "purchaseOrders", label: "Purchase Orders", icon: <IconReceipt {...iconProps} /> },
     { id: "messages", label: "Messages", icon: <IconChat {...iconProps} />, badge: unread },
     { id: "guidelines", label: "Supplier Guidelines", icon: <IconLog {...iconProps} /> },
     { id: "account", label: "Account", icon: <IconUser {...iconProps} /> },
@@ -123,6 +125,7 @@ export default function SupplierDashboard() {
           />
         )}
         {tab === "byBranch" && <OrdersByBranch />}
+        {tab === "purchaseOrders" && <PurchaseOrders />}
         {tab === "messages" && <SupplierMessages />}
         {tab === "guidelines" && <SupplierGuidelines />}
         {tab === "account" && <SupplierAccount />}

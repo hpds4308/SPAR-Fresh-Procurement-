@@ -19,6 +19,7 @@ from app.api.v1 import (
     branches,
     safety_stock,
     promotions,
+    purchase_orders,
 )
 
 api_router = APIRouter()
@@ -40,3 +41,4 @@ api_router.include_router(settings.router, tags=["settings"])
 api_router.include_router(branches.router, tags=["branches"])
 api_router.include_router(safety_stock.router, tags=["safety-stock"])
 api_router.include_router(promotions.router, tags=["promotions"])
+api_router.include_router(purchase_orders.router, tags=["purchase-orders"])

@@ -13,6 +13,7 @@ import {
   fetchSupplierPricePreview,
   setSupplierOrderAdmin,
 } from "../../api/supplierOrders";
+import { PurchaseOrder, issuePurchaseOrder } from "../../api/purchaseOrders";
 import { SkeletonTable } from "../shared/ui/Skeleton";
 
 // One cell in the grid = one branch+product combination.
@@ -22,12 +23,27 @@ function cellKey(productId: number, branchId: number): string {
 
 type ExtraDetail = { agreed_price: string; notes: string };
 
+// Order lines with a quantity, normalised — compared against the last
+// saved/loaded version to tell whether the grid has unsaved changes.
+function orderSnapshot(qty: Record<string, string>, extra: Record<string, ExtraDetail>): string {
+  return JSON.stringify(
+    Object.keys(qty)
+      .filter((key) => qty[key].trim() !== "" && parseFloat(qty[key]) > 0)
+      .sort()
+      .map((key) => [key, parseFloat(qty[key]), extra[key]?.agreed_price?.trim() ?? "", extra[key]?.notes?.trim() ?? ""])
+  );
+}
+
 function formatDate(iso: string): string {
   const d = new Date(iso + "T00:00:00");
   return d.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 }
 
-export default function SupplierOrderBuilder() {
+export default function SupplierOrderBuilder({
+  onPurchaseOrderIssued,
+}: {
+  onPurchaseOrderIssued?: (po: PurchaseOrder) => void;
+}) {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [supplierId, setSupplierId] = useState<number | "">("");
@@ -65,6 +81,10 @@ export default function SupplierOrderBuilder() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
+  // What's saved on the server for this supplier/date (null = nothing), so
+  // "Issue purchase order" is only offered for an order with no unsaved edits.
+  const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null);
+  const [issuing, setIssuing] = useState(false);
 
   // Quantity per product already given to OTHER suppliers for this date —
   // subtracted from branch demand so Required Qty reflects what's actually
@@ -112,6 +132,7 @@ export default function SupplierOrderBuilder() {
       setAssignedElsewhereByBranch({});
       setSupplierPrices({});
       setAssignedToSupplier({});
+      setSavedSnapshot(null);
       return;
     }
     let cancelled = false;
@@ -155,6 +176,7 @@ export default function SupplierOrderBuilder() {
         );
         setQty(nextQty);
         setExtra(nextExtra);
+        setSavedSnapshot(order.items.length > 0 ? orderSnapshot(nextQty, nextExtra) : null);
         setRowProductIds(merged);
         setKeepUnpriced(new Set([...savedProductIds, ...Object.keys(assignedMap).map(Number)]));
         setAssignedElsewhere(assigned);
@@ -418,7 +440,8 @@ export default function SupplierOrderBuilder() {
     setSaving(true);
     try {
       await setSupplierOrderAdmin(supplierId as number, deliveryDate, parsed);
-      setSavedMessage("Order saved.");
+      setSavedSnapshot(orderSnapshot(qty, extra));
+      setSavedMessage("Order saved. You can now issue the purchase order.");
       // A line for a branch that hadn't ordered the item may have just
       // been added to that branch's own order (see the backend sync) —
       // re-fetch so "Required Qty"/branch demand and the "not on their
@@ -431,6 +454,23 @@ export default function SupplierOrderBuilder() {
       setError(err instanceof ApiError ? err.message : "Could not save the order.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  const hasUnsavedChanges = orderSnapshot(qty, extra) !== savedSnapshot;
+
+  async function handleIssuePo() {
+    if (!supplierId) return;
+    setError(null);
+    setIssuing(true);
+    try {
+      const po = await issuePurchaseOrder(supplierId, deliveryDate);
+      setSavedMessage(`Purchase order ${po.po_number} issued.`);
+      onPurchaseOrderIssued?.(po);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not issue the purchase order.");
+    } finally {
+      setIssuing(false);
     }
   }
 
@@ -776,7 +816,21 @@ export default function SupplierOrderBuilder() {
         {error && <p className="text-tomato-600 text-sm mt-3">{error}</p>}
         {savedMessage && <p className="text-crate-700 text-sm mt-3 font-medium">{savedMessage}</p>}
 
-        <div className="flex justify-end mt-4">
+        <div className="flex flex-wrap justify-end gap-2 mt-4">
+          {savedSnapshot !== null && (
+            <button
+              onClick={handleIssuePo}
+              disabled={issuing || saving || hasUnsavedChanges}
+              title={
+                hasUnsavedChanges
+                  ? "Save your changes first — the purchase order is made from the saved order"
+                  : "Make the numbered purchase order (supplier PO + one per branch) from this saved order"
+              }
+              className="text-sm border border-crate-700 text-crate-700 bg-white rounded-full px-5 py-2 font-semibold hover:bg-sage-50 active:scale-[0.98] disabled:opacity-40 disabled:active:scale-100 transition-all duration-150"
+            >
+              {issuing ? "Issuing…" : "Issue purchase order"}
+            </button>
+          )}
           <button
             onClick={handleSave}
             disabled={saving || !supplierId}

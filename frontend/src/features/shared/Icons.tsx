@@ -249,3 +249,13 @@ export function IconSettings(props: IconProps) {
     props
   );
 }
+
+export function IconReceipt(props: IconProps) {
+  return base(
+    <>
+      <path d="M5 2.5h10v15l-2-1.3-1.7 1.3L10 16.2l-1.3 1.3L7 16.2l-2 1.3z" />
+      <path d="M7.5 6.5h5M7.5 9.5h5M7.5 12.5h3" />
+    </>,
+    props
+  );
+}

@@ -23,3 +23,28 @@
     display: none !important;
   }
 }
+
+/* Printing a purchase order: the app is taken out of the layout entirely
+   and only the body-level .po-print-root copy is printed, in normal flow
+   so it can run over several pages, one branch PO per page. */
+.po-print-root {
+  display: none;
+}
+@media print {
+  body.po-printing .po-print-root {
+    display: block;
+  }
+  body.po-printing > *:not(.po-print-root) {
+    display: none !important;
+  }
+  body.po-printing .po-print-root,
+  body.po-printing .po-print-root * {
+    visibility: visible;
+  }
+  body.po-printing {
+    background: white !important;
+  }
+  .po-print-root .po-page + .po-page {
+    break-before: page;
+  }
+}

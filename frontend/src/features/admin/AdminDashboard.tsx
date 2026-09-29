@@ -1,13 +1,14 @@
 import { ReactNode, useEffect, useState } from "react";
 import DashboardShell from "../shared/DashboardShell";
 import { SidebarItem } from "../shared/Sidebar";
-import { IconBasket, IconTruck, IconTag, IconChart, IconChat, IconClock, IconGrid, IconStore, IconBranches, IconLog, IconSettings, IconUser, IconPercent, IconShield } from "../shared/Icons";
+import { IconBasket, IconTruck, IconTag, IconChart, IconChat, IconClock, IconGrid, IconStore, IconBranches, IconLog, IconSettings, IconUser, IconPercent, IconShield, IconReceipt } from "../shared/Icons";
 import { fetchAdminUnreadCount } from "../../api/messages";
 import { fetchAdminAttentionCount } from "../../api/priceApprovals";
 import OrderMatrixView from "./OrderMatrixView";
 import AdminOrderHistory from "./AdminOrderHistory";
 import ReportsView from "./ReportsView";
 import SupplierOrderBuilder from "./SupplierOrderBuilder";
+import AdminPurchaseOrders, { PoFocus } from "./AdminPurchaseOrders";
 import SupplierPricesView from "./SupplierPricesView";
 import AdminPriceApprovals from "./AdminPriceApprovals";
 import AdminKeellsPrices from "./AdminKeellsPrices";
@@ -19,7 +20,7 @@ import AdminMessages from "./AdminMessages";
 import AdminAuditLog from "./AdminAuditLog";
 import AdminSettings from "./AdminSettings";
 import AdminUsers from "./AdminUsers";
-type Tab = "orders" | "orderHistory" | "supplierOrders" | "supplierPrices" | "priceApprovals" | "keellsPrices" | "marketPrices" | "marketPriceHistory" | "masterData" | "promotions" | "messages" | "reports" | "auditLog" | "settings" | "users";
+type Tab = "orders" | "orderHistory" | "supplierOrders" | "purchaseOrders" | "supplierPrices" | "priceApprovals" | "keellsPrices" | "marketPrices" | "marketPriceHistory" | "masterData" | "promotions" | "messages" | "reports" | "auditLog" | "settings" | "users";
 
 const iconProps = { width: 17, height: 17 };
 const UNREAD_POLL_MS = 15000;
@@ -29,6 +30,8 @@ export default function AdminDashboard() {
   const [unread, setUnread] = useState(0);
   // Rejected price sheets for upcoming deliveries not yet followed up.
   const [rejectedSheets, setRejectedSheets] = useState(0);
+  // A PO just issued from Supplier Orders, to open on the Purchase Orders tab.
+  const [poFocus, setPoFocus] = useState<PoFocus | null>(null);
 
   // Every tab a user has opened this session stays mounted (just hidden)
   // instead of being torn down when they switch away — otherwise any
@@ -89,6 +92,7 @@ export default function AdminDashboard() {
     { id: "orders", label: "Branch Orders", icon: <IconBasket {...iconProps} /> },
     { id: "orderHistory", label: "Order History", icon: <IconClock {...iconProps} /> },
     { id: "supplierOrders", label: "Supplier Orders", icon: <IconTruck {...iconProps} /> },
+    { id: "purchaseOrders", label: "Purchase Orders", icon: <IconReceipt {...iconProps} /> },
     { id: "supplierPrices", label: "Supplier Prices", icon: <IconTag {...iconProps} /> },
     { id: "priceApprovals", label: "Price Approvals", icon: <IconShield {...iconProps} />, badge: rejectedSheets },
     { id: "keellsPrices", label: "Keells Prices", icon: <IconStore {...iconProps} /> },
@@ -137,7 +141,21 @@ export default function AdminDashboard() {
           <h2 className="text-xs font-semibold uppercase tracking-wide text-crate-800/60 mb-3">
             Give an order to a supplier
           </h2>
-          <SupplierOrderBuilder />
+          <SupplierOrderBuilder
+            onPurchaseOrderIssued={(po) => {
+              setPoFocus({ deliveryDate: po.delivery_date, poId: po.id, nonce: Date.now() });
+              setTab("purchaseOrders");
+            }}
+          />
+        </>
+      )}
+      {keepAlive(
+        "purchaseOrders",
+        <>
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-crate-800/60 mb-3">
+            Purchase Orders
+          </h2>
+          <AdminPurchaseOrders focus={poFocus} />
         </>
       )}
       {keepAlive(
