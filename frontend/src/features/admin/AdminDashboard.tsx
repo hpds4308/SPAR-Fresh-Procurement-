@@ -1,5 +1,6 @@
 import { ReactNode, useEffect, useState } from "react";
 import DashboardShell from "../shared/DashboardShell";
+import { useTabParam } from "../shared/useTabParam";
 import { SidebarItem } from "../shared/Sidebar";
 import { IconBasket, IconTruck, IconTag, IconChart, IconChat, IconClock, IconGrid, IconStore, IconBranches, IconLog, IconSettings, IconUser, IconPercent, IconShield, IconReceipt } from "../shared/Icons";
 import { fetchAdminUnreadCount } from "../../api/messages";
@@ -20,13 +21,14 @@ import AdminMessages from "./AdminMessages";
 import AdminAuditLog from "./AdminAuditLog";
 import AdminSettings from "./AdminSettings";
 import AdminUsers from "./AdminUsers";
-type Tab = "orders" | "orderHistory" | "supplierOrders" | "purchaseOrders" | "supplierPrices" | "priceApprovals" | "keellsPrices" | "marketPrices" | "marketPriceHistory" | "masterData" | "promotions" | "messages" | "reports" | "auditLog" | "settings" | "users";
+const TABS = ["orders", "orderHistory", "supplierOrders", "purchaseOrders", "supplierPrices", "priceApprovals", "keellsPrices", "marketPrices", "marketPriceHistory", "masterData", "promotions", "messages", "reports", "auditLog", "settings", "users"] as const;
+type Tab = (typeof TABS)[number];
 
 const iconProps = { width: 17, height: 17 };
 const UNREAD_POLL_MS = 15000;
 
 export default function AdminDashboard() {
-  const [tab, setTab] = useState<Tab>("orders");
+  const [tab, setTab] = useTabParam(TABS, "orders");
   const [unread, setUnread] = useState(0);
   // Rejected price sheets for upcoming deliveries not yet followed up.
   const [rejectedSheets, setRejectedSheets] = useState(0);

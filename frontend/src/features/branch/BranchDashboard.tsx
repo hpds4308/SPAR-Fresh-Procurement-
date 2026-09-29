@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "../auth/AuthContext";
 import DashboardShell from "../shared/DashboardShell";
+import { useTabParam } from "../shared/useTabParam";
 import { SidebarItem } from "../shared/Sidebar";
 import { IconPlus, IconClock, IconChat, IconLog, IconShield, IconReceipt } from "../shared/Icons";
 import { fetchMyUnreadCount } from "../../api/messages";
@@ -14,14 +15,15 @@ import BranchGuidelines from "./BranchGuidelines";
 import BranchWelcomeScreen from "./BranchWelcomeScreen";
 import { FadeSwitch } from "../shared/ui/FadeSwitch";
 
-type Tab = "new" | "history" | "purchaseOrders" | "safety" | "messages" | "guidelines";
+const TABS = ["new", "history", "purchaseOrders", "safety", "messages", "guidelines"] as const;
+type Tab = (typeof TABS)[number];
 
 const iconProps = { width: 17, height: 17 };
 const UNREAD_POLL_MS = 15000;
 
 export default function BranchDashboard() {
   const { user } = useAuth();
-  const [tab, setTab] = useState<Tab>("new");
+  const [tab, setTab] = useTabParam(TABS, "new");
   const [refreshKey, setRefreshKey] = useState(0);
   const [unread, setUnread] = useState(0);
   // Set by AuthContext.login() only for a fresh BRANCH login, not on a
