@@ -127,7 +127,7 @@ export default function SupplierDashboard() {
         )}
         {tab === "byBranch" && <OrdersByBranch />}
         {tab === "purchaseOrders" && (
-          <PurchaseOrderList fetchList={fetchMyPurchaseOrders} fetchOne={fetchMyPurchaseOrder} defaultView="matrix" />
+          <PurchaseOrderList fetchList={fetchMyPurchaseOrders} fetchOne={fetchMyPurchaseOrder} />
         )}
         {tab === "messages" && <SupplierMessages />}
         {tab === "guidelines" && <SupplierGuidelines />}

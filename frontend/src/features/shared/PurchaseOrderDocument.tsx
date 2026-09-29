@@ -159,7 +159,17 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 /** One printable page: the supplier PO when `branch` is omitted, otherwise that branch's PO. */
-function PoPage({ po, branch, matrix = false }: { po: PurchaseOrder; branch?: BranchPurchaseOrder; matrix?: boolean }) {
+function PoPage({
+  po,
+  branch,
+  matrix = false,
+  pageLabel,
+}: {
+  po: PurchaseOrder;
+  branch?: BranchPurchaseOrder;
+  matrix?: boolean;
+  pageLabel?: string;
+}) {
   const s = po.supplier;
   return (
     <section className={`po-page space-y-5 ${matrix ? "po-page-wide" : ""}`}>
@@ -170,13 +180,18 @@ function PoPage({ po, branch, matrix = false }: { po: PurchaseOrder; branch?: Br
         </div>
         <div className="text-right">
           <p className="text-xs uppercase tracking-[0.2em] text-crate-800/50 font-semibold">
-            {branch ? "Branch purchase order" : matrix ? "Purchase order — items by branch" : "Purchase order"}
+            {branch
+              ? `Purchase order · ${branch.branch_name}`
+              : matrix
+              ? "Purchase order — items by branch"
+              : "Purchase order"}
           </p>
           <p className="font-mono text-lg font-semibold text-crate-950">{branch ? branch.po_number : po.po_number}</p>
           <p className="text-xs text-crate-800/50">
             Revision {po.revision}
             {branch ? ` · part of ${po.po_number}` : ""}
           </p>
+          {pageLabel && <p className="text-xs font-semibold text-crate-800/70 mt-0.5">{pageLabel}</p>}
         </div>
       </header>
 
@@ -272,12 +287,22 @@ function PoPage({ po, branch, matrix = false }: { po: PurchaseOrder; branch?: Br
 export function PurchaseOrderDocument({ po, view }: { po: PurchaseOrder; view: PoView }) {
   const branchPages =
     view === "branches" || view === "all" ? po.branches : typeof view === "number" ? po.branches.filter((b) => b.branch_id === view) : [];
+  // Every page of this view, in order, so each can say "Page 2 of 3".
+  const pages: { key: string; branch?: BranchPurchaseOrder; matrix?: boolean }[] = [
+    ...(view === "supplier" || view === "all" ? [{ key: "supplier" }] : []),
+    ...(view === "matrix" || view === "all" ? [{ key: "matrix", matrix: true }] : []),
+    ...branchPages.map((b) => ({ key: `branch-${b.branch_id}`, branch: b })),
+  ];
   return (
     <div className="space-y-10">
-      {(view === "supplier" || view === "all") && <PoPage po={po} />}
-      {(view === "matrix" || view === "all") && <PoPage po={po} matrix />}
-      {branchPages.map((b) => (
-        <PoPage key={b.branch_id} po={po} branch={b} />
+      {pages.map((p, i) => (
+        <PoPage
+          key={p.key}
+          po={po}
+          branch={p.branch}
+          matrix={p.matrix}
+          pageLabel={pages.length > 1 ? `Page ${i + 1} of ${pages.length}` : undefined}
+        />
       ))}
     </div>
   );
@@ -293,7 +318,7 @@ export function PurchaseOrderViewer({
   po,
   actions,
   branchOnly = false,
-  defaultView = "supplier",
+  defaultView = "branches",
 }: {
   po: PurchaseOrder;
   actions?: React.ReactNode;
@@ -334,9 +359,11 @@ export function PurchaseOrderViewer({
             }}
             className="border border-sage-300 bg-sage-50/60 rounded-full px-4 py-2 text-sm text-crate-950 focus:outline-none focus:ring-2 focus:ring-crate-700/30 focus:border-crate-700 focus:bg-white"
           >
-            <option value="supplier">Supplier PO (all branches)</option>
+            <option value="branches">
+              Branch-wise PO — {po.branches.length} page{po.branches.length === 1 ? "" : "s"}, one per branch
+            </option>
+            <option value="supplier">Combined PO (all branches on one page)</option>
             <option value="matrix">Items by branch (quantity per branch)</option>
-            <option value="branches">All branch POs ({po.branches.length})</option>
             {po.branches.map((b) => (
               <option key={b.branch_id} value={b.branch_id}>
                 Branch PO — {b.branch_name}

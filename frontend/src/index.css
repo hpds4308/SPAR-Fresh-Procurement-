@@ -58,3 +58,11 @@
     page: wide;
   }
 }
+
+/* On screen, mark where each printed PO page (one per branch) begins. */
+@media screen {
+  .po-page + .po-page {
+    border-top: 2px dashed rgba(21, 56, 38, 0.18);
+    padding-top: 2.5rem;
+  }
+}
