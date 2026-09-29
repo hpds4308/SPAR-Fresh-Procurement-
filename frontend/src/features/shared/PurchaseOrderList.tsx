@@ -1,26 +1,41 @@
 import { useEffect, useState } from "react";
 import { ApiError } from "../../api/client";
-import { PurchaseOrder, PurchaseOrderSummary, fetchMyPurchaseOrder, fetchMyPurchaseOrders } from "../../api/purchaseOrders";
-import EmptyState from "../shared/EmptyState";
-import { IconReceipt } from "../shared/Icons";
-import { PoStatusBadge, PurchaseOrderViewer } from "../shared/PurchaseOrderDocument";
-import { formatDateTime, formatLongDate } from "../shared/PriceSheetParts";
-import { SkeletonTable } from "../shared/ui/Skeleton";
+import { PurchaseOrder, PurchaseOrderSummary } from "../../api/purchaseOrders";
+import EmptyState from "./EmptyState";
+import { IconReceipt } from "./Icons";
+import { PoStatusBadge, PurchaseOrderViewer } from "./PurchaseOrderDocument";
+import { formatDateTime, formatLongDate } from "./PriceSheetParts";
+import { SkeletonTable } from "./ui/Skeleton";
 
 const card = "bg-white rounded-2xl shadow-card border border-sage-100";
 
-export default function PurchaseOrders() {
+/**
+ * A supplier's or a branch's list of purchase orders, click-through to the
+ * printable PO. Branches get their own branch PO only (the API has already
+ * cut each PO down to their lines), so the view picker is hidden for them.
+ */
+export default function PurchaseOrderList({
+  fetchList,
+  fetchOne,
+  branchView = false,
+}: {
+  fetchList: () => Promise<PurchaseOrderSummary[]>;
+  fetchOne: (id: number) => Promise<PurchaseOrder>;
+  branchView?: boolean;
+}) {
   const [list, setList] = useState<PurchaseOrderSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<number | null>(null);
 
   useEffect(() => {
-    fetchMyPurchaseOrders()
+    fetchList()
       .then(setList)
       .catch((err) => setError(err instanceof ApiError ? err.message : "Could not load your purchase orders."));
-  }, []);
+  }, [fetchList]);
 
-  if (openId !== null) return <PurchaseOrderDetail id={openId} onBack={() => setOpenId(null)} />;
+  if (openId !== null) {
+    return <PurchaseOrderDetail id={openId} fetchOne={fetchOne} branchView={branchView} onBack={() => setOpenId(null)} />;
+  }
 
   if (error) {
     return <div className="rounded-2xl bg-tomato-500/10 border border-tomato-500/25 p-4 text-tomato-600 text-sm">{error}</div>;
@@ -37,7 +52,11 @@ export default function PurchaseOrders() {
       <EmptyState
         icon={<IconReceipt width={20} height={20} />}
         title="No purchase orders yet"
-        description="When SPAR issues you a purchase order, it appears here to view and print."
+        description={
+          branchView
+            ? "When SPAR issues a purchase order to a supplier for your branch, it appears here to check deliveries against."
+            : "When SPAR issues you a purchase order, it appears here to view and print."
+        }
       />
     );
   }
@@ -57,8 +76,9 @@ export default function PurchaseOrders() {
                   {po.revision > 1 && <span className="text-crate-800/45 font-normal"> · revision {po.revision}</span>}
                 </p>
                 <p className="text-xs text-crate-800/45 mt-0.5">
-                  Delivery {formatLongDate(po.delivery_date)} · {po.branch_count} branch
-                  {po.branch_count === 1 ? "" : "es"} · issued {formatDateTime(po.issued_at)}
+                  {branchView ? `${po.supplier_name} · ` : ""}Delivery {formatLongDate(po.delivery_date)}
+                  {branchView ? "" : ` · ${po.branch_count} branch${po.branch_count === 1 ? "" : "es"}`} · issued{" "}
+                  {formatDateTime(po.issued_at)}
                 </p>
               </div>
               <span className="text-sm font-semibold text-crate-950 tabular-nums">Rs. {po.total_amount.toFixed(2)}</span>
@@ -71,15 +91,25 @@ export default function PurchaseOrders() {
   );
 }
 
-function PurchaseOrderDetail({ id, onBack }: { id: number; onBack: () => void }) {
+function PurchaseOrderDetail({
+  id,
+  fetchOne,
+  branchView,
+  onBack,
+}: {
+  id: number;
+  fetchOne: (id: number) => Promise<PurchaseOrder>;
+  branchView: boolean;
+  onBack: () => void;
+}) {
   const [po, setPo] = useState<PurchaseOrder | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchMyPurchaseOrder(id)
+    fetchOne(id)
       .then(setPo)
       .catch((err) => setError(err instanceof ApiError ? err.message : "Could not load this purchase order."));
-  }, [id]);
+  }, [id, fetchOne]);
 
   return (
     <div className="space-y-4">
@@ -94,7 +124,7 @@ function PurchaseOrderDetail({ id, onBack }: { id: number; onBack: () => void })
       )}
       {po && (
         <div className={`${card} p-5 sm:p-6`}>
-          <PurchaseOrderViewer po={po} />
+          <PurchaseOrderViewer po={po} branchOnly={branchView} />
         </div>
       )}
     </div>

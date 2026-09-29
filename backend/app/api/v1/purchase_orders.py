@@ -70,3 +70,17 @@ def my_list(current_user: User = Depends(require_roles("SUPPLIER")), db: Session
 @router.get("/mine/{po_id}", response_model=PurchaseOrderDetailOut)
 def my_get(po_id: int, current_user: User = Depends(require_roles("SUPPLIER")), db: Session = Depends(get_db)):
     return svc.to_detail(db, svc.get_my_purchase_order(db, current_user, po_id))
+
+
+# ---- Branch ----
+
+
+@router.get("/branch", response_model=list[PurchaseOrderSummaryOut])
+def branch_list(current_user: User = Depends(require_roles("BRANCH")), db: Session = Depends(get_db)):
+    """This branch's own branch POs, from every supplier."""
+    return svc.list_branch_purchase_orders(db, current_user)
+
+
+@router.get("/branch/{po_id}", response_model=PurchaseOrderDetailOut)
+def branch_get(po_id: int, current_user: User = Depends(require_roles("BRANCH")), db: Session = Depends(get_db)):
+    return svc.get_branch_purchase_order(db, current_user, po_id)

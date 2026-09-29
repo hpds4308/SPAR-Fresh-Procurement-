@@ -219,6 +219,56 @@ def list_my_purchase_orders(db: Session, supplier_user: User) -> list[PurchaseOr
     return to_summaries(db, pos)
 
 
+def _branch_id_of(user: User) -> int:
+    if not user.branch_id:
+        raise PermissionDeniedError("Only branch accounts have branch purchase orders.")
+    return user.branch_id
+
+
+def _for_branch(detail: PurchaseOrderDetailOut, branch_id: int) -> PurchaseOrderDetailOut:
+    """Cuts a PO down to one branch's own branch PO — a branch never sees
+    other branches' quantities or the supplier's combined total."""
+    branch = next(b for b in detail.branches if b.branch_id == branch_id)
+    return detail.model_copy(
+        update={
+            "po_number": branch.po_number,
+            "branch_count": 1,
+            "line_count": len(branch.lines),
+            "total_amount": branch.total,
+            "consolidated_lines": branch.lines,
+            "branches": [branch],
+            "is_outdated": False,
+        }
+    )
+
+
+def list_branch_purchase_orders(db: Session, branch_user: User) -> list[PurchaseOrderSummaryOut]:
+    """Every PO with lines for this branch, as that branch's own branch PO,
+    most recent delivery first."""
+    branch_id = _branch_id_of(branch_user)
+    pos = (
+        db.query(PurchaseOrder)
+        .order_by(PurchaseOrder.delivery_date.desc(), PurchaseOrder.id.desc())
+        .limit(1000)
+        .all()
+    )
+    # items is plain JSON (not JSONB), so the branch filter runs here.
+    pos = [po for po in pos if any(ln["branch_id"] == branch_id for ln in po.items)][:200]
+    return [
+        PurchaseOrderSummaryOut(**_for_branch(to_detail(db, po), branch_id).model_dump(include=set(PurchaseOrderSummaryOut.model_fields)))
+        for po in pos
+    ]
+
+
+def get_branch_purchase_order(db: Session, branch_user: User, po_id: int) -> PurchaseOrderDetailOut:
+    branch_id = _branch_id_of(branch_user)
+    po = db.get(PurchaseOrder, po_id)
+    # Same 404 whether it doesn't exist or has nothing for this branch.
+    if not po or not any(ln["branch_id"] == branch_id for ln in po.items):
+        raise NotFoundError("Purchase order not found.")
+    return _for_branch(to_detail(db, po), branch_id)
+
+
 def list_admin_rows(db: Session, delivery_date: date) -> list[PurchaseOrderAdminRowOut]:
     """Every supplier with an order saved for this date, plus any PO on
     this date whose supplier order has since been emptied — each with its

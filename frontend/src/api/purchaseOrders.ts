@@ -97,3 +97,12 @@ export function fetchMyPurchaseOrders(): Promise<PurchaseOrderSummary[]> {
 export function fetchMyPurchaseOrder(id: number): Promise<PurchaseOrder> {
   return apiFetch(`/purchase-orders/mine/${id}`);
 }
+
+/** A branch's own branch POs — each cut down to just that branch's lines. */
+export function fetchBranchPurchaseOrders(): Promise<PurchaseOrderSummary[]> {
+  return apiFetch("/purchase-orders/branch");
+}
+
+export function fetchBranchPurchaseOrder(id: number): Promise<PurchaseOrder> {
+  return apiFetch(`/purchase-orders/branch/${id}`);
+}

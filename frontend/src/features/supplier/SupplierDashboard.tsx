@@ -9,7 +9,8 @@ import PriceForm from "./PriceForm";
 import PriceHistory from "./PriceHistory";
 import PriceApprovals from "./PriceApprovals";
 import OrdersByBranch from "./OrdersByBranch";
-import PurchaseOrders from "./PurchaseOrders";
+import PurchaseOrderList from "../shared/PurchaseOrderList";
+import { fetchMyPurchaseOrder, fetchMyPurchaseOrders } from "../../api/purchaseOrders";
 import SupplierMessages from "./SupplierMessages";
 import SupplierGuidelines from "./SupplierGuidelines";
 import SupplierAccount from "./SupplierAccount";
@@ -125,7 +126,9 @@ export default function SupplierDashboard() {
           />
         )}
         {tab === "byBranch" && <OrdersByBranch />}
-        {tab === "purchaseOrders" && <PurchaseOrders />}
+        {tab === "purchaseOrders" && (
+          <PurchaseOrderList fetchList={fetchMyPurchaseOrders} fetchOne={fetchMyPurchaseOrder} />
+        )}
         {tab === "messages" && <SupplierMessages />}
         {tab === "guidelines" && <SupplierGuidelines />}
         {tab === "account" && <SupplierAccount />}

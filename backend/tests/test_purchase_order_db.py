@@ -174,3 +174,37 @@ def test_purchase_order_endpoints_are_role_gated(
     assert resp.json()["total_amount"] == 10
     branch_user = make_user(role="BRANCH", branch=branch)
     assert client.get("/api/v1/purchase-orders/mine", headers=auth_headers(branch_user)).status_code == 403
+
+
+def test_branch_sees_only_its_own_branch_po(
+    db_session, make_branch, make_supplier, make_product, make_user, admin_user
+):
+    supplier = make_supplier(supplier_code="SUP09")
+    mine = make_branch(branch_code="BR05")
+    other = make_branch()
+    outside = make_branch()
+    product = make_product()
+    _save_order(
+        db_session,
+        admin_user,
+        supplier,
+        [
+            dict(branch_id=mine.id, product_id=product.id, quantity=10, agreed_price=5),
+            dict(branch_id=other.id, product_id=product.id, quantity=90, agreed_price=5),
+        ],
+    )
+    po = purchase_order_service.issue_purchase_order(db_session, admin_user, supplier.id, DELIVERY_DATE)
+
+    branch_user = make_user(role="BRANCH", branch=mine)
+    [summary] = purchase_order_service.list_branch_purchase_orders(db_session, branch_user)
+    assert summary.po_number == f"{po.po_number}-BR05"
+    assert summary.total_amount == 50 and summary.branch_count == 1
+
+    detail = purchase_order_service.get_branch_purchase_order(db_session, branch_user, po.id)
+    assert [b.branch_id for b in detail.branches] == [mine.id]
+    assert [ln.quantity for ln in detail.consolidated_lines] == [10]
+
+    outsider = make_user(role="BRANCH", branch=outside)
+    assert purchase_order_service.list_branch_purchase_orders(db_session, outsider) == []
+    with pytest.raises(NotFoundError):
+        purchase_order_service.get_branch_purchase_order(db_session, outsider, po.id)

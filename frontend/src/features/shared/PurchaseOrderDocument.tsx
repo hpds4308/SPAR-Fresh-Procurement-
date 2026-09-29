@@ -212,12 +212,22 @@ export function PurchaseOrderDocument({ po, view }: { po: PurchaseOrder; view: P
  * normal page flow (see index.css), so a long PO runs onto as many pages
  * as it needs and each branch PO starts on a new page.
  */
-export function PurchaseOrderViewer({ po, actions }: { po: PurchaseOrder; actions?: React.ReactNode }) {
-  const [view, setView] = useState<PoView>("supplier");
+export function PurchaseOrderViewer({
+  po,
+  actions,
+  branchOnly = false,
+}: {
+  po: PurchaseOrder;
+  actions?: React.ReactNode;
+  /** Branch accounts: show just their branch PO, no view picker. */
+  branchOnly?: boolean;
+}) {
+  const initialView: PoView = branchOnly && po.branches.length === 1 ? po.branches[0].branch_id : "supplier";
+  const [view, setView] = useState<PoView>(initialView);
 
   useEffect(() => {
-    setView("supplier");
-  }, [po.id]);
+    setView(initialView);
+  }, [po.id, initialView]);
 
   useEffect(() => {
     const done = () => document.body.classList.remove("po-printing");
@@ -236,23 +246,25 @@ export function PurchaseOrderViewer({ po, actions }: { po: PurchaseOrder; action
   return (
     <div className="space-y-4">
       <div className="no-print flex flex-wrap items-center gap-3">
-        <select
-          value={String(view)}
-          onChange={(e) => {
-            const v = e.target.value;
-            setView(v === "supplier" || v === "branches" || v === "all" ? v : Number(v));
-          }}
-          className="border border-sage-300 bg-sage-50/60 rounded-full px-4 py-2 text-sm text-crate-950 focus:outline-none focus:ring-2 focus:ring-crate-700/30 focus:border-crate-700 focus:bg-white"
-        >
-          <option value="supplier">Supplier PO (all branches)</option>
-          <option value="branches">All branch POs ({po.branches.length})</option>
-          {po.branches.map((b) => (
-            <option key={b.branch_id} value={b.branch_id}>
-              Branch PO — {b.branch_name}
-            </option>
-          ))}
-          <option value="all">Everything (supplier PO + branch POs)</option>
-        </select>
+        {!branchOnly && (
+          <select
+            value={String(view)}
+            onChange={(e) => {
+              const v = e.target.value;
+              setView(v === "supplier" || v === "branches" || v === "all" ? v : Number(v));
+            }}
+            className="border border-sage-300 bg-sage-50/60 rounded-full px-4 py-2 text-sm text-crate-950 focus:outline-none focus:ring-2 focus:ring-crate-700/30 focus:border-crate-700 focus:bg-white"
+          >
+            <option value="supplier">Supplier PO (all branches)</option>
+            <option value="branches">All branch POs ({po.branches.length})</option>
+            {po.branches.map((b) => (
+              <option key={b.branch_id} value={b.branch_id}>
+                Branch PO — {b.branch_name}
+              </option>
+            ))}
+            <option value="all">Everything (supplier PO + branch POs)</option>
+          </select>
+        )}
         <Button variant="secondary" size="sm" onClick={print}>
           Print / Save as PDF
         </Button>
