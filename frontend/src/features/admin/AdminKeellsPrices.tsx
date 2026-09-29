@@ -115,7 +115,7 @@ export default function AdminKeellsPrices() {
     <div className="space-y-4">
       <div className="bg-white rounded-2xl shadow-card border border-sage-100 p-4">
         <div className="flex flex-wrap items-center gap-3">
-          <label className="text-sm text-crate-800/70">Order Date</label>
+          <label className="text-sm text-crate-800/70">Date</label>
           <input
             type="date"
             value={deliveryDate}
