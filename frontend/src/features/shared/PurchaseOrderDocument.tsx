@@ -153,7 +153,7 @@ function BranchMatrixTable({ po }: { po: PurchaseOrder }) {
  *  "Authorised by" line. Not shown once the PO is cancelled. */
 function ApprovedStamp({ po }: { po: PurchaseOrder }) {
   return (
-    <div className="po-stamp inline-block -rotate-2 mb-2 rounded-lg border-2 border-[#16a34a] bg-[#16a34a]/5 px-3 py-1.5 text-[#15803d]">
+    <div className="po-stamp inline-block -rotate-2 mb-2 rounded-lg border-2 border-[#6d28d9] bg-[#6d28d9]/5 px-3 py-1.5 text-[#5b21b6]">
       <p className="flex items-center gap-1.5 font-bold uppercase tracking-[0.2em] text-sm">
         <svg width="14" height="14" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M1 5l3 3 5-6" />
@@ -161,7 +161,7 @@ function ApprovedStamp({ po }: { po: PurchaseOrder }) {
         Approved
       </p>
       <p className="text-[10px] leading-snug whitespace-nowrap">
-        E-signed{po.issued_by_name ? ` by ${po.issued_by_name}` : ""} · {formatDateTime(po.issued_at)}
+        E-signed by SPAR Fresh Team · {formatDateTime(po.issued_at)}
       </p>
       <p className="text-[10px] leading-snug">
         {po.po_number} · revision {po.revision}

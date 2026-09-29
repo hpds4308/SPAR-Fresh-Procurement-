@@ -67,7 +67,7 @@
   }
 }
 
-/* Keep the green APPROVED stamp green on paper and in the PDF. */
+/* Keep the purple APPROVED stamp purple on paper and in the PDF. */
 .po-stamp {
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
