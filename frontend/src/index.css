@@ -66,3 +66,9 @@
     padding-top: 2.5rem;
   }
 }
+
+/* Keep the green APPROVED stamp green on paper and in the PDF. */
+.po-stamp {
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}

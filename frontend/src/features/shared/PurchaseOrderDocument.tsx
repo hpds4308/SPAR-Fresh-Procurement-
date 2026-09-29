@@ -149,6 +149,27 @@ function BranchMatrixTable({ po }: { po: PurchaseOrder }) {
   );
 }
 
+/** Admin's e-signature on an issued PO: who issued it and when, above the
+ *  "Authorised by" line. Not shown once the PO is cancelled. */
+function ApprovedStamp({ po }: { po: PurchaseOrder }) {
+  return (
+    <div className="po-stamp inline-block -rotate-2 mb-2 rounded-lg border-2 border-[#16a34a] bg-[#16a34a]/5 px-3 py-1.5 text-[#15803d]">
+      <p className="flex items-center gap-1.5 font-bold uppercase tracking-[0.2em] text-sm">
+        <svg width="14" height="14" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M1 5l3 3 5-6" />
+        </svg>
+        Approved
+      </p>
+      <p className="text-[10px] leading-snug whitespace-nowrap">
+        E-signed{po.issued_by_name ? ` by ${po.issued_by_name}` : ""} · {formatDateTime(po.issued_at)}
+      </p>
+      <p className="text-[10px] leading-snug">
+        {po.po_number} · revision {po.revision}
+      </p>
+    </div>
+  );
+}
+
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
@@ -274,8 +295,13 @@ function PoPage({
         </>
       )}
 
-      <div className="grid grid-cols-2 gap-10 pt-10 break-inside-avoid">
-        <div className="border-t border-crate-800/40 pt-1.5 text-xs text-crate-800/60">Authorised by — SPAR Sri Lanka</div>
+      <div className="grid grid-cols-2 gap-10 pt-10 items-end break-inside-avoid">
+        <div>
+          {po.status === "ISSUED" && <ApprovedStamp po={po} />}
+          <div className="border-t border-crate-800/40 pt-1.5 text-xs text-crate-800/60">
+            Authorised by — SPAR Fresh Procurement
+          </div>
+        </div>
         <div className="border-t border-crate-800/40 pt-1.5 text-xs text-crate-800/60">
           {branch ? `Received by — SPAR ${branch.branch_name}` : `Accepted by — ${s.supplier_name}`}
         </div>
