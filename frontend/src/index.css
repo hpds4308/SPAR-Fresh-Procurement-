@@ -48,3 +48,13 @@
     break-before: page;
   }
 }
+
+/* The items-by-branch PO page has a column per branch: print it landscape. */
+@page wide {
+  size: A4 landscape;
+}
+@media print {
+  .po-print-root .po-page-wide {
+    page: wide;
+  }
+}

@@ -5,9 +5,10 @@ import { StatusBadge } from "./ui/Badge";
 import Button from "./ui/Button";
 import { formatDateTime, formatLongDate } from "./PriceSheetParts";
 
-/** "supplier" = all branches combined; "branches" = every branch PO;
- *  "all" = both; a number = that one branch's PO. */
-export type PoView = "supplier" | "branches" | "all" | number;
+/** "supplier" = all branches combined; "matrix" = items x branches with
+ *  the quantity for each branch; "branches" = every branch PO; "all" =
+ *  all of those; a number = that one branch's PO. */
+export type PoView = "supplier" | "matrix" | "branches" | "all" | number;
 
 function money(n: number): string {
   return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -77,6 +78,77 @@ function LinesTable({ lines, total }: { lines: PurchaseOrderLine[]; total: numbe
   );
 }
 
+/** Items down the side, one column per branch: what quantity of each item
+ *  goes to which branch — how a supplier packs and loads the delivery. */
+function BranchMatrixTable({ po }: { po: PurchaseOrder }) {
+  const rows = new Map<string, { line: PurchaseOrderLine; qty: Map<number, number>; total: number }>();
+  for (const b of po.branches) {
+    for (const l of b.lines) {
+      const key = `${l.product_id}:${l.unit_code}`;
+      const row = rows.get(key) ?? { line: l, qty: new Map<number, number>(), total: 0 };
+      row.qty.set(b.branch_id, (row.qty.get(b.branch_id) ?? 0) + l.quantity);
+      row.total = Math.round((row.total + l.quantity) * 100) / 100;
+      rows.set(key, row);
+    }
+  }
+  const sorted = [...rows.values()].sort((a, b) => a.line.product_description.localeCompare(b.line.product_description));
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm border-collapse">
+        <thead>
+          <tr className="text-xs text-crate-800/50 border-y border-crate-800/20">
+            <th className="py-2 pr-2 font-medium text-left uppercase tracking-wide sticky left-0 bg-white">Item</th>
+            <th className="py-2 px-2 font-medium text-left uppercase tracking-wide">Unit</th>
+            {po.branches.map((b) => (
+              <th key={b.branch_id} className="py-2 px-2 font-semibold text-crate-800 text-right border-l border-sage-100">
+                {b.branch_name}
+                <div className="text-[10px] font-normal text-crate-800/40">{b.branch_code}</div>
+              </th>
+            ))}
+            <th className="py-2 pl-2 font-semibold text-crate-950 text-right border-l border-crate-800/20 uppercase tracking-wide">
+              Total
+            </th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-sage-100">
+          {sorted.map(({ line, qty, total }) => (
+            <tr key={`${line.product_id}:${line.unit_code}`} className="break-inside-avoid">
+              <td className="py-1.5 pr-2 text-crate-950 sticky left-0 bg-white">
+                {line.product_description}
+                <span className="text-crate-800/40 text-xs ml-1.5">{line.product_code}</span>
+              </td>
+              <td className="py-1.5 px-2 text-crate-800/60">{line.unit_code}</td>
+              {po.branches.map((b) => (
+                <td key={b.branch_id} className="py-1.5 px-2 text-right tabular-nums border-l border-sage-100">
+                  {qty.has(b.branch_id) ? qty.get(b.branch_id) : <span className="text-crate-800/20">—</span>}
+                </td>
+              ))}
+              <td className="py-1.5 pl-2 text-right tabular-nums font-semibold text-crate-950 border-l border-crate-800/20">
+                {total}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr className="border-t-2 border-crate-800/30 text-xs">
+            <td colSpan={2} className="py-2 pr-2 font-semibold text-crate-950 sticky left-0 bg-white">
+              Amount (Rs.)
+            </td>
+            {po.branches.map((b) => (
+              <td key={b.branch_id} className="py-2 px-2 text-right tabular-nums border-l border-sage-100">
+                {money(b.total)}
+              </td>
+            ))}
+            <td className="py-2 pl-2 text-right tabular-nums font-semibold text-crate-950 border-l border-crate-800/20 whitespace-nowrap">
+              {money(po.total_amount)}
+            </td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  );
+}
+
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
@@ -87,10 +159,10 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 /** One printable page: the supplier PO when `branch` is omitted, otherwise that branch's PO. */
-function PoPage({ po, branch }: { po: PurchaseOrder; branch?: BranchPurchaseOrder }) {
+function PoPage({ po, branch, matrix = false }: { po: PurchaseOrder; branch?: BranchPurchaseOrder; matrix?: boolean }) {
   const s = po.supplier;
   return (
-    <section className="po-page space-y-5">
+    <section className={`po-page space-y-5 ${matrix ? "po-page-wide" : ""}`}>
       <header className="flex flex-wrap items-start justify-between gap-4 border-b border-crate-800/20 pb-4">
         <div>
           <p className="font-display text-xl font-semibold text-crate-900">SPAR Sri Lanka</p>
@@ -98,7 +170,7 @@ function PoPage({ po, branch }: { po: PurchaseOrder; branch?: BranchPurchaseOrde
         </div>
         <div className="text-right">
           <p className="text-xs uppercase tracking-[0.2em] text-crate-800/50 font-semibold">
-            {branch ? "Branch purchase order" : "Purchase order"}
+            {branch ? "Branch purchase order" : matrix ? "Purchase order — items by branch" : "Purchase order"}
           </p>
           <p className="font-mono text-lg font-semibold text-crate-950">{branch ? branch.po_number : po.po_number}</p>
           <p className="text-xs text-crate-800/50">
@@ -137,7 +209,9 @@ function PoPage({ po, branch }: { po: PurchaseOrder; branch?: BranchPurchaseOrde
               <p className="font-semibold">
                 {po.branch_count} SPAR branch{po.branch_count === 1 ? "" : "es"}
               </p>
-              <p className="text-crate-800/60 text-xs">Per the branch purchase orders below</p>
+              <p className="text-crate-800/60 text-xs">
+                {matrix ? "Quantity for each branch below" : "Per the branch purchase orders below"}
+              </p>
             </>
           )}
         </Field>
@@ -152,6 +226,8 @@ function PoPage({ po, branch }: { po: PurchaseOrder; branch?: BranchPurchaseOrde
 
       {branch ? (
         <LinesTable lines={branch.lines} total={branch.total} />
+      ) : matrix ? (
+        <BranchMatrixTable po={po} />
       ) : (
         <>
           <LinesTable lines={po.consolidated_lines} total={po.total_amount} />
@@ -199,6 +275,7 @@ export function PurchaseOrderDocument({ po, view }: { po: PurchaseOrder; view: P
   return (
     <div className="space-y-10">
       {(view === "supplier" || view === "all") && <PoPage po={po} />}
+      {(view === "matrix" || view === "all") && <PoPage po={po} matrix />}
       {branchPages.map((b) => (
         <PoPage key={b.branch_id} po={po} branch={b} />
       ))}
@@ -216,13 +293,15 @@ export function PurchaseOrderViewer({
   po,
   actions,
   branchOnly = false,
+  defaultView = "supplier",
 }: {
   po: PurchaseOrder;
   actions?: React.ReactNode;
   /** Branch accounts: show just their branch PO, no view picker. */
   branchOnly?: boolean;
+  defaultView?: PoView;
 }) {
-  const initialView: PoView = branchOnly && po.branches.length === 1 ? po.branches[0].branch_id : "supplier";
+  const initialView: PoView = branchOnly && po.branches.length === 1 ? po.branches[0].branch_id : defaultView;
   const [view, setView] = useState<PoView>(initialView);
 
   useEffect(() => {
@@ -251,18 +330,19 @@ export function PurchaseOrderViewer({
             value={String(view)}
             onChange={(e) => {
               const v = e.target.value;
-              setView(v === "supplier" || v === "branches" || v === "all" ? v : Number(v));
+              setView(v === "supplier" || v === "matrix" || v === "branches" || v === "all" ? v : Number(v));
             }}
             className="border border-sage-300 bg-sage-50/60 rounded-full px-4 py-2 text-sm text-crate-950 focus:outline-none focus:ring-2 focus:ring-crate-700/30 focus:border-crate-700 focus:bg-white"
           >
             <option value="supplier">Supplier PO (all branches)</option>
+            <option value="matrix">Items by branch (quantity per branch)</option>
             <option value="branches">All branch POs ({po.branches.length})</option>
             {po.branches.map((b) => (
               <option key={b.branch_id} value={b.branch_id}>
                 Branch PO — {b.branch_name}
               </option>
             ))}
-            <option value="all">Everything (supplier PO + branch POs)</option>
+            <option value="all">Everything</option>
           </select>
         )}
         <Button variant="secondary" size="sm" onClick={print}>

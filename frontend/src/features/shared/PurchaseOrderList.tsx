@@ -3,7 +3,7 @@ import { ApiError } from "../../api/client";
 import { PurchaseOrder, PurchaseOrderSummary } from "../../api/purchaseOrders";
 import EmptyState from "./EmptyState";
 import { IconReceipt } from "./Icons";
-import { PoStatusBadge, PurchaseOrderViewer } from "./PurchaseOrderDocument";
+import { PoStatusBadge, PoView, PurchaseOrderViewer } from "./PurchaseOrderDocument";
 import { formatDateTime, formatLongDate } from "./PriceSheetParts";
 import { SkeletonTable } from "./ui/Skeleton";
 
@@ -18,10 +18,13 @@ export default function PurchaseOrderList({
   fetchList,
   fetchOne,
   branchView = false,
+  defaultView,
 }: {
   fetchList: () => Promise<PurchaseOrderSummary[]>;
   fetchOne: (id: number) => Promise<PurchaseOrder>;
   branchView?: boolean;
+  /** Which view a PO opens on (see PurchaseOrderViewer). */
+  defaultView?: PoView;
 }) {
   const [list, setList] = useState<PurchaseOrderSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -34,7 +37,15 @@ export default function PurchaseOrderList({
   }, [fetchList]);
 
   if (openId !== null) {
-    return <PurchaseOrderDetail id={openId} fetchOne={fetchOne} branchView={branchView} onBack={() => setOpenId(null)} />;
+    return (
+      <PurchaseOrderDetail
+        id={openId}
+        fetchOne={fetchOne}
+        branchView={branchView}
+        defaultView={defaultView}
+        onBack={() => setOpenId(null)}
+      />
+    );
   }
 
   if (error) {
@@ -95,11 +106,13 @@ function PurchaseOrderDetail({
   id,
   fetchOne,
   branchView,
+  defaultView,
   onBack,
 }: {
   id: number;
   fetchOne: (id: number) => Promise<PurchaseOrder>;
   branchView: boolean;
+  defaultView?: PoView;
   onBack: () => void;
 }) {
   const [po, setPo] = useState<PurchaseOrder | null>(null);
@@ -124,7 +137,7 @@ function PurchaseOrderDetail({
       )}
       {po && (
         <div className={`${card} p-5 sm:p-6`}>
-          <PurchaseOrderViewer po={po} branchOnly={branchView} />
+          <PurchaseOrderViewer po={po} branchOnly={branchView} defaultView={defaultView} />
         </div>
       )}
     </div>
