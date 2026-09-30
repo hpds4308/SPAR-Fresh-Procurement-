@@ -10,9 +10,9 @@
       href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <!-- Boot splash: the SPAR loading animation (brand video with its black background
-         keyed out), inline so it paints before the JS bundle arrives; the app calls
-         window.__hideSplash() once the initial auth check has settled. -->
+    <!-- Boot splash: the SPAR produce-orbit loading video (upscaled to 1080p), inline so
+         it paints before the JS bundle arrives; the app calls window.__hideSplash() once
+         the initial auth check has settled. -->
     <style>
       #boot-splash {
         position: fixed;
@@ -21,34 +21,33 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        background: #fff;
+        background: #eee; /* matches the video's studio backdrop at its edges */
         transition: opacity 0.4s ease;
       }
       #boot-splash.sl-done {
         opacity: 0;
         pointer-events: none;
       }
-      #boot-splash video,
-      #boot-splash img {
+      #boot-splash video {
         display: block;
-        width: min(94vw, 720px);
+        width: min(100vw, 177.78vh); /* as large as fits, 16:9 */
         height: auto;
+        /* feather the frame edges into the page so there's no visible box */
+        -webkit-mask-image: radial-gradient(closest-side, #000 86%, transparent 100%);
+        mask-image: radial-gradient(closest-side, #000 86%, transparent 100%);
       }
     </style>
   </head>
   <body>
     <div id="boot-splash" role="progressbar" aria-label="Loading SPAR">
+      <video width="1920" height="1080" autoplay muted loop playsinline preload="auto">
+        <source src="/videos/spar-loader-hd.webm" type="video/webm" />
+        <source src="/videos/spar-loader-hd.mp4" type="video/mp4" />
+      </video>
     </div>
     <script>
       (function () {
         var splash = document.getElementById("boot-splash");
-        // Transparent VP9 WebM (~630 KB) everywhere it's supported; Safari and all iOS
-        // browsers (WebKit) ignore WebM alpha, so they get the animated WebP instead.
-        var ua = navigator.userAgent;
-        var webkitOnly = /iPad|iPhone|iPod/.test(ua) || (/Safari/.test(ua) && !/Chrome|Chromium|Edg|Android/.test(ua));
-        splash.innerHTML = webkitOnly
-          ? '<img src="/images/spar-loader.webp" width="640" height="290" alt="" />'
-          : '<video src="/videos/spar-loader.webm" width="720" height="326" autoplay muted loop playsinline></video>';
         var start = Date.now();
         var MIN_SHOW = 2000; // let the animation read even when the app loads instantly
         var done = false;
