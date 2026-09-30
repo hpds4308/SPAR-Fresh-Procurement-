@@ -411,6 +411,62 @@ def get_stock_in_hand_for_branch(db: Session, branch_user: User) -> dict[int, fl
     }
 
 
+def get_stock_in_hand_all_branches(db: Session, branch_user: User) -> list[dict]:
+    """
+    The same stock-in-hand figures as get_stock_in_hand_for_branch, but for
+    every ACTIVE branch, so the New Order form can show one row per branch
+    under each product. Ordered by branch_name (the branch list's existing
+    order). Each entry: {branch_id, branch_name, is_current, stock:
+    {product_id: quantity}} — a branch with no location code, or one the
+    POS has no data for, just gets an empty stock map ("unknown", not zero).
+
+    Deliberately reuses pos_stock_service.get_stock_in_hand unchanged, one
+    location at a time: identical values to the single-branch lookup, and
+    its circuit breaker / concurrency cap still apply (calls are sequential
+    so this request never holds more than one POS slot).
+    """
+    if not branch_user.branch_id:
+        raise PermissionDeniedError("Only branch accounts have their own orders.")
+
+    from app.services import pos_stock_service
+
+    branches = [
+        (b.id, b.branch_name, b.pos_location_code)
+        for b in db.query(Branch).filter(Branch.status == "ACTIVE").order_by(Branch.branch_name).all()
+    ]
+    products = (
+        db.query(Product)
+        .filter(Product.status == "ACTIVE", Product.pos_code.isnot(None))
+        .all()
+    )
+    pos_code_to_product_id = {p.pos_code: p.id for p in products}
+
+    # Release the pooled connection before any outbound POS call (see get_stock_in_hand_for_branch).
+    db.rollback()
+
+    result = []
+    for branch_id, branch_name, pos_location_code in branches:
+        stock: dict[int, float] = {}
+        if pos_location_code and pos_code_to_product_id:
+            stock_by_pos_code = pos_stock_service.get_stock_in_hand(
+                list(pos_code_to_product_id.keys()), pos_location_code
+            )
+            stock = {
+                pos_code_to_product_id[code]: quantity
+                for code, quantity in stock_by_pos_code.items()
+                if code in pos_code_to_product_id
+            }
+        result.append(
+            {
+                "branch_id": branch_id,
+                "branch_name": branch_name,
+                "is_current": branch_id == branch_user.branch_id,
+                "stock": stock,
+            }
+        )
+    return result
+
+
 def save_draft_order(db: Session, branch_user: User, payload: OrderCreate) -> Order:
     """
     Saves (creates or updates in place) today's order as a DRAFT — never

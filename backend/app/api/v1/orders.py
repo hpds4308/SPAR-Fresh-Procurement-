@@ -13,6 +13,7 @@ from app.models.order import OrderLine
 from app.models.product import Product
 from app.models.user import User
 from app.schemas.order import (
+    BranchStockOut,
     OrderCreate,
     OrderOut,
     OrderLineOut,
@@ -223,6 +224,20 @@ def get_stock_in_hand(
     order form, not something an order's validity depends on.
     """
     return order_service.get_stock_in_hand_for_branch(db, current_user)
+
+
+@router.get("/stock-in-hand/all-branches", response_model=list[BranchStockOut])
+def get_stock_in_hand_all_branches(
+    current_user: User = Depends(require_roles("BRANCH")),
+    db: Session = Depends(get_db),
+):
+    """
+    Stock in hand for every active branch, in branch-name order, flagged
+    with which one is the caller's own — one request for the whole form,
+    never one per product or per branch. Same always-200 contract as
+    /stock-in-hand: a branch the POS can't answer for just has no entries.
+    """
+    return order_service.get_stock_in_hand_all_branches(db, current_user)
 
 
 @router.post("", response_model=OrderOut)

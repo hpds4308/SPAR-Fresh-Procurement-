@@ -110,6 +110,20 @@ export function fetchStockInHand(): Promise<Record<number, number>> {
   return apiFetch("/orders/stock-in-hand");
 }
 
+// The same POS stock figures for every active branch (in branch-name
+// order), one request for the whole form. `stock` follows the same rule
+// as above: a missing product_id means unknown, not zero.
+export type BranchStock = {
+  branch_id: number;
+  branch_name: string;
+  is_current: boolean;
+  stock: Record<number, number>;
+};
+
+export function fetchStockInHandAllBranches(): Promise<BranchStock[]> {
+  return apiFetch("/orders/stock-in-hand/all-branches");
+}
+
 export type MatrixBranchColumn = {
   branch_id: number;
   branch_code: string;
