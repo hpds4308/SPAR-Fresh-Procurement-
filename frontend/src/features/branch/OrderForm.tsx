@@ -9,8 +9,6 @@ import {
   fetchOrderWindow,
   fetchMyOrderToday,
   fetchStockInHand,
-  fetchStockInHandAllBranches,
-  BranchStock,
   previewOrderExcel,
   submitOrder,
   saveDraftOrder,
@@ -35,21 +33,11 @@ function productImageUrl(productCode: string): string {
 
 const PREVIEW_SIZE = 180;
 
-// Branch | Stock in Hand | Order Qty — shared by the header and every branch row under a product.
-const BRANCH_GRID = "grid grid-cols-[minmax(0,1fr)_5.5rem_7.5rem] lg:grid-cols-[minmax(0,1fr)_7rem_9.5rem] items-center gap-x-2";
-
 export default function OrderForm({ onSubmitted }: { onSubmitted: () => void }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [window_, setWindow] = useState<OrderWindow | null>(null);
   const [myOrder, setMyOrder] = useState<Order | null>(null);
   const [stockByProduct, setStockByProduct] = useState<Record<number, number>>({});
-  // Every active branch's stock, for the per-branch rows under each product.
-  // Loaded separately (it's one POS lookup per branch, so slower) and never
-  // blocks the form: until it arrives, or if it fails, each product just
-  // shows the logged-in branch's own row from stockByProduct above.
-  const [branchStock, setBranchStock] = useState<BranchStock[] | null>(null);
-  const [branchStockFailed, setBranchStockFailed] = useState(false);
-  const [showOtherBranches, setShowOtherBranches] = useState(true);
   const promotions = useActivePromotions();
   // Product IDs a real photo was found for, discovered by silently
   // preloading every product's image once products are known (below) —
@@ -118,20 +106,6 @@ export default function OrderForm({ onSubmitted }: { onSubmitted: () => void }) 
     };
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    fetchStockInHandAllBranches()
-      .then((rows) => {
-        if (!cancelled) setBranchStock(rows);
-      })
-      .catch(() => {
-        if (!cancelled) setBranchStockFailed(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   // Silently probes every product's photo once, off-screen — populates
   // hasImage per product as each check resolves, so the hover preview
   // only ever offers to pop up for an item that genuinely has one.
@@ -187,22 +161,6 @@ export default function OrderForm({ onSubmitted }: { onSubmitted: () => void }) 
       />
     </div>
   );
-
-  // Branch rows in the backend's order, with the logged-in branch's figure
-  // always taken from the existing single-branch lookup. If the all-branch
-  // list isn't available (yet), that one row is shown on its own.
-  const branchRows = useMemo(() => {
-    const rows = (branchStock ?? []).map((b) => ({
-      key: b.branch_id,
-      name: b.branch_name,
-      isCurrent: b.is_current,
-      stock: b.is_current ? stockByProduct : b.stock,
-    }));
-    if (!rows.some((r) => r.isCurrent)) {
-      rows.unshift({ key: -1, name: "Your branch", isCurrent: true, stock: stockByProduct });
-    }
-    return rows;
-  }, [branchStock, stockByProduct]);
 
   const categories = useMemo(() => {
     const set = new Set(products.map((p) => p.category_name));
@@ -368,7 +326,7 @@ export default function OrderForm({ onSubmitted }: { onSubmitted: () => void }) 
             placeholder="Search products…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="flex-1 min-w-0 border border-sage-300 bg-sage-50/60 rounded-full px-4 py-2 text-sm text-crate-950 placeholder:text-crate-950/35 focus:outline-none focus:ring-2 focus:ring-crate-700/30 focus:border-crate-700 focus:bg-white transition-all duration-150"
+            className="flex-1 border border-sage-300 bg-sage-50/60 rounded-full px-4 py-2 text-sm text-crate-950 placeholder:text-crate-950/35 focus:outline-none focus:ring-2 focus:ring-crate-700/30 focus:border-crate-700 focus:bg-white transition-all duration-150"
           />
           <select
             value={category}
@@ -401,24 +359,6 @@ export default function OrderForm({ onSubmitted }: { onSubmitted: () => void }) 
           </button>
         </div>
         {excelError && <p className="text-tomato-600 text-sm mt-2">{excelError}</p>}
-        <div className="flex items-center justify-between gap-3 mt-3 text-xs text-crate-800/50">
-          <span>
-            {branchStock === null && !branchStockFailed
-              ? "Loading stock for all branches…"
-              : branchStockFailed
-                ? "Other branches' stock is unavailable right now — showing your branch only."
-                : `Stock in hand shown for ${branchRows.length} branch${branchRows.length === 1 ? "" : "es"}.`}
-          </span>
-          {branchStock !== null && branchRows.length > 1 && (
-            <button
-              type="button"
-              onClick={() => setShowOtherBranches((v) => !v)}
-              className="text-crate-700 font-medium hover:underline whitespace-nowrap"
-            >
-              {showOtherBranches ? "Show my branch only" : "Show all branches"}
-            </button>
-          )}
-        </div>
       </div>
 
       {excelPreview && (
@@ -469,16 +409,16 @@ export default function OrderForm({ onSubmitted }: { onSubmitted: () => void }) 
         </div>
       )}
 
-      <div className="max-h-[70vh] overflow-y-auto divide-y divide-sage-100">
+      <div className="max-h-[28rem] overflow-y-auto divide-y divide-sage-100">
         {filtered.length === 0 && (
           <p className="p-6 text-sm text-crate-800/35 text-center">No products match your search.</p>
         )}
         {filtered.map((p) => (
-          <div key={p.id} className="px-6 py-4 hover:bg-sage-50/30 transition-colors duration-100">
+          <div key={p.id} className="flex items-center justify-between px-6 py-3 hover:bg-sage-50/50 transition-colors duration-100">
             <div className="min-w-0">
               <div className="flex items-center gap-2 min-w-0">
                 <p
-                  className={`text-sm font-medium text-crate-950 truncate w-fit ${hasImage.has(p.id) ? "cursor-pointer" : ""}`}
+                  className={`text-sm text-crate-950 truncate w-fit ${hasImage.has(p.id) ? "cursor-pointer" : ""}`}
                   onMouseEnter={(e) => hasImage.has(p.id) && showPreview(p.id, e.currentTarget)}
                   onMouseLeave={hidePreview}
                 >
@@ -500,54 +440,23 @@ export default function OrderForm({ onSubmitted }: { onSubmitted: () => void }) 
                 <CategoryBadge name={p.category_name} />
               </div>
             </div>
-            <div className="mt-2.5 max-w-xl border border-sage-100 rounded-xl overflow-hidden">
-              <div className={`${BRANCH_GRID} bg-sage-50/70 px-3 py-1.5 text-[10px] uppercase tracking-wide text-crate-800/40`}>
-                <span>Branch</span>
-                <span className="text-right">Stock in Hand</span>
-                <span className="text-right">Order Qty</span>
-              </div>
-              {branchRows
-                .filter((b) => b.isCurrent || showOtherBranches)
-                .map((b) =>
-                  b.isCurrent ? (
-                    // The logged-in branch: highlighted, and the only row with a quantity input.
-                    <div
-                      key={b.key}
-                      className={`${BRANCH_GRID} px-3 py-1.5 bg-crate-700/[0.06] border-l-[3px] border-l-crate-700`}
-                    >
-                      <span className="flex items-center gap-1.5 min-w-0">
-                        <span className="text-sm font-semibold text-crate-800 truncate">{b.name}</span>
-                        <span className="hidden lg:inline shrink-0 text-[9px] uppercase tracking-wide font-semibold text-crate-700 bg-white border border-crate-700/20 rounded-full px-1.5 py-px">
-                          You
-                        </span>
-                      </span>
-                      <span className="text-sm font-medium text-crate-800 text-right">
-                        {b.stock[p.id] !== undefined ? `${b.stock[p.id]} ${p.unit_code}` : "—"}
-                      </span>
-                      <span className="flex items-center justify-end gap-1.5">
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          placeholder="0"
-                          aria-label={`Order quantity for ${p.description}`}
-                          value={quantities[p.id] ?? ""}
-                          onChange={(e) => setQty(p.id, e.target.value)}
-                          className="w-20 lg:w-24 border border-sage-300 bg-white rounded-full px-3 py-1 text-sm text-right text-crate-950 focus:outline-none focus:ring-2 focus:ring-crate-700/30 focus:border-crate-700 transition-all duration-150"
-                        />
-                        <span className="text-xs text-crate-800/40 w-8">{p.unit_code}</span>
-                      </span>
-                    </div>
-                  ) : (
-                    <div key={b.key} className={`${BRANCH_GRID} px-3 py-1 border-t border-sage-100 text-xs`}>
-                      <span className="text-crate-800/70 truncate">{b.name}</span>
-                      <span className="text-crate-800/70 text-right">
-                        {b.stock[p.id] !== undefined ? `${b.stock[p.id]} ${p.unit_code}` : "—"}
-                      </span>
-                      <span />
-                    </div>
-                  )
-                )}
+            <div className="text-right shrink-0 w-24 px-2">
+              <p className="text-[10px] uppercase tracking-wide text-crate-800/35">Stock in Hand</p>
+              <p className="text-sm text-crate-800/70">
+                {stockByProduct[p.id] !== undefined ? `${stockByProduct[p.id]} ${p.unit_code}` : "—"}
+              </p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0 ml-4">
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="0"
+                value={quantities[p.id] ?? ""}
+                onChange={(e) => setQty(p.id, e.target.value)}
+                className="w-24 border border-sage-300 bg-sage-50/60 rounded-full px-3 py-1.5 text-sm text-right text-crate-950 focus:outline-none focus:ring-2 focus:ring-crate-700/30 focus:border-crate-700 focus:bg-white transition-all duration-150"
+              />
+              <span className="text-xs text-crate-800/40 w-10">{p.unit_code}</span>
             </div>
           </div>
         ))}

@@ -86,14 +86,6 @@ class OrderWindowOut(BaseModel):
     server_time: str  # ISO datetime, for client-side countdowns
 
 
-class BranchStockOut(BaseModel):
-    """One branch's POS stock in hand, for the New Order form's per-branch rows."""
-    branch_id: int
-    branch_name: str
-    is_current: bool
-    stock: dict[int, float]
-
-
 class MatrixBranchColumn(BaseModel):
     branch_id: int
     branch_code: str
