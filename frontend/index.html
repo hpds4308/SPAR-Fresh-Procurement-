@@ -10,257 +10,55 @@
       href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <!-- Boot splash: SPAR banner with produce orbiting the tree logo and a filling
-         progress bar. Inline so it paints before the JS bundle arrives; the app
-         calls window.__hideSplash() once the initial auth check has settled. -->
+    <!-- Boot splash: the SPAR loading animation (brand video with its black background
+         keyed out), inline so it paints before the JS bundle arrives; the app calls
+         window.__hideSplash() once the initial auth check has settled. -->
     <style>
       #boot-splash {
-        --w: clamp(260px, 72vw, 620px); /* logo width */
-        --h: calc(var(--w) * 0.1589); /* logo height (SVG aspect 1013.95 x 161.11) */
-        --rx: calc(var(--w) * 0.26); /* produce orbit radii */
-        --ry: calc(var(--h) * 1.05);
-        --t: 3.2s; /* one orbit */
         position: fixed;
         inset: 0;
         z-index: 9999;
         display: flex;
-        flex-direction: column;
         align-items: center;
         justify-content: center;
-        gap: calc(var(--h) * 0.9 + 28px);
-        background: radial-gradient(ellipse at 50% 45%, #161616 0%, #050505 70%);
-        overflow: hidden;
+        background: #fff;
         transition: opacity 0.4s ease;
       }
       #boot-splash.sl-done {
         opacity: 0;
         pointer-events: none;
       }
-      .sl-stage {
-        position: relative;
-        width: 100%;
-        isolation: isolate;
-      }
-      .sl-band {
-        position: relative;
-        z-index: 2;
-        display: flex;
-        justify-content: center;
-        /* red to the left of the logo's bar (ends at x=810 of 1014), white behind the tree roundel */
-        background: linear-gradient(90deg, #ec1b24 calc(50% + var(--w) * 0.299), #fff 0);
-        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
-      }
-      .sl-logo {
+      #boot-splash video,
+      #boot-splash img {
         display: block;
-        width: var(--w);
-        height: var(--h);
-        flex: none;
-      }
-      /* orbit anchor = centre of the green roundel */
-      .sl-orbit {
-        position: absolute;
-        left: calc(50% + var(--w) * 0.418);
-        top: 50%;
-      }
-      .sl-ring {
-        position: absolute;
-        z-index: 1;
-        left: calc(var(--rx) * -1.12);
-        top: calc(var(--ry) * -1.12);
-        width: calc(var(--rx) * 2.24);
-        height: calc(var(--ry) * 2.24);
-        overflow: visible;
-        fill: none;
-        stroke: #fff;
-      }
-      .sl-ring .sl-trail {
-        stroke-dasharray: 26 74;
-        opacity: 0.35;
-        animation: sl-trail var(--t) linear infinite;
-      }
-      /* each item: outer div swings X, inner swings Y — together an ellipse */
-      .sl-fx {
-        position: absolute;
-        left: 0;
-        top: 0;
-        animation:
-          sl-x calc(var(--t) / 2) ease-in-out calc(var(--d) * var(--t)) infinite alternate both,
-          sl-z var(--t) linear calc((var(--d) - 0.25) * var(--t)) infinite both;
-      }
-      .sl-fy {
-        font-size: calc(var(--h) * 0.42 + 6px);
-        line-height: 1;
-        translate: -50% -50%;
-        animation:
-          sl-y calc(var(--t) / 2) ease-in-out calc((var(--d) - 0.25) * var(--t)) infinite alternate both,
-          sl-s var(--t) ease-in-out calc((var(--d) - 0.25) * var(--t)) infinite both;
-        filter: drop-shadow(0 3px 4px rgba(0, 0, 0, 0.5));
-      }
-      @keyframes sl-x {
-        from { transform: translateX(calc(var(--rx) * -1)); }
-        to { transform: translateX(var(--rx)); }
-      }
-      @keyframes sl-y {
-        from { transform: translateY(calc(var(--ry) * -1)); }
-        to { transform: translateY(var(--ry)); }
-      }
-      /* in front of the banner on the lower half of the orbit, behind it on the upper half */
-      @keyframes sl-z {
-        0%, 24.9% { z-index: 1; }
-        25%, 74.9% { z-index: 3; }
-        75%, 100% { z-index: 1; }
-      }
-      @keyframes sl-s {
-        0%, 100% { scale: 0.72; }
-        50% { scale: 1.12; }
-      }
-      @keyframes sl-trail {
-        from { stroke-dashoffset: 0; }
-        to { stroke-dashoffset: 100; }
-      }
-
-      .sl-meter {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        font-family: "Plus Jakarta Sans", system-ui, sans-serif;
-      }
-      .sl-pct {
-        min-width: 4ch;
-        text-align: right;
-        color: #62d256;
-        font-weight: 800;
-        font-size: 20px;
-        font-variant-numeric: tabular-nums;
-        text-shadow: 0 0 10px rgba(98, 210, 86, 0.45);
-      }
-      .sl-bar {
-        width: min(62vw, 420px);
-        height: 26px;
-        padding: 3px;
-        border: 2px solid rgba(255, 255, 255, 0.9);
-        border-radius: 999px;
-        background: #0b0b0b;
-        box-sizing: border-box;
-      }
-      .sl-fill {
-        position: relative;
-        width: 0%;
-        height: 100%;
-        border-radius: 999px;
-        background:
-          radial-gradient(circle, rgba(255, 255, 255, 0.9) 0 1px, transparent 1.6px) 0 0 / 14px 9px,
-          radial-gradient(circle, rgba(220, 255, 180, 0.7) 0 1px, transparent 1.6px) 7px 4px / 18px 11px,
-          linear-gradient(180deg, #a6f77c 0%, #4cc44a 45%, #1f8a36 100%);
-        box-shadow: 0 0 14px rgba(90, 220, 90, 0.55);
-        animation: sl-sparkle 1.4s linear infinite;
-      }
-      /* bright flare riding the leading edge */
-      .sl-fill::after {
-        content: "";
-        position: absolute;
-        right: -18px;
-        top: 50%;
-        width: 40px;
-        height: 40px;
-        translate: 0 -50%;
-        border-radius: 50%;
-        background: radial-gradient(circle, #fff 0 8%, rgba(255, 255, 230, 0.7) 18%, rgba(255, 255, 200, 0) 65%);
-        animation: sl-flare 0.9s ease-in-out infinite alternate;
-      }
-      @keyframes sl-sparkle {
-        to { background-position: 14px 0, 25px 4px, 0 0; }
-      }
-      @keyframes sl-flare {
-        from { opacity: 0.7; scale: 0.8; }
-        to { opacity: 1; scale: 1.15; }
-      }
-      @media (prefers-reduced-motion: reduce) {
-        .sl-fx, .sl-ring { display: none; }
-        .sl-fill, .sl-fill::after { animation: none; }
+        width: min(94vw, 720px);
+        height: auto;
       }
     </style>
   </head>
   <body>
-    <div id="boot-splash" role="progressbar" aria-label="Loading SPAR" aria-valuemin="0" aria-valuemax="100">
-      <div class="sl-stage">
-        <div class="sl-band">
-          <svg class="sl-logo" viewBox="0 0 1013.95 161.11" aria-hidden="true">
-            <path fill="#fff" d="M575.91,30.93c6.97,0,11.29,2.57,17.81,10.9l48.48,69.37c2.58,3.63,2.33,9.42-2.12,13.18c-3.94,3.33-10.91,3.63-14.69-1.36l-11.6-16.05h-76.36l-11.59,16.35c-4.09,4.85-9.09,4.85-13.63,1.82c-4.72-3.15-5.92-9.24-3.03-13.48l48.93-69.82C564.33,33.2,569.25,30.93,575.91,30.93z M578.81,56.6c-1.28-1.87-1.75-2.05-3.11-2.05c-1.52,0-2.12,0.76-3.15,2.14c-1.67,2.23-21.11,30.88-21.33,30.88h49.09C600.21,87.57,581.52,60.61,578.81,56.6"/>
-            <path fill="#fff" d="M245.25,31.05h69.84c17.33,0,18.92,19.94,18.92,19.94h-85.92c-4.25,0-8.2,3.21-8.2,8.8c0,6.37,4.84,9.4,7.9,9.4h60.72c12.03,0,29.15,10.02,29.15,27.32c0,22.46-19.89,30.44-26.81,30.44h-71.04c-21.11,0-19.94-20.13-19.94-20.13h88.05c3.52,0,8.71-3.49,8.71-8.71c0-4.98-4.55-8.8-7.9-8.8h-59.5c-16.88,0-29.96-12.53-29.96-29.53C219.24,40.66,235.65,31.05,245.25,31.05"/>
-            <path fill="#fff" d="M692.88,30.92H765c10.93,0,27.88,8.93,27.88,30.29v1.36c0,11.37-7.12,21.36-17.12,26.2c0,0,0.72,1.09,16.21,22.11c2.01,2.72,2.12,9.24-2.27,13.18c-4.19,3.76-11.17,4.23-14.69,0.15c-4.92-5.69-10.61-13.18-26.21-33.01h-28.18c-8.03,0-18.93-6.37-18.93-20.45h60.9c3.31-0.14,8.61-3.31,8.61-9.53c0-5.75-5.1-9.7-8.64-9.7h-67.26l0.05,63.75c0.01,6.96-5.33,11.65-11.08,11.65c-5.46,0-10.9-4.84-10.9-11.36V50.61C673.35,39.69,684.86,30.92,692.88,30.92"/>
-            <path fill="#fff" d="M395.66,31.08h72.12c10.93,0,27.88,8.94,27.88,30.29v1.36c0,11.38-7.12,21.36-17.12,26.2c0,0-5.17,1.67-10.02,2.28h-45.3c-8.03,0-18.33-6.51-18.33-20.6h60.29c3.31-0.14,8.78-3.01,8.78-9.23c0-5.75-5.1-9.7-8.64-9.7l-67.25-0.01l0.04,63.76c0.01,6.96-5.33,11.65-11.08,11.65c-5.46,0-10.9-4.84-10.9-11.36V50.77C376.12,39.85,387.63,31.08,395.66,31.08"/>
-            <path fill="#157946" d="M848.77,82.59c0,29.71,14.96,56.32,41.32,69.34c24.77,12.24,57.78,12.24,82.62,0c24.5-12.07,41.24-39.62,41.24-69.34c0-45.45-36.36-82.59-82.59-82.59C884.91,0,848.77,36.85,848.77,82.59"/>
-            <path fill="#fff" d="M931.4,21.41c-8.31,28.18-33.08,69.48-51.15,89.73h42.84l0.1,12.27c-0.1,6.96-5.63,14.18-13.68,14.08c-11.19-0.13-25.18-5.3-33.63-19.65c-6.16-10.47-10.63-18.72-10.63-35.25c0-36.13,29.1-66.06,66.12-66.06c36.61,0,66.12,30.81,66.12,66.06c0,16.54-7.72,30.84-10.27,34.96c-9.04,14.64-22.8,19.81-33.46,19.94c-7.35,0.09-14.12-5.3-14.12-14.12v-12.24h43.5C964.41,90.89,939.64,49.6,931.4,21.41"/>
-          </svg>
-        </div>
-        <div class="sl-orbit" aria-hidden="true">
-          <svg class="sl-ring" viewBox="0 0 224 224" preserveAspectRatio="none">
-            <ellipse cx="112" cy="112" rx="100" ry="100" pathLength="100" stroke-width="1.5" opacity="0.1" vector-effect="non-scaling-stroke" />
-            <ellipse class="sl-trail" cx="112" cy="112" rx="100" ry="100" pathLength="100" stroke-width="3" stroke-linecap="round" vector-effect="non-scaling-stroke" />
-          </svg>
-          <div class="sl-fx" style="--d: 0"><div class="sl-fy">🍅</div></div>
-          <div class="sl-fx" style="--d: -0.2"><div class="sl-fy">🥕</div></div>
-          <div class="sl-fx" style="--d: -0.4"><div class="sl-fy">🍏</div></div>
-          <div class="sl-fx" style="--d: -0.6"><div class="sl-fy">🍋</div></div>
-          <div class="sl-fx" style="--d: -0.8"><div class="sl-fy">🥬</div></div>
-        </div>
-      </div>
-      <div class="sl-meter">
-        <span class="sl-pct">0%</span>
-        <div class="sl-bar"><div class="sl-fill"></div></div>
-      </div>
+    <div id="boot-splash" role="progressbar" aria-label="Loading SPAR">
     </div>
     <script>
       (function () {
         var splash = document.getElementById("boot-splash");
-        var fill = splash.querySelector(".sl-fill");
-        var pct = splash.querySelector(".sl-pct");
-        var start = performance.now();
-        var MIN_SHOW = 1200; // let the animation read even when the app loads instantly
-        var value = 0;
-        var target = null; // set to 100 once the app is ready
-        var raf;
-
-        function render(v) {
-          value = v;
-          var n = Math.round(v);
-          fill.style.width = v + "%";
-          pct.textContent = n + "%";
-          splash.setAttribute("aria-valuenow", n);
-        }
-
-        function tick(now) {
-          if (target === null) {
-            // eases toward 92% and waits there for the app
-            render(92 * (1 - Math.exp(-(now - start) / 900)));
-          } else {
-            render(Math.min(100, value + 3.5));
-            if (value >= 100) {
-              setTimeout(finish, 180);
-              return;
-            }
-          }
-          raf = requestAnimationFrame(tick);
-        }
-        raf = requestAnimationFrame(tick);
-
-        function finish() {
-          if (splash.classList.contains("sl-done")) return;
-          cancelAnimationFrame(raf);
-          render(100);
-          splash.classList.add("sl-done");
-          setTimeout(function () { splash.remove(); }, 450);
-        }
-
+        // Transparent VP9 WebM (~630 KB) everywhere it's supported; Safari and all iOS
+        // browsers (WebKit) ignore WebM alpha, so they get the animated WebP instead.
+        var ua = navigator.userAgent;
+        var webkitOnly = /iPad|iPhone|iPod/.test(ua) || (/Safari/.test(ua) && !/Chrome|Chromium|Edg|Android/.test(ua));
+        splash.innerHTML = webkitOnly
+          ? '<img src="/images/spar-loader.webp" width="640" height="290" alt="" />'
+          : '<video src="/videos/spar-loader.webm" width="720" height="326" autoplay muted loop playsinline></video>';
+        var start = Date.now();
+        var MIN_SHOW = 2000; // let the animation read even when the app loads instantly
+        var done = false;
         window.__hideSplash = function () {
-          if (target !== null) return;
-          var wait = Math.max(0, MIN_SHOW - (performance.now() - start));
+          if (done) return;
+          done = true;
           setTimeout(function () {
-            target = 100;
-            // rAF is paused in background tabs; don't leave the splash up there
-            setTimeout(finish, 800);
-          }, wait);
+            splash.classList.add("sl-done");
+            setTimeout(function () { splash.remove(); }, 450);
+          }, Math.max(0, MIN_SHOW - (Date.now() - start)));
         };
       })();
     </script>
