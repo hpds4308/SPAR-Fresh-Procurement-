@@ -105,6 +105,8 @@ class MatrixBranchColumn(BaseModel):
     auto_submit_source: str | None = None
     auto_source_order_date: date | None = None
     auto_reviewed: bool = False
+    # Missed the cutoff with nothing to auto-submit (see MissedOrderNotice) — no order for this date.
+    no_order: bool = False
 
 
 class MatrixRow(BaseModel):
@@ -239,8 +241,27 @@ class AutoSubmittedOrderOut(BaseModel):
     line_count: int
 
 
+class MissedOrderNoticeOut(BaseModel):
+    """A branch that missed the cutoff with nothing to auto-submit (no draft, no previous order)."""
+
+    notice_id: int
+    branch_id: int
+    branch_name: str
+    order_date: date
+    delivery_date: date
+
+
+class AutoSubmitAttentionOut(BaseModel):
+    """Everything from the auto-submit job still waiting for Admin: orders to review, branches with no order."""
+
+    orders: list[AutoSubmittedOrderOut]
+    missed: list[MissedOrderNoticeOut]
+
+
 class AutoSubmittedReviewRequest(BaseModel):
-    """Acknowledge one order (order_id), every one for a delivery date, or — both omitted — all of them."""
+    """Acknowledge one order (order_id), dismiss one notice (notice_id), everything for a delivery
+    date, or — all omitted — everything."""
 
     order_id: int | None = None
+    notice_id: int | None = None
     delivery_date: date | None = None

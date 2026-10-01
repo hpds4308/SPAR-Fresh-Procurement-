@@ -6,10 +6,12 @@ from datetime import datetime, timedelta
 
 import pytest
 
+from app.core.errors import ValidationFailedError
+from app.models.missed_order_notice import MissedOrderNotice
 from app.models.order import Order, OrderLine
 from app.models.order_deadline_exception import OrderDeadlineException
 from app.models.system import SystemSetting
-from app.services import auto_order_service
+from app.services import auto_order_service, order_service
 from app.services.order_service import BUSINESS_TZ
 
 NOW = datetime(2026, 9, 30, 15, 0, tzinfo=BUSINESS_TZ)  # a Wednesday, one hour past a 14:00 cutoff
@@ -122,12 +124,47 @@ def test_no_order_last_week_copies_latest_previous_order(db_session, branch_ctx)
     assert _lines(db_session, order) == {p2.id: 4.0}
 
 
-def test_no_previous_order_at_all_means_nothing_to_submit(db_session, branch_ctx):
+def _open_notice_branch_ids(db_session):
+    return {n.branch_id for n in auto_order_service.list_open_notices(db_session)}
+
+
+def test_no_previous_order_at_all_leaves_admin_a_notice(db_session, branch_ctx, admin_user):
     branch, _, _, _ = branch_ctx
 
     auto_order_service.auto_submit_missed_orders(db_session, now=NOW)
+    auto_order_service.auto_submit_missed_orders(db_session, now=NOW + timedelta(minutes=1))
 
     assert _today_order(db_session, branch) is None
+    notices = db_session.query(MissedOrderNotice).filter(MissedOrderNotice.branch_id == branch.id).all()
+    assert [n.order_date for n in notices] == [TODAY]  # once, not once per run
+    assert branch.id in _open_notice_branch_ids(db_session)
+
+    auto_order_service.mark_reviewed(db_session, admin_user, notice_id=notices[0].id)
+    assert branch.id not in _open_notice_branch_ids(db_session)
+
+
+def test_notice_clears_once_the_branch_has_an_order(db_session, branch_ctx, admin_user):
+    branch, _, p1, _ = branch_ctx
+    auto_order_service.auto_submit_missed_orders(db_session, now=NOW)
+    assert branch.id in _open_notice_branch_ids(db_session)
+
+    order_service.admin_add_order_line(db_session, admin_user, branch.id, p1.id, TODAY + timedelta(days=2), 3)
+
+    assert branch.id not in _open_notice_branch_ids(db_session)
+
+
+def test_admin_can_remove_lines_from_auto_submitted_order_only(db_session, branch_ctx, admin_user):
+    branch, user, p1, p2 = branch_ctx
+    _order(db_session, branch, user, LAST_WEEK, "SUBMITTED", [(p1, 5), (p2, 2)])
+    auto_order_service.auto_submit_missed_orders(db_session, now=NOW)
+    order = _today_order(db_session, branch)
+
+    order_service.admin_remove_order_line(db_session, admin_user, branch.id, p2.id, order.delivery_date)
+    assert _lines(db_session, order) == {p1.id: 5.0}
+
+    # The branch's own submitted order is still protected.
+    with pytest.raises(ValidationFailedError):
+        order_service.admin_remove_order_line(db_session, admin_user, branch.id, p1.id, LAST_WEEK + timedelta(days=2))
 
 
 def test_skips_inactive_products_and_branches_with_late_exception(db_session, branch_ctx, make_branch, make_user, admin_user):

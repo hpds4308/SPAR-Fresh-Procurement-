@@ -13,8 +13,9 @@ for it, so a forgotten order never means an empty delivery:
   since deactivated are dropped).
 - Nothing last week -> the branch's most recent submitted order before
   today is copied instead (same rules).
-- No draft and no previous order at all -> nothing to copy, the branch is
-  left without an order (same as before this existed).
+- No draft and no previous order at all -> nothing to copy. A
+  MissedOrderNotice is recorded instead, so Admin is told the branch has
+  no order (and can add items for it from the order matrix).
 
 A branch Admin granted a late-submission exception for today is skipped —
 Admin has explicitly given them more time.
@@ -36,6 +37,7 @@ from sqlalchemy.orm import Session
 from app.core.audit import write_audit_log
 from app.core.config import settings
 from app.models.branch import Branch
+from app.models.missed_order_notice import MissedOrderNotice
 from app.models.order import Order, OrderLine
 from app.models.product import Product
 from app.models.user import User
@@ -78,6 +80,7 @@ def auto_submit_missed_orders(db: Session, now: datetime | None = None) -> list[
             continue
         order = _submit_from_draft(db, existing) if existing else _submit_from_previous(db, branch, today)
         if order is None:
+            _record_missed(db, branch, today)
             continue
         try:
             db.commit()
@@ -90,6 +93,35 @@ def auto_submit_missed_orders(db: Session, now: datetime | None = None) -> list[
         _audit(db, branch, order)
     db.commit()  # releases the advisory lock when nothing was submitted
     return submitted
+
+
+def _record_missed(db: Session, branch: Branch, order_date: date) -> None:
+    """Nothing to auto-submit for this branch — leave Admin a notice (once per branch per date)."""
+    exists = (
+        db.query(MissedOrderNotice)
+        .filter(MissedOrderNotice.branch_id == branch.id, MissedOrderNotice.order_date == order_date)
+        .first()
+    )
+    if exists:
+        return
+    db.add(MissedOrderNotice(branch_id=branch.id, order_date=order_date))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        return
+    write_audit_log(
+        db,
+        user_id=None,
+        role="SYSTEM",
+        action="ORDER_AUTO_SUBMIT_NOTHING",
+        entity_type="branch",
+        entity_id=branch.id,
+        description=(
+            f"'{branch.branch_name}' submitted nothing by the cutoff on {order_date.isoformat()} and had no "
+            "draft or previous order to copy — no order was submitted."
+        ),
+    )
 
 
 def _submit_from_draft(db: Session, draft: Order) -> Order | None:
@@ -191,20 +223,58 @@ def list_unreviewed(db: Session) -> list[Order]:
     )
 
 
-def mark_reviewed(db: Session, admin: User, delivery_date: date | None = None, order_id: int | None = None) -> int:
-    """Admin acknowledges auto-submitted order(s) — one order, every one for a delivery date, or all."""
-    query = db.query(Order).filter(Order.auto_submitted.is_(True), Order.auto_reviewed_at.is_(None))
-    if order_id is not None:
-        query = query.filter(Order.id == order_id)
-    if delivery_date is not None:
-        query = query.filter(Order.delivery_date == delivery_date)
-    orders = query.all()
+def list_open_notices(db: Session) -> list[MissedOrderNotice]:
+    """Undismissed "no order" notices whose branch still has no submitted order for that date."""
+    has_order = (
+        db.query(Order.id)
+        .filter(
+            Order.branch_id == MissedOrderNotice.branch_id,
+            Order.order_date == MissedOrderNotice.order_date,
+            Order.status != "DRAFT",
+        )
+        .exists()
+    )
+    return (
+        db.query(MissedOrderNotice)
+        .filter(MissedOrderNotice.reviewed_at.is_(None), ~has_order)
+        .order_by(MissedOrderNotice.order_date.desc(), MissedOrderNotice.branch_id)
+        .all()
+    )
+
+
+def mark_reviewed(
+    db: Session,
+    admin: User,
+    delivery_date: date | None = None,
+    order_id: int | None = None,
+    notice_id: int | None = None,
+) -> int:
+    """Admin acknowledges auto-submitted order(s) and/or dismisses "no order" notices — one order
+    (order_id), one notice (notice_id), everything for a delivery date, or everything."""
     stamp = datetime.now(BUSINESS_TZ)
-    for o in orders:
-        o.auto_reviewed_at = stamp
-        o.auto_reviewed_by = admin.id
+    count = 0
+    if notice_id is None:
+        query = db.query(Order).filter(Order.auto_submitted.is_(True), Order.auto_reviewed_at.is_(None))
+        if order_id is not None:
+            query = query.filter(Order.id == order_id)
+        if delivery_date is not None:
+            query = query.filter(Order.delivery_date == delivery_date)
+        for o in query.all():
+            o.auto_reviewed_at = stamp
+            o.auto_reviewed_by = admin.id
+            count += 1
+    if order_id is None:
+        query = db.query(MissedOrderNotice).filter(MissedOrderNotice.reviewed_at.is_(None))
+        if notice_id is not None:
+            query = query.filter(MissedOrderNotice.id == notice_id)
+        if delivery_date is not None:
+            query = query.filter(MissedOrderNotice.order_date == delivery_date - timedelta(days=2))
+        for n in query.all():
+            n.reviewed_at = stamp
+            n.reviewed_by = admin.id
+            count += 1
     db.commit()
-    return len(orders)
+    return count
 
 
 # --------------------------------------------------------------------------

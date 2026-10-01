@@ -130,6 +130,8 @@ export type MatrixBranchColumn = {
   auto_submit_source: "LAST_WEEK" | "LATEST" | "DRAFT" | null;
   auto_source_order_date: string | null;
   auto_reviewed: boolean;
+  // Missed the cutoff with nothing to auto-submit — no order for this date.
+  no_order: boolean;
 };
 
 export type MatrixRow = {
@@ -181,14 +183,32 @@ export type AutoSubmittedOrder = {
   line_count: number;
 };
 
-// Orders the system submitted for branches that missed the cutoff, which
-// Admin hasn't acknowledged yet — drives the Branch Orders badge/banner.
-export function fetchUnreviewedAutoOrders(): Promise<AutoSubmittedOrder[]> {
+// A branch that missed the cutoff with nothing to auto-submit (no draft and
+// no previous order to copy), and still has no order for that date.
+export type MissedOrderNotice = {
+  notice_id: number;
+  branch_id: number;
+  branch_name: string;
+  order_date: string;
+  delivery_date: string;
+};
+
+export type AutoSubmitAttention = {
+  orders: AutoSubmittedOrder[];
+  missed: MissedOrderNotice[];
+};
+
+// Everything from the auto-submit job Admin hasn't dealt with yet: orders
+// to review, and branches left with no order — drives the Branch Orders
+// badge/banner.
+export function fetchUnreviewedAutoOrders(): Promise<AutoSubmitAttention> {
   return apiFetch("/orders/admin/auto-submitted");
 }
 
-// Acknowledge one order, every one for a delivery date, or (no args) all.
-export function reviewAutoOrders(payload: { order_id?: number; delivery_date?: string } = {}): Promise<{ reviewed: number }> {
+// Acknowledge one order, dismiss one notice, everything for a delivery date, or (no args) everything.
+export function reviewAutoOrders(
+  payload: { order_id?: number; notice_id?: number; delivery_date?: string } = {}
+): Promise<{ reviewed: number }> {
   return apiFetch("/orders/admin/auto-submitted/review", {
     method: "POST",
     body: JSON.stringify(payload),

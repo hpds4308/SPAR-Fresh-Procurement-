@@ -10,6 +10,7 @@ from app.models.supplier import Supplier  # noqa: F401
 from app.models.product import ProductCategory, ProductUnit, Product  # noqa: F401
 from app.models.order import Order, OrderLine  # noqa: F401
 from app.models.order_deadline_exception import OrderDeadlineException  # noqa: F401
+from app.models.missed_order_notice import MissedOrderNotice  # noqa: F401
 from app.models.price_revision import SupplierPriceRevision  # noqa: F401
 from app.models.pricing import SupplierPrice  # noqa: F401
 from app.models.assignment import SupplierAssignment  # noqa: F401

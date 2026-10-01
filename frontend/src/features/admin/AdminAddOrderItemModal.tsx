@@ -149,7 +149,7 @@ export default function AdminAddOrderItemModal({
               onClick={handleRemove}
               disabled={removing || saving}
               className="text-sm text-tomato-600 hover:text-tomato-700 font-medium disabled:opacity-50 transition-colors duration-150"
-              title="Only removable if Admin added this line — a branch's own item can't be removed here."
+              title="Removable if Admin added this line or the order was auto-submitted — a branch's own submitted item can't be removed here."
             >
               {removing ? "Removing…" : "Remove item"}
             </button>

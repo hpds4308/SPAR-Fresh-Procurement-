@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError } from "../../api/client";
 import {
   AutoSubmittedOrder,
+  MissedOrderNotice,
   OrderMatrix,
   autoSubmitDescription,
   fetchOrderMatrix,
@@ -12,6 +13,7 @@ import {
 import ProductAssignmentPanel from "./ProductAssignmentPanel";
 import AdminAddOrderItemModal from "./AdminAddOrderItemModal";
 import { CategoryBadge } from "../shared/ui/CategoryBadge";
+import { StatusBadge } from "../shared/ui/Badge";
 
 type AddItemTarget = {
   branchId: number;
@@ -43,49 +45,66 @@ export default function OrderMatrixView({
   const [openProductId, setOpenProductId] = useState<number | null>(null);
   const [addItemTarget, setAddItemTarget] = useState<AddItemTarget | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
-  // Orders the system auto-submitted for branches that missed the cutoff,
-  // still waiting for Admin to acknowledge them.
+  // From the auto-submit job, still waiting for Admin: orders the system
+  // submitted for branches that missed the cutoff, and branches it found
+  // nothing to submit for (no order at all).
   const [autoOrders, setAutoOrders] = useState<AutoSubmittedOrder[]>([]);
+  const [missed, setMissed] = useState<MissedOrderNotice[]>([]);
   const [reviewing, setReviewing] = useState(false);
+  const seenAutoIds = useRef<Set<number> | null>(null);
+
+  function loadAttention() {
+    fetchUnreviewedAutoOrders()
+      .then(({ orders, missed }) => {
+        setAutoOrders(orders);
+        setMissed(missed);
+        onAutoOrdersChanged?.(orders.length + missed.length);
+        // A new auto-submitted order changes the matrix itself — reload it.
+        const seen = seenAutoIds.current;
+        if (seen && orders.some((o) => !seen.has(o.order_id))) setRefreshKey((k) => k + 1);
+        seenAutoIds.current = new Set(orders.map((o) => o.order_id));
+      })
+      .catch(() => {});
+  }
 
   useEffect(() => {
-    let cancelled = false;
-    let seen: Set<number> | null = null;
-    function poll() {
-      fetchUnreviewedAutoOrders()
-        .then((list) => {
-          if (cancelled) return;
-          setAutoOrders(list);
-          onAutoOrdersChanged?.(list.length);
-          // A new auto-submitted order changes the matrix itself — reload it.
-          if (seen && list.some((o) => !seen!.has(o.order_id))) setRefreshKey((k) => k + 1);
-          seen = new Set(list.map((o) => o.order_id));
-        })
-        .catch(() => {});
-    }
-    poll();
-    const id = setInterval(poll, AUTO_POLL_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
+    const id = setInterval(loadAttention, AUTO_POLL_MS);
+    return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function markReviewed(orderId?: number) {
+  // Also on every matrix reload — e.g. Admin adding items for a branch with
+  // no order clears that branch's notice server-side.
+  useEffect(() => {
+    loadAttention();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
+
+  async function markReviewed(target: { order_id?: number; notice_id?: number } = {}) {
     setReviewing(true);
     try {
-      await reviewAutoOrders(orderId !== undefined ? { order_id: orderId } : {});
-      const remaining = orderId !== undefined ? autoOrders.filter((o) => o.order_id !== orderId) : [];
-      setAutoOrders(remaining);
-      onAutoOrdersChanged?.(remaining.length);
+      await reviewAutoOrders(target);
+      const all = target.order_id === undefined && target.notice_id === undefined;
+      const orders = all ? [] : autoOrders.filter((o) => o.order_id !== target.order_id);
+      const notices = all ? [] : missed.filter((n) => n.notice_id !== target.notice_id);
+      setAutoOrders(orders);
+      setMissed(notices);
+      onAutoOrdersChanged?.(orders.length + notices.length);
       setRefreshKey((k) => k + 1);
     } catch {
-      setError("Could not mark the order as reviewed. Please try again.");
+      setError("Could not update this notice. Please try again.");
     } finally {
       setReviewing(false);
     }
   }
+
+  const attentionTitle = [
+    autoOrders.length > 0 &&
+      `${autoOrders.length} order${autoOrders.length === 1 ? " was" : "s were"} auto-submitted`,
+    missed.length > 0 && `${missed.length} branch${missed.length === 1 ? " has" : "es have"} no order`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   useEffect(() => {
     let cancelled = false;
@@ -191,25 +210,26 @@ export default function OrderMatrixView({
 
       {error && <p className="text-tomato-600 text-sm px-4 pt-3">{error}</p>}
 
-      {autoOrders.length > 0 && (
+      {(autoOrders.length > 0 || missed.length > 0) && (
         <div className="m-4 rounded-xl border border-mango-500/40 bg-mango-500/10 p-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <p className="text-sm font-semibold text-[#8A5A0D]">
-                {autoOrders.length} order{autoOrders.length === 1 ? " was" : "s were"} auto-submitted
-              </p>
+              <p className="text-sm font-semibold text-[#8A5A0D]">{attentionTitle}</p>
               <p className="text-xs text-crate-800/60 mt-0.5">
-                These branches didn't submit before the cutoff, so the system submitted an order for them. Check the
-                quantities, adjust if needed, then mark as reviewed.
+                These branches didn't submit before the cutoff.
+                {autoOrders.length > 0 &&
+                  " Auto-submitted orders: check the quantities, adjust or remove items if needed, then mark as reviewed."}
+                {missed.length > 0 &&
+                  " Branches with no order had nothing to copy: click their column in the table to add items, or dismiss."}
               </p>
             </div>
-            {autoOrders.length > 1 && (
+            {autoOrders.length + missed.length > 1 && (
               <button
                 onClick={() => markReviewed()}
                 disabled={reviewing}
                 className="text-xs font-semibold rounded-full border border-mango-500/60 text-[#8A5A0D] px-3 py-1 hover:bg-mango-500/15 disabled:opacity-50 transition-colors duration-150"
               >
-                Mark all reviewed
+                {missed.length > 0 ? "Clear all" : "Mark all reviewed"}
               </button>
             )}
           </div>
@@ -231,11 +251,38 @@ export default function OrderMatrixView({
                     </button>
                   )}
                   <button
-                    onClick={() => markReviewed(o.order_id)}
+                    onClick={() => markReviewed({ order_id: o.order_id })}
                     disabled={reviewing}
                     className="text-xs font-semibold rounded-full bg-white border border-mango-500/60 text-[#8A5A0D] px-3 py-1 hover:bg-mango-500/15 disabled:opacity-50 transition-colors duration-150"
                   >
                     Mark reviewed
+                  </button>
+                </span>
+              </li>
+            ))}
+            {missed.map((n) => (
+              <li key={`missed-${n.notice_id}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-sm">
+                <span className="font-medium text-crate-950">{n.branch_name}</span>
+                <StatusBadge tone="danger">No order</StatusBadge>
+                <span className="text-xs text-crate-800/60">Delivery {formatDate(n.delivery_date)}</span>
+                <span className="text-xs text-crate-800/50 basis-full sm:basis-auto">
+                  Nothing was submitted, and there's no previous order to copy.
+                </span>
+                <span className="ml-auto flex gap-2">
+                  {n.delivery_date !== selectedDate && (
+                    <button
+                      onClick={() => setSelectedDate(n.delivery_date)}
+                      className="text-xs font-medium text-crate-700 hover:underline"
+                    >
+                      View
+                    </button>
+                  )}
+                  <button
+                    onClick={() => markReviewed({ notice_id: n.notice_id })}
+                    disabled={reviewing}
+                    className="text-xs font-semibold rounded-full bg-white border border-mango-500/60 text-[#8A5A0D] px-3 py-1 hover:bg-mango-500/15 disabled:opacity-50 transition-colors duration-150"
+                  >
+                    Dismiss
                   </button>
                 </span>
               </li>
@@ -273,6 +320,14 @@ export default function OrderMatrixView({
                   title={b.auto_submitted ? autoSubmitDescription(b) : undefined}
                 >
                   {b.branch_name}
+                  {b.no_order && (
+                    <span
+                      className="ml-1.5 inline-block align-middle rounded-full px-1.5 py-0.5 text-[10px] font-bold normal-case tracking-normal bg-tomato-500/10 text-tomato-600"
+                      title="Missed the cutoff with nothing to copy — no order for this date"
+                    >
+                      No order
+                    </span>
+                  )}
                   {b.auto_submitted && (
                     <span
                       className={`ml-1.5 inline-block align-middle rounded-full px-1.5 py-0.5 text-[10px] font-bold normal-case tracking-normal ${

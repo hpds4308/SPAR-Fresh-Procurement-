@@ -654,9 +654,10 @@ def admin_remove_order_line(db: Session, admin: User, branch_id: int, product_id
     """
     Undoes one line Admin previously added via admin_add_order_line —
     e.g. it was added under the wrong delivery date by mistake. Only ever
-    removes a line with added_by_admin=True; a branch's own submitted
-    line is never touched here, so this can't be used to silently erase
-    what a branch actually ordered. Deletes the whole order if this was
+    removes a line with added_by_admin=True, or any line of an order the
+    system auto-submitted (the branch never submitted it themselves); a
+    branch's own submitted line is never touched here, so this can't be
+    used to silently erase what a branch actually ordered. Deletes the whole order if this was
     its only line (a bare, mistakenly-created order with nothing left in
     it isn't worth keeping around), returning None in that case.
     """
@@ -679,7 +680,9 @@ def admin_remove_order_line(db: Session, admin: User, branch_id: int, product_id
     )
     if not line:
         raise NotFoundError("This product is not on that order.")
-    if not line.added_by_admin:
+    # An auto-submitted order was placed by the system, not the branch (see
+    # auto_order_service), so Admin reviewing it may remove any of its lines.
+    if not line.added_by_admin and not order.auto_submitted:
         raise ValidationFailedError(
             "This line was submitted by the branch itself and can't be removed here."
         )
@@ -886,6 +889,21 @@ def get_order_matrix(db: Session, delivery_date: date | None = None):
         .all()
     } if auto_orders else {}
 
+    # Branches the auto-submit job found nothing to copy for (see MissedOrderNotice), still undismissed
+    # and still without an order for this date.
+    from app.models.missed_order_notice import MissedOrderNotice
+
+    branches_with_order = {
+        r[0]
+        for r in db.query(Order.branch_id).filter(Order.delivery_date == delivery_date, Order.status != "DRAFT").all()
+    }
+    no_order_branch_ids = {
+        n.branch_id
+        for n in db.query(MissedOrderNotice)
+        .filter(MissedOrderNotice.order_date == delivery_date - timedelta(days=2), MissedOrderNotice.reviewed_at.is_(None))
+        .all()
+    } - branches_with_order
+
     def _branch_column(b: Branch) -> dict:
         auto = auto_orders.get(b.id)
         return {
@@ -896,6 +914,7 @@ def get_order_matrix(db: Session, delivery_date: date | None = None):
             "auto_submit_source": auto.auto_submit_source if auto else None,
             "auto_source_order_date": source_dates.get(auto.auto_source_order_id) if auto else None,
             "auto_reviewed": bool(auto and auto.auto_reviewed_at),
+            "no_order": b.id in no_order_branch_ids,
         }
 
     return {

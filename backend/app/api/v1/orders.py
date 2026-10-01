@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, File, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from datetime import date
+from datetime import date, timedelta
 import io
 
 from app.core.database import get_db
@@ -25,6 +25,8 @@ from app.schemas.order import (
     AdminRemoveOrderLineRequest,
     AutoSubmittedOrderOut,
     AutoSubmittedReviewRequest,
+    AutoSubmitAttentionOut,
+    MissedOrderNoticeOut,
 )
 from app.schemas.assignment import ProductComparisonOut, SetAssignmentsRequest
 from app.services import order_service, assignment_service, auto_order_service
@@ -109,12 +111,13 @@ def get_order_matrix(
     return order_service.get_order_matrix(db, delivery_date)
 
 
-@router.get("/admin/auto-submitted", response_model=list[AutoSubmittedOrderOut])
+@router.get("/admin/auto-submitted", response_model=AutoSubmitAttentionOut)
 def list_unreviewed_auto_submitted(
     admin: User = Depends(require_roles("ADMIN")),
     db: Session = Depends(get_db),
 ):
-    """Orders the system submitted for branches that missed the cutoff, not yet reviewed by Admin."""
+    """Orders the system submitted for branches that missed the cutoff, not yet reviewed by Admin,
+    plus branches that missed it with nothing to submit (still without an order)."""
     result = []
     for o in auto_order_service.list_unreviewed(db):
         branch = db.get(Branch, o.branch_id)
@@ -131,7 +134,19 @@ def list_unreviewed_auto_submitted(
                 line_count=db.query(OrderLine).filter(OrderLine.order_id == o.id).count(),
             )
         )
-    return result
+    missed = []
+    for n in auto_order_service.list_open_notices(db):
+        branch = db.get(Branch, n.branch_id)
+        missed.append(
+            MissedOrderNoticeOut(
+                notice_id=n.id,
+                branch_id=n.branch_id,
+                branch_name=branch.branch_name if branch else "—",
+                order_date=n.order_date,
+                delivery_date=n.order_date + timedelta(days=2),
+            )
+        )
+    return AutoSubmitAttentionOut(orders=result, missed=missed)
 
 
 @router.post("/admin/auto-submitted/review")
@@ -141,7 +156,7 @@ def review_auto_submitted(
     db: Session = Depends(get_db),
 ):
     """Admin acknowledges auto-submitted order(s), clearing them from the dashboard badge."""
-    count = auto_order_service.mark_reviewed(db, admin, payload.delivery_date, payload.order_id)
+    count = auto_order_service.mark_reviewed(db, admin, payload.delivery_date, payload.order_id, payload.notice_id)
     return {"reviewed": count}
 
 

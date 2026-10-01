@@ -76,7 +76,7 @@ export default function AdminDashboard() {
         .catch(() => {});
       fetchUnreviewedAutoOrders()
         .then((r) => {
-          if (!cancelled) setAutoOrders(r.length);
+          if (!cancelled) setAutoOrders(r.orders.length + r.missed.length);
         })
         .catch(() => {});
     }
