@@ -38,6 +38,18 @@ class Order(Base):
     notes: Mapped[str | None] = mapped_column(Text)
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     confirmed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    # Set when the branch submitted nothing by the cutoff and the system
+    # submitted this order for them (see auto_order_service). Source is
+    # "LAST_WEEK" (copied from the same weekday's order a week earlier,
+    # auto_source_order_id), "LATEST" (no order last week, so the most
+    # recent earlier one) or "DRAFT" (the branch's own unsent draft).
+    # auto_reviewed_at stays null until Admin acknowledges it — that's
+    # what drives the "needs a look" badge on the Admin dashboard.
+    auto_submitted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    auto_submit_source: Mapped[str | None] = mapped_column(String(20))
+    auto_source_order_id: Mapped[int | None] = mapped_column(ForeignKey("orders.id", ondelete="SET NULL"))
+    auto_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    auto_reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

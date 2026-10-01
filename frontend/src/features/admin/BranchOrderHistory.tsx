@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ApiError } from "../../api/client";
-import { Order, OrderSummary, fetchOrder, fetchOrderDates, fetchOrdersForDate } from "../../api/orders";
+import { Order, OrderSummary, autoSubmitDescription, fetchOrder, fetchOrderDates, fetchOrdersForDate } from "../../api/orders";
 import EmptyState from "../shared/EmptyState";
 import { StatusBadge } from "../shared/ui/Badge";
 import { SkeletonTable } from "../shared/ui/Skeleton";
@@ -179,6 +179,11 @@ export default function BranchOrderHistory() {
                   <div className="flex items-center gap-3 min-w-0">
                     <span className="text-sm font-medium text-crate-950 truncate">{o.branch_name}</span>
                     <StatusBadge tone={statusTone(o.status)}>{o.status}</StatusBadge>
+                    {o.auto_submitted && (
+                      <span title={autoSubmitDescription(o)}>
+                        <StatusBadge tone="warning">Auto-submitted</StatusBadge>
+                      </span>
+                    )}
                   </div>
                   <span className="text-xs text-crate-800/40 shrink-0 ml-3">
                     {o.line_count} item{o.line_count === 1 ? "" : "s"}
@@ -190,24 +195,31 @@ export default function BranchOrderHistory() {
                     {detailLoading ? (
                       <p className="text-xs text-crate-800/40 py-2">Loading items…</p>
                     ) : expandedDetail ? (
-                      <table className="w-full text-sm mt-1">
-                        <thead>
-                          <tr className="text-crate-800/40 text-left text-xs uppercase tracking-wide">
-                            <th className="pb-1.5 font-medium">Product</th>
-                            <th className="pb-1.5 font-medium text-right">Quantity</th>
-                            <th className="pb-1.5 font-medium text-right">Unit</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-sage-200/60">
-                          {expandedDetail.lines.map((l) => (
-                            <tr key={l.id}>
-                              <td className="py-1.5 text-crate-950">{l.product_description}</td>
-                              <td className="py-1.5 text-right text-crate-800/80">{l.quantity}</td>
-                              <td className="py-1.5 text-right text-crate-800/40">{l.unit_code}</td>
+                      <>
+                        {expandedDetail.auto_submitted && (
+                          <p className="text-xs text-[#8A5A0D] bg-mango-500/10 rounded-lg px-3 py-2 mt-2 mb-1">
+                            {autoSubmitDescription(expandedDetail)}
+                          </p>
+                        )}
+                        <table className="w-full text-sm mt-1">
+                          <thead>
+                            <tr className="text-crate-800/40 text-left text-xs uppercase tracking-wide">
+                              <th className="pb-1.5 font-medium">Product</th>
+                              <th className="pb-1.5 font-medium text-right">Quantity</th>
+                              <th className="pb-1.5 font-medium text-right">Unit</th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                          </thead>
+                          <tbody className="divide-y divide-sage-200/60">
+                            {expandedDetail.lines.map((l) => (
+                              <tr key={l.id}>
+                                <td className="py-1.5 text-crate-950">{l.product_description}</td>
+                                <td className="py-1.5 text-right text-crate-800/80">{l.quantity}</td>
+                                <td className="py-1.5 text-right text-crate-800/40">{l.unit_code}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </>
                     ) : null}
                   </div>
                 )}

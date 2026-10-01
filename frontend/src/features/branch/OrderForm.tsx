@@ -234,7 +234,22 @@ export default function OrderForm({ onSubmitted }: { onSubmitted: () => void }) 
     return (
       <div className="bg-white rounded-2xl shadow-[0_10px_30px_-12px_rgba(21,56,38,0.15)] border border-sage-100 p-6">
         {previewPopup}
-        <p className="text-crate-700 font-semibold">Order submitted successfully.</p>
+        {myOrder.auto_submitted ? (
+          <>
+            <p className="text-[#8A5A0D] font-semibold">Your order was submitted automatically.</p>
+            <p className="text-crate-800/60 text-sm mt-1">
+              Nothing was submitted before the {window_?.cutoff_time ?? ""} cutoff, so{" "}
+              {myOrder.auto_submit_source === "DRAFT"
+                ? "your saved draft was submitted for you."
+                : myOrder.auto_submit_source === "LATEST"
+                  ? "your latest previous order was copied and submitted for you."
+                  : "last week's order for the same day was copied and submitted for you."}{" "}
+              Contact SPAR Fresh Procurement if anything needs to change.
+            </p>
+          </>
+        ) : (
+          <p className="text-crate-700 font-semibold">Order submitted successfully.</p>
+        )}
         <p className="text-crate-800/60 text-sm mt-1">
           It will be delivered on {formatDate(myOrder.delivery_date)}. This order is now read-only — you
           can view it below, but quantities can no longer be changed.

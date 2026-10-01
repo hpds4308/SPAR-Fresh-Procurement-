@@ -5,6 +5,7 @@ import { SidebarItem } from "../shared/Sidebar";
 import { IconBasket, IconTruck, IconTag, IconChart, IconChat, IconClock, IconGrid, IconStore, IconBranches, IconLog, IconSettings, IconUser, IconPercent, IconShield, IconReceipt } from "../shared/Icons";
 import { fetchAdminUnreadCount } from "../../api/messages";
 import { fetchAdminAttentionCount } from "../../api/priceApprovals";
+import { fetchUnreviewedAutoOrders } from "../../api/orders";
 import OrderMatrixView from "./OrderMatrixView";
 import AdminOrderHistory from "./AdminOrderHistory";
 import ReportsView from "./ReportsView";
@@ -32,6 +33,8 @@ export default function AdminDashboard() {
   const [unread, setUnread] = useState(0);
   // Rejected price sheets for upcoming deliveries not yet followed up.
   const [rejectedSheets, setRejectedSheets] = useState(0);
+  // Orders auto-submitted for branches that missed the cutoff, not yet reviewed.
+  const [autoOrders, setAutoOrders] = useState(0);
   // A PO just issued from Supplier Orders, to open on the Purchase Orders tab.
   const [poFocus, setPoFocus] = useState<PoFocus | null>(null);
 
@@ -71,6 +74,11 @@ export default function AdminDashboard() {
           if (!cancelled) setRejectedSheets(r.count);
         })
         .catch(() => {});
+      fetchUnreviewedAutoOrders()
+        .then((r) => {
+          if (!cancelled) setAutoOrders(r.length);
+        })
+        .catch(() => {});
     }
     poll();
     const id = setInterval(poll, UNREAD_POLL_MS);
@@ -91,7 +99,7 @@ export default function AdminDashboard() {
   }, [tab]);
 
   const navItems: SidebarItem<Tab>[] = [
-    { id: "orders", label: "Branch Orders", icon: <IconBasket {...iconProps} /> },
+    { id: "orders", label: "Branch Orders", icon: <IconBasket {...iconProps} />, badge: autoOrders },
     { id: "orderHistory", label: "Order History", icon: <IconClock {...iconProps} /> },
     { id: "supplierOrders", label: "Supplier Orders", icon: <IconTruck {...iconProps} /> },
     { id: "purchaseOrders", label: "Purchase Orders", icon: <IconReceipt {...iconProps} /> },
@@ -125,7 +133,7 @@ export default function AdminDashboard() {
           <h2 className="text-xs font-semibold uppercase tracking-wide text-crate-800/60 mb-3">
             Branch Orders
           </h2>
-          <OrderMatrixView />
+          <OrderMatrixView onAutoOrdersChanged={setAutoOrders} />
         </>
       )}
       {keepAlive(

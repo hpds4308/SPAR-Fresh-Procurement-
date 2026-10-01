@@ -31,6 +31,12 @@ class Settings(BaseSettings):
     # Business defaults (also stored in system_settings table, these are fallback defaults)
     BRANCH_ORDER_DEADLINE: str = "14:00"
     SUPPLIER_PRICE_DEADLINE: str = "12:00"
+    # Background job that, once the branch order cutoff passes, submits
+    # last week's same-weekday order for any branch that submitted nothing
+    # (see auto_order_service). Off in the test suite so a TestClient
+    # never starts a thread that writes orders behind a test's back.
+    AUTO_SUBMIT_MISSED_ORDERS: bool = True
+    AUTO_SUBMIT_CHECK_SECONDS: int = 60
 
     # Email (used for e.g. "Send to Master Data" on the Master Data Sheet
     # page). Left blank by default — if SMTP_HOST isn't set, email-sending

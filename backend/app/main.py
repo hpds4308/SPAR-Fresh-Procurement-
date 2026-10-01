@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi.errors import RateLimitExceeded
@@ -9,6 +11,7 @@ from app.core.logging import configure_logging
 from app.core.errors import register_error_handlers
 from app.core.rate_limit import limiter
 from app.api.v1.router import api_router
+from app.services import auto_order_service
 
 configure_logging()
 
@@ -22,7 +25,19 @@ configure_logging()
 # (development, testing, or anything else left unset all keep docs on).
 _docs_enabled = settings.APP_ENV != "production"
 
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # Submits last week's order for any branch that misses the daily cutoff
+    # (see auto_order_service). Disabled via AUTO_SUBMIT_MISSED_ORDERS=false.
+    auto_order_service.start_scheduler()
+    yield
+    auto_order_service.stop_scheduler()
+
+
 app = FastAPI(
+    lifespan=lifespan,
     title=settings.APP_NAME,
     version="0.1.0",
     docs_url=f"{settings.API_V1_PREFIX}/docs" if _docs_enabled else None,

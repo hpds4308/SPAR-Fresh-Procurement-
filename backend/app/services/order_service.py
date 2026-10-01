@@ -873,11 +873,34 @@ def get_order_matrix(db: Session, delivery_date: date | None = None):
             }
         )
 
+    auto_orders = {
+        o.branch_id: o
+        for o in db.query(Order)
+        .filter(Order.delivery_date == delivery_date, Order.auto_submitted.is_(True), Order.status != "DRAFT")
+        .all()
+    }
+    source_dates = {
+        o.id: o.order_date
+        for o in db.query(Order)
+        .filter(Order.id.in_([a.auto_source_order_id for a in auto_orders.values() if a.auto_source_order_id]))
+        .all()
+    } if auto_orders else {}
+
+    def _branch_column(b: Branch) -> dict:
+        auto = auto_orders.get(b.id)
+        return {
+            "branch_id": b.id,
+            "branch_code": b.branch_code,
+            "branch_name": b.branch_name,
+            "auto_submitted": auto is not None,
+            "auto_submit_source": auto.auto_submit_source if auto else None,
+            "auto_source_order_date": source_dates.get(auto.auto_source_order_id) if auto else None,
+            "auto_reviewed": bool(auto and auto.auto_reviewed_at),
+        }
+
     return {
         "delivery_date": delivery_date,
-        "branches": [
-            {"branch_id": b.id, "branch_code": b.branch_code, "branch_name": b.branch_name} for b in branches
-        ],
+        "branches": [_branch_column(b) for b in branches],
         "rows": rows,
         "available_delivery_dates": available_dates,
     }

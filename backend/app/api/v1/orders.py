@@ -9,7 +9,7 @@ from app.core.database import get_db
 from app.core.errors import ValidationFailedError
 from app.core.security import get_current_user, get_user_roles, require_roles
 from app.models.branch import Branch
-from app.models.order import OrderLine
+from app.models.order import Order, OrderLine
 from app.models.product import Product
 from app.models.user import User
 from app.schemas.order import (
@@ -23,11 +23,24 @@ from app.schemas.order import (
     DeliveryConfirmRequest,
     AdminAddOrderLineRequest,
     AdminRemoveOrderLineRequest,
+    AutoSubmittedOrderOut,
+    AutoSubmittedReviewRequest,
 )
 from app.schemas.assignment import ProductComparisonOut, SetAssignmentsRequest
-from app.services import order_service, assignment_service
+from app.services import order_service, assignment_service, auto_order_service
 
 router = APIRouter(prefix="/orders", dependencies=[Depends(get_current_user)])
+
+
+def _auto_fields(db: Session, order) -> dict:
+    """The auto-submit flags shared by OrderOut and OrderSummary (see Order.auto_submitted)."""
+    source = db.get(Order, order.auto_source_order_id) if order.auto_source_order_id else None
+    return {
+        "auto_submitted": order.auto_submitted,
+        "auto_submit_source": order.auto_submit_source,
+        "auto_source_order_date": source.order_date if source else None,
+        "auto_reviewed": order.auto_reviewed_at is not None,
+    }
 
 
 def _to_order_out(db: Session, order) -> OrderOut:
@@ -52,6 +65,7 @@ def _to_order_out(db: Session, order) -> OrderOut:
         submitted_by_username=submitted_by.username if submitted_by else "—",
         confirmed_at=order.confirmed_at.isoformat() if order.confirmed_at else None,
         confirmed_by_username=confirmed_by.username if confirmed_by else None,
+        **_auto_fields(db, order),
         lines=[
             OrderLineOut(
                 id=ln.id,
@@ -93,6 +107,42 @@ def get_order_matrix(
 ):
     """Consolidated view: every active product x every branch, quantities for the given delivery date."""
     return order_service.get_order_matrix(db, delivery_date)
+
+
+@router.get("/admin/auto-submitted", response_model=list[AutoSubmittedOrderOut])
+def list_unreviewed_auto_submitted(
+    admin: User = Depends(require_roles("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """Orders the system submitted for branches that missed the cutoff, not yet reviewed by Admin."""
+    result = []
+    for o in auto_order_service.list_unreviewed(db):
+        branch = db.get(Branch, o.branch_id)
+        fields = _auto_fields(db, o)
+        result.append(
+            AutoSubmittedOrderOut(
+                order_id=o.id,
+                branch_id=o.branch_id,
+                branch_name=branch.branch_name if branch else "—",
+                order_date=o.order_date,
+                delivery_date=o.delivery_date,
+                auto_submit_source=o.auto_submit_source or auto_order_service.SOURCE_LAST_WEEK,
+                auto_source_order_date=fields["auto_source_order_date"],
+                line_count=db.query(OrderLine).filter(OrderLine.order_id == o.id).count(),
+            )
+        )
+    return result
+
+
+@router.post("/admin/auto-submitted/review")
+def review_auto_submitted(
+    payload: AutoSubmittedReviewRequest,
+    admin: User = Depends(require_roles("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """Admin acknowledges auto-submitted order(s), clearing them from the dashboard badge."""
+    count = auto_order_service.mark_reviewed(db, admin, payload.delivery_date, payload.order_id)
+    return {"reviewed": count}
 
 
 @router.get("/admin/matrix/export")
@@ -330,6 +380,7 @@ def list_orders(
                 status=o.status,
                 line_count=line_count,
                 has_admin_added_lines=o.id in admin_added_order_ids,
+                **_auto_fields(db, o),
             )
         )
     return result

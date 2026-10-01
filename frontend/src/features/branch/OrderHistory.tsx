@@ -188,6 +188,15 @@ export default function OrderHistory({ refreshKey }: { refreshKey: number }) {
               <p className="text-sm text-crate-950 group-hover:text-crate-800">
                 Delivery date {o.delivery_date} &middot; {o.line_count} item{o.line_count === 1 ? "" : "s"}
               </p>
+              {o.auto_submitted && (
+                <p className="text-[11px] text-[#8A5A0D] font-medium mt-0.5">
+                  {o.auto_submit_source === "DRAFT"
+                    ? "Submitted automatically from your unsent draft"
+                    : o.auto_submit_source === "LATEST"
+                      ? "Submitted automatically — a copy of your latest previous order"
+                      : "Submitted automatically — a copy of last week's order"}
+                </p>
+              )}
               {o.has_admin_added_lines && (
                 <p className="text-[11px] text-[#8A5A0D] font-medium mt-0.5">
                   Includes item(s) added by SPAR Fresh Procurement

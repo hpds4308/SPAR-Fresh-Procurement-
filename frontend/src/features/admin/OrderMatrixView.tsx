@@ -1,6 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { ApiError } from "../../api/client";
-import { OrderMatrix, fetchOrderMatrix, downloadOrderMatrix } from "../../api/orders";
+import {
+  AutoSubmittedOrder,
+  OrderMatrix,
+  autoSubmitDescription,
+  fetchOrderMatrix,
+  downloadOrderMatrix,
+  fetchUnreviewedAutoOrders,
+  reviewAutoOrders,
+} from "../../api/orders";
 import ProductAssignmentPanel from "./ProductAssignmentPanel";
 import AdminAddOrderItemModal from "./AdminAddOrderItemModal";
 import { CategoryBadge } from "../shared/ui/CategoryBadge";
@@ -19,7 +27,13 @@ function formatDate(iso: string): string {
   return d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric" });
 }
 
-export default function OrderMatrixView() {
+const AUTO_POLL_MS = 60000;
+
+export default function OrderMatrixView({
+  onAutoOrdersChanged,
+}: {
+  onAutoOrdersChanged?: (count: number) => void;
+} = {}) {
   const [matrix, setMatrix] = useState<OrderMatrix | null>(null);
   const [selectedDate, setSelectedDate] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(true);
@@ -29,6 +43,49 @@ export default function OrderMatrixView() {
   const [openProductId, setOpenProductId] = useState<number | null>(null);
   const [addItemTarget, setAddItemTarget] = useState<AddItemTarget | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  // Orders the system auto-submitted for branches that missed the cutoff,
+  // still waiting for Admin to acknowledge them.
+  const [autoOrders, setAutoOrders] = useState<AutoSubmittedOrder[]>([]);
+  const [reviewing, setReviewing] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    let seen: Set<number> | null = null;
+    function poll() {
+      fetchUnreviewedAutoOrders()
+        .then((list) => {
+          if (cancelled) return;
+          setAutoOrders(list);
+          onAutoOrdersChanged?.(list.length);
+          // A new auto-submitted order changes the matrix itself — reload it.
+          if (seen && list.some((o) => !seen!.has(o.order_id))) setRefreshKey((k) => k + 1);
+          seen = new Set(list.map((o) => o.order_id));
+        })
+        .catch(() => {});
+    }
+    poll();
+    const id = setInterval(poll, AUTO_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function markReviewed(orderId?: number) {
+    setReviewing(true);
+    try {
+      await reviewAutoOrders(orderId !== undefined ? { order_id: orderId } : {});
+      const remaining = orderId !== undefined ? autoOrders.filter((o) => o.order_id !== orderId) : [];
+      setAutoOrders(remaining);
+      onAutoOrdersChanged?.(remaining.length);
+      setRefreshKey((k) => k + 1);
+    } catch {
+      setError("Could not mark the order as reviewed. Please try again.");
+    } finally {
+      setReviewing(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -134,6 +191,59 @@ export default function OrderMatrixView() {
 
       {error && <p className="text-tomato-600 text-sm px-4 pt-3">{error}</p>}
 
+      {autoOrders.length > 0 && (
+        <div className="m-4 rounded-xl border border-mango-500/40 bg-mango-500/10 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-[#8A5A0D]">
+                {autoOrders.length} order{autoOrders.length === 1 ? " was" : "s were"} auto-submitted
+              </p>
+              <p className="text-xs text-crate-800/60 mt-0.5">
+                These branches didn't submit before the cutoff, so the system submitted an order for them. Check the
+                quantities, adjust if needed, then mark as reviewed.
+              </p>
+            </div>
+            {autoOrders.length > 1 && (
+              <button
+                onClick={() => markReviewed()}
+                disabled={reviewing}
+                className="text-xs font-semibold rounded-full border border-mango-500/60 text-[#8A5A0D] px-3 py-1 hover:bg-mango-500/15 disabled:opacity-50 transition-colors duration-150"
+              >
+                Mark all reviewed
+              </button>
+            )}
+          </div>
+          <ul className="mt-3 divide-y divide-mango-500/20">
+            {autoOrders.map((o) => (
+              <li key={o.order_id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-sm">
+                <span className="font-medium text-crate-950">{o.branch_name}</span>
+                <span className="text-xs text-crate-800/60">
+                  Delivery {formatDate(o.delivery_date)} &middot; {o.line_count} item{o.line_count === 1 ? "" : "s"}
+                </span>
+                <span className="text-xs text-crate-800/50 basis-full sm:basis-auto">{autoSubmitDescription(o)}</span>
+                <span className="ml-auto flex gap-2">
+                  {o.delivery_date !== selectedDate && (
+                    <button
+                      onClick={() => setSelectedDate(o.delivery_date)}
+                      className="text-xs font-medium text-crate-700 hover:underline"
+                    >
+                      View
+                    </button>
+                  )}
+                  <button
+                    onClick={() => markReviewed(o.order_id)}
+                    disabled={reviewing}
+                    className="text-xs font-semibold rounded-full bg-white border border-mango-500/60 text-[#8A5A0D] px-3 py-1 hover:bg-mango-500/15 disabled:opacity-50 transition-colors duration-150"
+                  >
+                    Mark reviewed
+                  </button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div className="overflow-x-auto">
         <table className="min-w-full text-sm">
           <thead>
@@ -157,8 +267,21 @@ export default function OrderMatrixView() {
                 Product
               </th>
               {matrix?.branches.map((b) => (
-                <th key={b.branch_id} className="text-right px-3 py-2.5 whitespace-nowrap">
+                <th
+                  key={b.branch_id}
+                  className={`text-right px-3 py-2.5 whitespace-nowrap ${b.auto_submitted ? "bg-mango-500/10" : ""}`}
+                  title={b.auto_submitted ? autoSubmitDescription(b) : undefined}
+                >
                   {b.branch_name}
+                  {b.auto_submitted && (
+                    <span
+                      className={`ml-1.5 inline-block align-middle rounded-full px-1.5 py-0.5 text-[10px] font-bold normal-case tracking-normal ${
+                        b.auto_reviewed ? "bg-sage-100 text-crate-800/60" : "bg-mango-500/25 text-[#8A5A0D]"
+                      }`}
+                    >
+                      Auto
+                    </span>
+                  )}
                 </th>
               ))}
             </tr>
@@ -193,7 +316,9 @@ export default function OrderMatrixView() {
                   return (
                     <td
                       key={b.branch_id}
-                      className="px-3 py-2 text-right text-crate-800/80 hover:bg-mango-500/15 cursor-pointer transition-colors duration-100"
+                      className={`px-3 py-2 text-right text-crate-800/80 hover:bg-mango-500/15 cursor-pointer transition-colors duration-100 ${
+                        b.auto_submitted ? "bg-mango-500/5" : ""
+                      }`}
                       title={`Click to ${qty !== undefined ? "edit" : "add"} ${b.branch_name}'s quantity`}
                       onClick={(e) => {
                         e.stopPropagation();

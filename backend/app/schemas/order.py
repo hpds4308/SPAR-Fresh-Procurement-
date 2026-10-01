@@ -54,6 +54,12 @@ class OrderOut(BaseModel):
     submitted_by_username: str
     confirmed_at: str | None = None
     confirmed_by_username: str | None = None
+    # See Order.auto_submitted — set when the branch missed the cutoff and
+    # the system submitted this order for them.
+    auto_submitted: bool = False
+    auto_submit_source: str | None = None  # "LAST_WEEK" | "LATEST" | "DRAFT"
+    auto_source_order_date: date | None = None
+    auto_reviewed: bool = False
     lines: list[OrderLineOut]
 
     class Config:
@@ -72,6 +78,10 @@ class OrderSummary(BaseModel):
     # branch itself — lets "My Orders" flag this at a glance, without the
     # branch having to expand every order to notice an admin top-up.
     has_admin_added_lines: bool = False
+    auto_submitted: bool = False
+    auto_submit_source: str | None = None
+    auto_source_order_date: date | None = None
+    auto_reviewed: bool = False
 
     class Config:
         from_attributes = True
@@ -90,6 +100,11 @@ class MatrixBranchColumn(BaseModel):
     branch_id: int
     branch_code: str
     branch_name: str
+    # This branch's order for the date was auto-submitted (it missed the cutoff).
+    auto_submitted: bool = False
+    auto_submit_source: str | None = None
+    auto_source_order_date: date | None = None
+    auto_reviewed: bool = False
 
 
 class MatrixRow(BaseModel):
@@ -209,3 +224,23 @@ class OrderDeadlineExceptionOut(BaseModel):
     order_date: date
     granted_by_username: str
     created_at: datetime
+
+
+class AutoSubmittedOrderOut(BaseModel):
+    """An order the system submitted for a branch that missed the cutoff, still awaiting Admin's review."""
+
+    order_id: int
+    branch_id: int
+    branch_name: str
+    order_date: date
+    delivery_date: date
+    auto_submit_source: str
+    auto_source_order_date: date | None = None
+    line_count: int
+
+
+class AutoSubmittedReviewRequest(BaseModel):
+    """Acknowledge one order (order_id), every one for a delivery date, or — both omitted — all of them."""
+
+    order_id: int | None = None
+    delivery_date: date | None = None

@@ -10,6 +10,7 @@ const ACTION_LABELS: Record<string, string> = {
   LOGIN: "Login",
   PASSWORD_CHANGED: "Password changed",
   ORDER_SUBMITTED: "Order submitted",
+  ORDER_AUTO_SUBMITTED: "Order auto-submitted",
   DELIVERY_CONFIRMED: "Delivery confirmed",
   PRICES_SUBMITTED: "Prices submitted",
   SUPPLIERS_ASSIGNED: "Suppliers assigned",
@@ -20,6 +21,7 @@ const ACTION_LABELS: Record<string, string> = {
 };
 
 function actionTone(action: string): "success" | "warning" | "info" | "neutral" {
+  if (action === "ORDER_AUTO_SUBMITTED") return "warning";
   if (action.includes("SENT") || action.includes("CONFIRMED") || action.includes("SUBMITTED")) return "success";
   if (action.includes("UNSENT") || action.includes("ADJUSTED")) return "warning";
   if (action === "LOGIN" || action === "PASSWORD_CHANGED") return "info";

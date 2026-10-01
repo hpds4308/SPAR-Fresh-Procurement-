@@ -29,6 +29,7 @@ _base_db_name = _parts.path.lstrip("/")
 _TEST_DB_NAME = f"{_base_db_name}_test"
 _TEST_DB_URL = urlunsplit((_parts.scheme, _parts.netloc, f"/{_TEST_DB_NAME}", _parts.query, _parts.fragment))
 os.environ["DATABASE_URL"] = _TEST_DB_URL
+os.environ["AUTO_SUBMIT_MISSED_ORDERS"] = "false"
 
 from pathlib import Path  # noqa: E402
 

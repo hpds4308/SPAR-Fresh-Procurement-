@@ -60,6 +60,14 @@ export type Order = {
   submitted_by_username: string;
   confirmed_at: string | null;
   confirmed_by_username: string | null;
+  // Set when the branch submitted nothing by the cutoff and the system
+  // submitted this order for them: "LAST_WEEK" = copied from the same
+  // weekday's order a week earlier, "LATEST" = no order last week, so the
+  // most recent earlier one, "DRAFT" = the branch's unsent draft.
+  auto_submitted: boolean;
+  auto_submit_source: "LAST_WEEK" | "LATEST" | "DRAFT" | null;
+  auto_source_order_date: string | null;
+  auto_reviewed: boolean;
   lines: OrderLine[];
 };
 
@@ -72,6 +80,10 @@ export type OrderSummary = {
   status: string;
   line_count: number;
   has_admin_added_lines: boolean;
+  auto_submitted: boolean;
+  auto_submit_source: "LAST_WEEK" | "LATEST" | "DRAFT" | null;
+  auto_source_order_date: string | null;
+  auto_reviewed: boolean;
 };
 
 export function fetchProducts(): Promise<Product[]> {
@@ -114,6 +126,10 @@ export type MatrixBranchColumn = {
   branch_id: number;
   branch_code: string;
   branch_name: string;
+  auto_submitted: boolean;
+  auto_submit_source: "LAST_WEEK" | "LATEST" | "DRAFT" | null;
+  auto_source_order_date: string | null;
+  auto_reviewed: boolean;
 };
 
 export type MatrixRow = {
@@ -135,6 +151,48 @@ export type OrderMatrix = {
 export function fetchOrderMatrix(deliveryDate?: string): Promise<OrderMatrix> {
   const qs = deliveryDate ? `?delivery_date=${deliveryDate}` : "";
   return apiFetch(`/orders/admin/matrix${qs}`);
+}
+
+// One-line explanation of where an auto-submitted order came from.
+export function autoSubmitDescription(o: {
+  auto_submit_source: "LAST_WEEK" | "LATEST" | "DRAFT" | null;
+  auto_source_order_date: string | null;
+}): string {
+  if (o.auto_submit_source === "DRAFT") return "Not submitted by the cutoff — the unsent draft was submitted automatically.";
+  const from = o.auto_source_order_date
+    ? new Date(o.auto_source_order_date + "T00:00:00").toLocaleDateString(undefined, {
+        weekday: "short",
+        day: "numeric",
+        month: "short",
+      })
+    : "earlier";
+  const which = o.auto_submit_source === "LATEST" ? "latest previous order" : "same day last week's order";
+  return `Not submitted by the cutoff — copied automatically from the ${which} (placed ${from}).`;
+}
+
+export type AutoSubmittedOrder = {
+  order_id: number;
+  branch_id: number;
+  branch_name: string;
+  order_date: string;
+  delivery_date: string;
+  auto_submit_source: "LAST_WEEK" | "LATEST" | "DRAFT";
+  auto_source_order_date: string | null;
+  line_count: number;
+};
+
+// Orders the system submitted for branches that missed the cutoff, which
+// Admin hasn't acknowledged yet — drives the Branch Orders badge/banner.
+export function fetchUnreviewedAutoOrders(): Promise<AutoSubmittedOrder[]> {
+  return apiFetch("/orders/admin/auto-submitted");
+}
+
+// Acknowledge one order, every one for a delivery date, or (no args) all.
+export function reviewAutoOrders(payload: { order_id?: number; delivery_date?: string } = {}): Promise<{ reviewed: number }> {
+  return apiFetch("/orders/admin/auto-submitted/review", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 // Admin adds (or updates) one product/quantity directly on a branch's
