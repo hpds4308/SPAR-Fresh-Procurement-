@@ -326,7 +326,7 @@ export default function OrderForm({ onSubmitted }: { onSubmitted: () => void }) 
             placeholder="Search products…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="flex-1 border border-sage-300 bg-sage-50/60 rounded-full px-4 py-2 text-sm text-crate-950 placeholder:text-crate-950/35 focus:outline-none focus:ring-2 focus:ring-crate-700/30 focus:border-crate-700 focus:bg-white transition-all duration-150"
+            className="flex-1 min-w-0 border border-sage-300 bg-sage-50/60 rounded-full px-4 py-2 text-sm text-crate-950 placeholder:text-crate-950/35 focus:outline-none focus:ring-2 focus:ring-crate-700/30 focus:border-crate-700 focus:bg-white transition-all duration-150"
           />
           <select
             value={category}
@@ -415,10 +415,10 @@ export default function OrderForm({ onSubmitted }: { onSubmitted: () => void }) 
         )}
         {filtered.map((p) => (
           <div key={p.id} className="flex items-center justify-between px-6 py-3 hover:bg-sage-50/50 transition-colors duration-100">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 min-w-0">
+            <div className="min-w-0 flex-1 pr-2">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0">
                 <p
-                  className={`text-sm text-crate-950 truncate w-fit ${hasImage.has(p.id) ? "cursor-pointer" : ""}`}
+                  className={`text-sm text-crate-950 truncate w-fit max-w-full ${hasImage.has(p.id) ? "cursor-pointer" : ""}`}
                   onMouseEnter={(e) => hasImage.has(p.id) && showPreview(p.id, e.currentTarget)}
                   onMouseLeave={hidePreview}
                 >
@@ -429,6 +429,7 @@ export default function OrderForm({ onSubmitted }: { onSubmitted: () => void }) 
                     name={promotions[p.id].promotion_name}
                     color={promotions[p.id].color}
                     endDate={promotions[p.id].end_date}
+                    className="max-w-full truncate align-middle"
                   />
                 )}
               </div>
@@ -440,8 +441,8 @@ export default function OrderForm({ onSubmitted }: { onSubmitted: () => void }) 
                 <CategoryBadge name={p.category_name} />
               </div>
             </div>
-            <div className="text-right shrink-0 w-24 px-2">
-              <p className="text-[10px] uppercase tracking-wide text-crate-800/35">Stock in Hand</p>
+            <div className="text-right shrink-0 w-28 px-2">
+              <p className="text-[10px] uppercase tracking-wide whitespace-nowrap text-crate-800/35">Stock in Hand</p>
               <p className="text-sm text-crate-800/70">
                 {stockByProduct[p.id] !== undefined ? `${stockByProduct[p.id]} ${p.unit_code}` : "—"}
               </p>
