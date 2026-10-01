@@ -1,15 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ApiError } from "../../api/client";
 import {
   Product,
   OrderWindow,
   Order,
-  ExcelOrderPreview,
   fetchProducts,
   fetchOrderWindow,
   fetchMyOrderToday,
   fetchStockInHand,
-  previewOrderExcel,
   submitOrder,
   saveDraftOrder,
 } from "../../api/orders";
@@ -56,14 +54,6 @@ export default function OrderForm({ onSubmitted }: { onSubmitted: () => void }) 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [draftSaved, setDraftSaved] = useState(false);
-
-  // Excel upload: purely an alternate way to fill in `quantities` above —
-  // "Apply" below just calls the same setQty every manual edit already
-  // uses, so Save/Submit are completely unaware an upload ever happened.
-  const [excelPreview, setExcelPreview] = useState<ExcelOrderPreview | null>(null);
-  const [excelUploading, setExcelUploading] = useState(false);
-  const [excelError, setExcelError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // A DRAFT is still editable; anything past that (SUBMITTED/ASSIGNED/
   // CONFIRMED) is locked — the branch can view it but not change it.
@@ -191,35 +181,6 @@ export default function OrderForm({ onSubmitted }: { onSubmitted: () => void }) 
       .filter((l) => l.quantity > 0);
   }
 
-  async function handleExcelSelected(file: File) {
-    setExcelError(null);
-    setExcelUploading(true);
-    try {
-      const result = await previewOrderExcel(file);
-      setExcelPreview(result);
-    } catch (err) {
-      setExcelError(err instanceof ApiError ? err.message : "Could not read that file. Please try again.");
-    } finally {
-      setExcelUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    }
-  }
-
-  function applyExcelPreview() {
-    if (!excelPreview) return;
-    setQuantities((prev) => {
-      const next = { ...prev };
-      for (const line of excelPreview.lines) {
-        if (line.product_id !== null && line.quantity !== null) {
-          next[line.product_id] = String(line.quantity);
-        }
-      }
-      return next;
-    });
-    setDraftSaved(false);
-    setExcelPreview(null);
-  }
-
   async function handleSaveDraft() {
     setError(null);
     setDraftSaved(false);
@@ -339,75 +300,8 @@ export default function OrderForm({ onSubmitted }: { onSubmitted: () => void }) 
               </option>
             ))}
           </select>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".xlsx"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) handleExcelSelected(file);
-            }}
-          />
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={excelUploading}
-            className="text-sm text-crate-700 border border-sage-300 rounded-full px-4 py-2 font-medium hover:bg-sage-50 disabled:opacity-50 transition-colors duration-150 whitespace-nowrap"
-          >
-            {excelUploading ? "Reading…" : "Upload Excel"}
-          </button>
         </div>
-        {excelError && <p className="text-tomato-600 text-sm mt-2">{excelError}</p>}
       </div>
-
-      {excelPreview && (
-        <div className="border-b border-sage-100 bg-sage-50/60 p-5">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <p className="text-sm text-crate-800">
-              <span className="font-semibold text-crate-700">{excelPreview.valid_line_count}</span> product
-              {excelPreview.valid_line_count === 1 ? "" : "s"} ready to apply
-              {excelPreview.error_count > 0 && (
-                <span className="text-tomato-600">
-                  {" "}
-                  · {excelPreview.error_count} row{excelPreview.error_count === 1 ? "" : "s"} skipped
-                </span>
-              )}
-            </p>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setExcelPreview(null)}
-                className="text-xs text-crate-800/50 hover:text-crate-800 px-3 py-1.5 transition-colors duration-150"
-              >
-                Discard
-              </button>
-              <button
-                type="button"
-                onClick={applyExcelPreview}
-                disabled={excelPreview.valid_line_count === 0}
-                className="text-xs bg-crate-700 text-white rounded-full px-4 py-1.5 font-semibold hover:bg-crate-800 disabled:opacity-40 transition-colors duration-150"
-              >
-                Apply to order
-              </button>
-            </div>
-          </div>
-          {excelPreview.error_count > 0 && (
-            <div className="mt-3 max-h-32 overflow-y-auto space-y-1">
-              {excelPreview.lines
-                .filter((ln) => ln.error)
-                .map((ln) => (
-                  <p key={ln.row_number} className="text-xs text-tomato-600">
-                    Row {ln.row_number} ({ln.product_code || "blank"}): {ln.error}
-                  </p>
-                ))}
-            </div>
-          )}
-          <p className="text-xs text-crate-800/40 mt-2">
-            Applying only fills in quantities below — nothing is saved until you press Save or Submit.
-          </p>
-        </div>
-      )}
 
       <div className="max-h-[28rem] overflow-y-auto divide-y divide-sage-100">
         {filtered.length === 0 && (

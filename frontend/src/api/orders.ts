@@ -197,32 +197,6 @@ export async function downloadOrderMatrix(deliveryDate?: string): Promise<void> 
   window.URL.revokeObjectURL(url);
 }
 
-export type ExcelOrderLinePreview = {
-  row_number: number;
-  product_code: string;
-  description: string | null;
-  unit_code: string | null;
-  quantity: number | null;
-  product_id: number | null;
-  error: string | null;
-};
-
-export type ExcelOrderPreview = {
-  lines: ExcelOrderLinePreview[];
-  valid_line_count: number;
-  error_count: number;
-};
-
-// Parses an uploaded order Excel (Product Code / POS Code / Product
-// Description / Unit / Quantity columns) into a preview — never saves
-// anything by itself. The caller reviews the result and still calls
-// saveDraftOrder/submitOrder separately, the same as manual entry.
-export function previewOrderExcel(file: File): Promise<ExcelOrderPreview> {
-  const formData = new FormData();
-  formData.append("file", file);
-  return apiFetch("/orders/draft/preview-excel", { method: "POST", body: formData });
-}
-
 export function submitOrder(lines: { product_id: number; quantity: number; notes?: string }[], notes?: string): Promise<Order> {
   return apiFetch("/orders", {
     method: "POST",
