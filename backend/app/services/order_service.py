@@ -913,6 +913,11 @@ def get_order_matrix(db: Session, delivery_date: date | None = None):
             "auto_submitted": auto is not None,
             "auto_submit_source": auto.auto_submit_source if auto else None,
             "auto_source_order_date": source_dates.get(auto.auto_source_order_id) if auto else None,
+            "auto_weeks_back": (
+                (auto.order_date - source_dates[auto.auto_source_order_id]).days // 7
+                if auto and auto.auto_submit_source == "LAST_WEEK" and auto.auto_source_order_id in source_dates
+                else None
+            ),
             "auto_reviewed": bool(auto and auto.auto_reviewed_at),
             "no_order": b.id in no_order_branch_ids,
         }

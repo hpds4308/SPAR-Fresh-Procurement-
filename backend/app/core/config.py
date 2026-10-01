@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     # never starts a thread that writes orders behind a test's back.
     AUTO_SUBMIT_MISSED_ORDERS: bool = True
     AUTO_SUBMIT_CHECK_SECONDS: int = 60
+    # How many weeks back (same weekday each time) the auto-submit job looks
+    # for an order to copy before giving up with "No Previous Order Found".
+    AUTO_SUBMIT_LOOKBACK_WEEKS: int = 8
 
     # Email (used for e.g. "Send to Master Data" on the Master Data Sheet
     # page). Left blank by default — if SMTP_HOST isn't set, email-sending

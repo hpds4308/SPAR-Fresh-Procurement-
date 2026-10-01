@@ -194,7 +194,8 @@ export default function OrderHistory({ refreshKey }: { refreshKey: number }) {
                     ? "Submitted automatically from your unsent draft"
                     : o.auto_submit_source === "LATEST"
                       ? "Submitted automatically — a copy of your latest previous order"
-                      : "Submitted automatically — a copy of last week's order"}
+                      : "Submitted automatically — a copy of your order from the same day " +
+                        (o.auto_weeks_back && o.auto_weeks_back > 1 ? `${o.auto_weeks_back} weeks earlier` : "last week")}
                 </p>
               )}
               {o.has_admin_added_lines && (

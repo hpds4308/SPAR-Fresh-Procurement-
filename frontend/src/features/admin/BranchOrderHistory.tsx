@@ -1,6 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { ApiError } from "../../api/client";
-import { Order, OrderSummary, autoSubmitDescription, fetchOrder, fetchOrderDates, fetchOrdersForDate } from "../../api/orders";
+import {
+  Order,
+  OrderSummary,
+  autoSubmitDescription,
+  autoSubmitLabel,
+  fetchOrder,
+  fetchOrderDates,
+  fetchOrdersForDate,
+} from "../../api/orders";
 import EmptyState from "../shared/EmptyState";
 import { StatusBadge } from "../shared/ui/Badge";
 import { SkeletonTable } from "../shared/ui/Skeleton";
@@ -181,7 +189,7 @@ export default function BranchOrderHistory() {
                     <StatusBadge tone={statusTone(o.status)}>{o.status}</StatusBadge>
                     {o.auto_submitted && (
                       <span title={autoSubmitDescription(o)}>
-                        <StatusBadge tone="warning">Auto-submitted</StatusBadge>
+                        <StatusBadge tone="warning">{autoSubmitLabel(o)}</StatusBadge>
                       </span>
                     )}
                   </div>

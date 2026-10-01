@@ -5,6 +5,8 @@ import {
   MissedOrderNotice,
   OrderMatrix,
   autoSubmitDescription,
+  autoSubmitLabel,
+  weeksBackLabel,
   fetchOrderMatrix,
   downloadOrderMatrix,
   fetchUnreviewedAutoOrders,
@@ -50,14 +52,16 @@ export default function OrderMatrixView({
   // nothing to submit for (no order at all).
   const [autoOrders, setAutoOrders] = useState<AutoSubmittedOrder[]>([]);
   const [missed, setMissed] = useState<MissedOrderNotice[]>([]);
+  const [lookbackWeeks, setLookbackWeeks] = useState<number | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const seenAutoIds = useRef<Set<number> | null>(null);
 
   function loadAttention() {
     fetchUnreviewedAutoOrders()
-      .then(({ orders, missed }) => {
+      .then(({ orders, missed, lookback_weeks }) => {
         setAutoOrders(orders);
         setMissed(missed);
+        setLookbackWeeks(lookback_weeks);
         onAutoOrdersChanged?.(orders.length + missed.length);
         // A new auto-submitted order changes the matrix itself — reload it.
         const seen = seenAutoIds.current;
@@ -101,7 +105,8 @@ export default function OrderMatrixView({
   const attentionTitle = [
     autoOrders.length > 0 &&
       `${autoOrders.length} order${autoOrders.length === 1 ? " was" : "s were"} auto-submitted`,
-    missed.length > 0 && `${missed.length} branch${missed.length === 1 ? " has" : "es have"} no order`,
+    missed.length > 0 &&
+      `${missed.length} branch${missed.length === 1 ? "" : "es"} with no previous order found`,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -220,7 +225,7 @@ export default function OrderMatrixView({
                 {autoOrders.length > 0 &&
                   " Auto-submitted orders: check the quantities, adjust or remove items if needed, then mark as reviewed."}
                 {missed.length > 0 &&
-                  " Branches with no order had nothing to copy: click their column in the table to add items, or dismiss."}
+                  " Branches with no previous order found had nothing to copy, so no order was created: click their column in the table to add items, or dismiss."}
               </p>
             </div>
             {autoOrders.length + missed.length > 1 && (
@@ -237,10 +242,18 @@ export default function OrderMatrixView({
             {autoOrders.map((o) => (
               <li key={o.order_id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-sm">
                 <span className="font-medium text-crate-950">{o.branch_name}</span>
-                <span className="text-xs text-crate-800/60">
-                  Delivery {formatDate(o.delivery_date)} &middot; {o.line_count} item{o.line_count === 1 ? "" : "s"}
+                <StatusBadge tone="warning">{autoSubmitLabel(o)}</StatusBadge>
+                <span className="text-xs text-crate-800/60 basis-full">
+                  Order date {formatDate(o.order_date)} &middot; Delivery {formatDate(o.delivery_date)} &middot;{" "}
+                  {o.line_count} product{o.line_count === 1 ? "" : "s"}
+                  {o.auto_source_order_date && (
+                    <>
+                      {" "}
+                      &middot; Copied from {formatDate(o.auto_source_order_date)}
+                      {weeksBackLabel(o.auto_weeks_back) && ` (${weeksBackLabel(o.auto_weeks_back)})`}
+                    </>
+                  )}
                 </span>
-                <span className="text-xs text-crate-800/50 basis-full sm:basis-auto">{autoSubmitDescription(o)}</span>
                 <span className="ml-auto flex gap-2">
                   {o.delivery_date !== selectedDate && (
                     <button
@@ -263,10 +276,11 @@ export default function OrderMatrixView({
             {missed.map((n) => (
               <li key={`missed-${n.notice_id}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-sm">
                 <span className="font-medium text-crate-950">{n.branch_name}</span>
-                <StatusBadge tone="danger">No order</StatusBadge>
-                <span className="text-xs text-crate-800/60">Delivery {formatDate(n.delivery_date)}</span>
-                <span className="text-xs text-crate-800/50 basis-full sm:basis-auto">
-                  Nothing was submitted, and there's no previous order to copy.
+                <StatusBadge tone="danger">No Previous Order Found</StatusBadge>
+                <span className="text-xs text-crate-800/60 basis-full">
+                  Order date {formatDate(n.order_date)} &middot; Delivery {formatDate(n.delivery_date)} &middot; Nothing
+                  was submitted, and there's no order on the same weekday
+                  {lookbackWeeks ? ` in the last ${lookbackWeeks} weeks` : ""} to copy. No order was created.
                 </span>
                 <span className="ml-auto flex gap-2">
                   {n.delivery_date !== selectedDate && (
@@ -323,9 +337,9 @@ export default function OrderMatrixView({
                   {b.no_order && (
                     <span
                       className="ml-1.5 inline-block align-middle rounded-full px-1.5 py-0.5 text-[10px] font-bold normal-case tracking-normal bg-tomato-500/10 text-tomato-600"
-                      title="Missed the cutoff with nothing to copy — no order for this date"
+                      title="No Previous Order Found — missed the cutoff with nothing to copy, so there's no order for this date"
                     >
-                      No order
+                      No previous order
                     </span>
                   )}
                   {b.auto_submitted && (

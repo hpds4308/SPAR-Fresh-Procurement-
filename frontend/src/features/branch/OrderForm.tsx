@@ -243,7 +243,11 @@ export default function OrderForm({ onSubmitted }: { onSubmitted: () => void }) 
                 ? "your saved draft was submitted for you."
                 : myOrder.auto_submit_source === "LATEST"
                   ? "your latest previous order was copied and submitted for you."
-                  : "last week's order for the same day was copied and submitted for you."}{" "}
+                  : `your order from the same day ${
+                      myOrder.auto_weeks_back && myOrder.auto_weeks_back > 1
+                        ? `${myOrder.auto_weeks_back} weeks earlier`
+                        : "last week"
+                    } was copied and submitted for you.`}{" "}
               Contact SPAR Fresh Procurement if anything needs to change.
             </p>
           </>

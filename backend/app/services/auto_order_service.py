@@ -8,17 +8,25 @@ for it, so a forgotten order never means an empty delivery:
 - If the branch saved a DRAFT but never pressed Submit, that draft is
   submitted as-is — it's the branch's own, most recent intent, and far
   closer to what they want than a week-old copy.
-- Otherwise, the branch's order from the same weekday last week
-  (order_date - 7) is copied line for line (ordered quantities; products
-  since deactivated are dropped).
-- Nothing last week -> the branch's most recent submitted order before
-  today is copied instead (same rules).
-- No draft and no previous order at all -> nothing to copy. A
-  MissedOrderNotice is recorded instead, so Admin is told the branch has
-  no order (and can add items for it from the order matrix).
+- Otherwise the weekly fallback: the branch's own order from the same
+  weekday one week back (order_date - 7), then two weeks back
+  (order_date - 14), and so on, up to settings.AUTO_SUBMIT_LOOKBACK_WEEKS.
+  The first eligible one wins — never an older order over a more recent
+  one, and never a different weekday or a different branch. Its product
+  lines and ordered quantities are copied (products since deactivated
+  are dropped); the new order gets today's own delivery date, never the
+  historical one.
+- Nothing eligible in the lookback window -> nothing is created. A
+  MissedOrderNotice ("No Previous Order Found") is recorded instead, so
+  Admin is told the branch has no order.
+
+"Eligible" = SUBMITTED/ASSIGNED/CONFIRMED with at least one line for a
+still-active product. Drafts (never sent) and orders with nothing left to
+copy are skipped and the search moves one more week back.
 
 A branch Admin granted a late-submission exception for today is skipped —
-Admin has explicitly given them more time.
+Admin has explicitly given them more time. An order the branch (or Admin)
+already submitted is never touched.
 
 Every auto-submitted order is flagged (Order.auto_submitted) and stays
 "unreviewed" until Admin acknowledges it, which is what drives the badge
@@ -28,6 +36,7 @@ and a no-op before the cutoff or once every branch has an order.
 """
 import logging
 import threading
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 
 from sqlalchemy import text
@@ -42,19 +51,65 @@ from app.models.order import Order, OrderLine
 from app.models.product import Product
 from app.models.user import User
 from app.services import settings_service
-from app.services.order_service import BUSINESS_TZ, _has_deadline_exception, _parse_cutoff
+from app.services.order_service import BUSINESS_TZ, _has_deadline_exception, _parse_cutoff, get_order_window
 
 logger = logging.getLogger(__name__)
 
-SOURCE_LAST_WEEK = "LAST_WEEK"
-SOURCE_LATEST = "LATEST"
+# Stored in Order.auto_submit_source. "LAST_WEEK" is kept as the stored
+# value for the weekly fallback (whichever week back it found) so rows
+# written before the multi-week search existed keep their meaning; see
+# weeks_back() for how far back the source was. "LATEST" only exists on
+# rows from the short-lived any-weekday fallback this replaced.
+SOURCE_PREVIOUS_WEEK = "LAST_WEEK"
+SOURCE_LATEST_LEGACY = "LATEST"
 SOURCE_DRAFT = "DRAFT"
 
-# Arbitrary constant key for pg_try_advisory_xact_lock, so two API
-# processes (e.g. a redeploy overlapping the old container) never run the
-# same pass at once. uq_orders_branch_order_date would still stop a
-# duplicate order, but this avoids the noisy IntegrityError path entirely.
+# Statuses a branch order can be copied from. An allowlist rather than
+# "anything but DRAFT", so a status added later (e.g. cancelled) is never
+# copied by accident.
+ELIGIBLE_SOURCE_STATUSES = ("SUBMITTED", "ASSIGNED", "CONFIRMED")
+
+# Arbitrary constant key for pg_try_advisory_lock, so two API processes
+# (e.g. a redeploy overlapping the old container) never run the same pass
+# at once. uq_orders_branch_order_date would still stop a duplicate order,
+# but this keeps a second pass from even trying.
 _ADVISORY_LOCK_KEY = 725_014_001
+
+
+def fallback_source_dates(order_date: date, max_weeks: int) -> list[date]:
+    """The order dates to try as a source for order_date, most recent first: the same weekday
+    1, 2, ... max_weeks weeks earlier. Plain 7-day steps, so month/year ends and leap days need
+    no special handling."""
+    return [order_date - timedelta(days=7 * n) for n in range(1, max_weeks + 1)]
+
+
+def weeks_back(order: Order, source_order_date: date | None) -> int | None:
+    """How many weeks back the weekly fallback found this order's source (1 = previous week)."""
+    if order.auto_submit_source != SOURCE_PREVIOUS_WEEK or source_order_date is None:
+        return None
+    return (order.order_date - source_order_date).days // 7
+
+
+@contextmanager
+def _single_pass_lock(db: Session):
+    """
+    Yields True if this process may run the pass. Held on its own connection with a session-level
+    advisory lock, so it lasts the whole pass — the pass commits once per branch, and a
+    transaction-scoped lock would be released at the first of those commits.
+    """
+    bind = db.get_bind()
+    if bind.dialect.name != "postgresql":
+        yield True
+        return
+    engine = getattr(bind, "engine", bind)  # a Session bound to a Connection (tests) -> its Engine
+    with engine.connect() as conn:
+        got = conn.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": _ADVISORY_LOCK_KEY}).scalar()
+        try:
+            yield bool(got)
+        finally:
+            if got:
+                conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": _ADVISORY_LOCK_KEY})
+            conn.commit()
 
 
 def auto_submit_missed_orders(db: Session, now: datetime | None = None) -> list[Order]:
@@ -65,72 +120,89 @@ def auto_submit_missed_orders(db: Session, now: datetime | None = None) -> list[
     if now.time() < cutoff:
         return []
 
-    if db.get_bind().dialect.name == "postgresql":
-        got_lock = db.execute(text("SELECT pg_try_advisory_xact_lock(:k)"), {"k": _ADVISORY_LOCK_KEY}).scalar()
+    today = now.date()
+    # The current ordering schedule's delivery date for an order placed today — never the
+    # source order's own (by now long past) delivery date.
+    delivery_date = get_order_window(db, now=now).delivery_date
+    max_weeks = settings.AUTO_SUBMIT_LOOKBACK_WEEKS
+
+    submitted: list[Order] = []
+    with _single_pass_lock(db) as got_lock:
         if not got_lock:
             return []
-
-    today = now.date()
-    submitted: list[Order] = []
-    for branch in db.query(Branch).filter(Branch.status == "ACTIVE").order_by(Branch.id).all():
-        existing = db.query(Order).filter(Order.branch_id == branch.id, Order.order_date == today).first()
-        if existing and existing.status != "DRAFT":
-            continue
-        if _has_deadline_exception(db, branch.id, today):
-            continue
-        order = _submit_from_draft(db, existing) if existing else _submit_from_previous(db, branch, today)
-        if order is None:
-            _record_missed(db, branch, today)
-            continue
-        try:
-            db.commit()
-        except IntegrityError:
-            # The branch (or Admin) created today's order between our lookup and commit — theirs wins.
-            db.rollback()
-            continue
-        db.refresh(order)
-        submitted.append(order)
-        _audit(db, branch, order)
-    db.commit()  # releases the advisory lock when nothing was submitted
+        for branch in db.query(Branch).filter(Branch.status == "ACTIVE").order_by(Branch.id).all():
+            try:
+                order = _process_branch(db, branch, today, delivery_date, max_weeks)
+            except IntegrityError:
+                # The branch (or Admin) created today's order between our lookup and commit —
+                # theirs wins, and nothing from this branch's attempt is kept.
+                db.rollback()
+                continue
+            if order is not None:
+                submitted.append(order)
+    db.commit()
     return submitted
 
 
-def _record_missed(db: Session, branch: Branch, order_date: date) -> None:
-    """Nothing to auto-submit for this branch — leave Admin a notice (once per branch per date)."""
-    exists = (
-        db.query(MissedOrderNotice)
-        .filter(MissedOrderNotice.branch_id == branch.id, MissedOrderNotice.order_date == order_date)
-        .first()
-    )
-    if exists:
-        return
-    db.add(MissedOrderNotice(branch_id=branch.id, order_date=order_date))
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        return
-    write_audit_log(
+def _process_branch(db: Session, branch: Branch, today: date, delivery_date: date, max_weeks: int) -> Order | None:
+    """Handles one branch in its own transaction (the order, its lines and its audit row commit
+    together, via write_audit_log's commit). Returns the order it submitted, if any."""
+    existing = db.query(Order).filter(Order.branch_id == branch.id, Order.order_date == today).first()
+    if existing and existing.status != "DRAFT":
+        return None  # already submitted by the branch or Admin — never touched
+    if _has_deadline_exception(db, branch.id, today):
+        return None
+
+    if existing and _submit_draft(db, existing):
+        order, how, line_count = existing, "the branch's unsent draft", _line_count(db, existing)
+    else:
+        found = _find_fallback_source(db, branch.id, today, max_weeks)
+        if found is None:
+            _record_missed(db, branch, today, max_weeks)
+            return None
+        source, source_lines = found
+        if existing:
+            # A DRAFT with no lines — the source's lines take its place under the same row.
+            db.delete(existing)
+            db.flush()
+        order = _create_from_source(db, branch, today, delivery_date, source, source_lines)
+        line_count = _line_count(db, order)
+        n = (today - source.order_date).days // 7
+        how = (
+            f"the order from {source.order_date.isoformat()} "
+            f"({n} week{'s' if n != 1 else ''} back, same weekday)"
+        )
+
+    write_audit_log(  # commits the order and this row together
         db,
         user_id=None,
         role="SYSTEM",
-        action="ORDER_AUTO_SUBMIT_NOTHING",
-        entity_type="branch",
-        entity_id=branch.id,
+        action="ORDER_AUTO_SUBMITTED",
+        entity_type="order",
+        entity_id=order.id,
         description=(
-            f"'{branch.branch_name}' submitted nothing by the cutoff on {order_date.isoformat()} and had no "
-            "draft or previous order to copy — no order was submitted."
+            f"'{branch.branch_name}' submitted nothing by the cutoff — auto-submitted {how}, "
+            f"{line_count} product(s), order date {today.isoformat()}, "
+            f"delivery {order.delivery_date.isoformat()}."
         ),
     )
+    db.refresh(order)
+    return order
 
 
-def _submit_from_draft(db: Session, draft: Order) -> Order | None:
-    if not db.query(OrderLine).filter(OrderLine.order_id == draft.id).count():
-        return None
+def _line_count(db: Session, order: Order) -> int:
+    return db.query(OrderLine).filter(OrderLine.order_id == order.id).count()
+
+
+def _submit_draft(db: Session, draft: Order) -> bool:
+    """Submits the branch's own unsent draft as-is. False if it has no lines to submit."""
+    if not _line_count(db, draft):
+        return False
     draft.status = "SUBMITTED"
     draft.auto_submitted = True
     draft.auto_submit_source = SOURCE_DRAFT
-    return draft
+    db.flush()
+    return True
 
 
 def _active_lines(db: Session, order: Order) -> list[OrderLine]:
@@ -138,29 +210,45 @@ def _active_lines(db: Session, order: Order) -> list[OrderLine]:
         db.query(OrderLine)
         .join(Product, Product.id == OrderLine.product_id)
         .filter(OrderLine.order_id == order.id, Product.status == "ACTIVE")
+        .order_by(OrderLine.id)
         .all()
     )
 
 
-def _submit_from_previous(db: Session, branch: Branch, today: date) -> Order | None:
-    """Copies the same weekday's order from last week, or failing that the branch's most recent
-    submitted order before today. An order whose products have all since been deactivated
-    doesn't count — the search moves on to the next most recent one."""
-    submitted = db.query(Order).filter(Order.branch_id == branch.id, Order.status != "DRAFT")
-    source_kind = SOURCE_LAST_WEEK
-    source = submitted.filter(Order.order_date == today - timedelta(days=7)).first()
-    source_lines = _active_lines(db, source) if source else []
-    if not source_lines:
-        source_kind = SOURCE_LATEST
-        source = None
-        for candidate in submitted.filter(Order.order_date < today).order_by(Order.order_date.desc()).limit(30):
-            source_lines = _active_lines(db, candidate)
-            if source_lines:
-                source = candidate
-                break
-    if not source:
-        return None
+def _find_fallback_source(
+    db: Session, branch_id: int, order_date: date, max_weeks: int
+) -> tuple[Order, list[OrderLine]] | None:
+    """The weekly fallback: this branch's eligible order on the same weekday 1, 2, ... max_weeks
+    weeks back — the most recent one found wins. Returns it with the lines to copy, or None."""
+    candidates = fallback_source_dates(order_date, max_weeks)
+    by_date = {
+        o.order_date: o
+        for o in db.query(Order)
+        .filter(
+            Order.branch_id == branch_id,
+            Order.order_date.in_(candidates),
+            Order.status.in_(ELIGIBLE_SOURCE_STATUSES),
+        )
+        .all()
+    }
+    for candidate in candidates:  # most recent first — never skip a newer eligible order
+        source = by_date.get(candidate)
+        if source is None:
+            continue
+        lines = _active_lines(db, source)
+        if lines:
+            return source, lines
+    return None
 
+
+def _create_from_source(
+    db: Session,
+    branch: Branch,
+    today: date,
+    delivery_date: date,
+    source: Order,
+    source_lines: list[OrderLine],
+) -> Order:
     # submitted_by is NOT NULL — attribute it to the branch's own account (the order is on their
     # behalf); the auto_submitted flag is what tells everyone the system actually placed it.
     branch_user = (
@@ -170,46 +258,57 @@ def _submit_from_previous(db: Session, branch: Branch, today: date) -> Order | N
         branch_id=branch.id,
         submitted_by=branch_user.id if branch_user else source.submitted_by,
         order_date=today,
-        delivery_date=today + timedelta(days=2),
+        delivery_date=delivery_date,
         status="SUBMITTED",
         notes=source.notes,
         auto_submitted=True,
-        auto_submit_source=source_kind,
+        auto_submit_source=SOURCE_PREVIOUS_WEEK,
         auto_source_order_id=source.id,
     )
     db.add(order)
-    db.flush()
+    db.flush()  # raises IntegrityError right here if today's order appeared meanwhile
+
+    # One line per product. A valid order never repeats a product, but a legacy row might; its
+    # quantities are summed, the same way the order matrix already totals them.
+    merged: dict[int, OrderLine] = {}
     for ln in source_lines:
-        db.add(
-            OrderLine(
-                order_id=order.id,
-                product_id=ln.product_id,
-                quantity=ln.quantity,
-                unit_code=ln.unit_code,
-                notes=ln.notes,
-            )
+        if ln.product_id in merged:
+            merged[ln.product_id].quantity = float(merged[ln.product_id].quantity) + float(ln.quantity)
+            continue
+        merged[ln.product_id] = OrderLine(
+            order_id=order.id,
+            product_id=ln.product_id,
+            quantity=ln.quantity,
+            unit_code=ln.unit_code,
+            notes=ln.notes,
         )
+    db.add_all(merged.values())
+    db.flush()
     return order
 
 
-def _audit(db: Session, branch: Branch, order: Order) -> None:
-    line_count = db.query(OrderLine).filter(OrderLine.order_id == order.id).count()
-    if order.auto_submit_source == SOURCE_DRAFT:
-        how = "the branch's unsent draft"
-    else:
-        source = db.get(Order, order.auto_source_order_id) if order.auto_source_order_id else None
-        which = "last week's order" if order.auto_submit_source == SOURCE_LAST_WEEK else "the latest previous order"
-        how = f"{which} ({source.order_date.isoformat()})" if source else which
-    write_audit_log(
+def _record_missed(db: Session, branch: Branch, order_date: date, max_weeks: int) -> None:
+    """Nothing to auto-submit for this branch — leave Admin a notice (once per branch per date)."""
+    exists = (
+        db.query(MissedOrderNotice)
+        .filter(MissedOrderNotice.branch_id == branch.id, MissedOrderNotice.order_date == order_date)
+        .first()
+    )
+    if exists:
+        return
+    db.add(MissedOrderNotice(branch_id=branch.id, order_date=order_date))
+    db.flush()  # IntegrityError here if another pass recorded it first — handled by the caller
+    write_audit_log(  # commits the notice and this row together
         db,
         user_id=None,
         role="SYSTEM",
-        action="ORDER_AUTO_SUBMITTED",
-        entity_type="order",
-        entity_id=order.id,
+        action="ORDER_AUTO_SUBMIT_NOTHING",
+        entity_type="branch",
+        entity_id=branch.id,
         description=(
-            f"'{branch.branch_name}' submitted nothing by the cutoff — auto-submitted {how}, "
-            f"{line_count} line(s), delivery {order.delivery_date.isoformat()}."
+            f"'{branch.branch_name}' submitted nothing by the cutoff on {order_date.isoformat()} — "
+            f"No Previous Order Found (no eligible order on the same weekday in the last {max_weeks} "
+            "weeks). No order was submitted."
         ),
     )
 

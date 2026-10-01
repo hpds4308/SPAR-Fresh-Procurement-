@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from datetime import date, timedelta
 import io
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.errors import ValidationFailedError
 from app.core.security import get_current_user, get_user_roles, require_roles
@@ -37,10 +38,12 @@ router = APIRouter(prefix="/orders", dependencies=[Depends(get_current_user)])
 def _auto_fields(db: Session, order) -> dict:
     """The auto-submit flags shared by OrderOut and OrderSummary (see Order.auto_submitted)."""
     source = db.get(Order, order.auto_source_order_id) if order.auto_source_order_id else None
+    source_date = source.order_date if source else None
     return {
         "auto_submitted": order.auto_submitted,
         "auto_submit_source": order.auto_submit_source,
-        "auto_source_order_date": source.order_date if source else None,
+        "auto_source_order_date": source_date,
+        "auto_weeks_back": auto_order_service.weeks_back(order, source_date),
         "auto_reviewed": order.auto_reviewed_at is not None,
     }
 
@@ -129,8 +132,9 @@ def list_unreviewed_auto_submitted(
                 branch_name=branch.branch_name if branch else "—",
                 order_date=o.order_date,
                 delivery_date=o.delivery_date,
-                auto_submit_source=o.auto_submit_source or auto_order_service.SOURCE_LAST_WEEK,
+                auto_submit_source=o.auto_submit_source or auto_order_service.SOURCE_PREVIOUS_WEEK,
                 auto_source_order_date=fields["auto_source_order_date"],
+                auto_weeks_back=fields["auto_weeks_back"],
                 line_count=db.query(OrderLine).filter(OrderLine.order_id == o.id).count(),
             )
         )
@@ -146,7 +150,7 @@ def list_unreviewed_auto_submitted(
                 delivery_date=n.order_date + timedelta(days=2),
             )
         )
-    return AutoSubmitAttentionOut(orders=result, missed=missed)
+    return AutoSubmitAttentionOut(orders=result, missed=missed, lookback_weeks=settings.AUTO_SUBMIT_LOOKBACK_WEEKS)
 
 
 @router.post("/admin/auto-submitted/review")

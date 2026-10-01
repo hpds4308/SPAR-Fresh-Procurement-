@@ -59,6 +59,8 @@ class OrderOut(BaseModel):
     auto_submitted: bool = False
     auto_submit_source: str | None = None  # "LAST_WEEK" | "LATEST" | "DRAFT"
     auto_source_order_date: date | None = None
+    # Weekly fallback only: how many weeks back the source order was (1 = previous week).
+    auto_weeks_back: int | None = None
     auto_reviewed: bool = False
     lines: list[OrderLineOut]
 
@@ -81,6 +83,8 @@ class OrderSummary(BaseModel):
     auto_submitted: bool = False
     auto_submit_source: str | None = None
     auto_source_order_date: date | None = None
+    # Weekly fallback only: how many weeks back the source order was (1 = previous week).
+    auto_weeks_back: int | None = None
     auto_reviewed: bool = False
 
     class Config:
@@ -104,6 +108,8 @@ class MatrixBranchColumn(BaseModel):
     auto_submitted: bool = False
     auto_submit_source: str | None = None
     auto_source_order_date: date | None = None
+    # Weekly fallback only: how many weeks back the source order was (1 = previous week).
+    auto_weeks_back: int | None = None
     auto_reviewed: bool = False
     # Missed the cutoff with nothing to auto-submit (see MissedOrderNotice) — no order for this date.
     no_order: bool = False
@@ -238,11 +244,14 @@ class AutoSubmittedOrderOut(BaseModel):
     delivery_date: date
     auto_submit_source: str
     auto_source_order_date: date | None = None
+    # Weekly fallback only: how many weeks back the source order was (1 = previous week).
+    auto_weeks_back: int | None = None
     line_count: int
 
 
 class MissedOrderNoticeOut(BaseModel):
-    """A branch that missed the cutoff with nothing to auto-submit (no draft, no previous order)."""
+    """A branch that missed the cutoff with nothing to auto-submit — "No Previous Order Found"
+    (no draft, and no eligible order on the same weekday within the lookback window)."""
 
     notice_id: int
     branch_id: int
@@ -256,6 +265,7 @@ class AutoSubmitAttentionOut(BaseModel):
 
     orders: list[AutoSubmittedOrderOut]
     missed: list[MissedOrderNoticeOut]
+    lookback_weeks: int  # how many weeks back (same weekday) the job searches before giving up
 
 
 class AutoSubmittedReviewRequest(BaseModel):

@@ -61,12 +61,14 @@ export type Order = {
   confirmed_at: string | null;
   confirmed_by_username: string | null;
   // Set when the branch submitted nothing by the cutoff and the system
-  // submitted this order for them: "LAST_WEEK" = copied from the same
-  // weekday's order a week earlier, "LATEST" = no order last week, so the
-  // most recent earlier one, "DRAFT" = the branch's unsent draft.
+  // submitted this order for them: "LAST_WEEK" = copied from the branch's
+  // own order on the same weekday, auto_weeks_back weeks earlier (1 = the
+  // previous week); "DRAFT" = the branch's unsent draft. "LATEST" only
+  // appears on orders from the earlier any-weekday fallback.
   auto_submitted: boolean;
   auto_submit_source: "LAST_WEEK" | "LATEST" | "DRAFT" | null;
   auto_source_order_date: string | null;
+  auto_weeks_back: number | null;
   auto_reviewed: boolean;
   lines: OrderLine[];
 };
@@ -83,6 +85,7 @@ export type OrderSummary = {
   auto_submitted: boolean;
   auto_submit_source: "LAST_WEEK" | "LATEST" | "DRAFT" | null;
   auto_source_order_date: string | null;
+  auto_weeks_back: number | null;
   auto_reviewed: boolean;
 };
 
@@ -129,6 +132,7 @@ export type MatrixBranchColumn = {
   auto_submitted: boolean;
   auto_submit_source: "LAST_WEEK" | "LATEST" | "DRAFT" | null;
   auto_source_order_date: string | null;
+  auto_weeks_back: number | null;
   auto_reviewed: boolean;
   // Missed the cutoff with nothing to auto-submit — no order for this date.
   no_order: boolean;
@@ -155,21 +159,40 @@ export function fetchOrderMatrix(deliveryDate?: string): Promise<OrderMatrix> {
   return apiFetch(`/orders/admin/matrix${qs}`);
 }
 
-// One-line explanation of where an auto-submitted order came from.
-export function autoSubmitDescription(o: {
+type AutoSource = {
   auto_submit_source: "LAST_WEEK" | "LATEST" | "DRAFT" | null;
   auto_source_order_date: string | null;
-}): string {
+  auto_weeks_back: number | null;
+};
+
+function shortDate(iso: string): string {
+  return new Date(iso + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+}
+
+// "1 week back" / "3 weeks back" — which week the weekly fallback used.
+export function weeksBackLabel(weeks: number | null): string | null {
+  if (!weeks) return null;
+  return weeks === 1 ? "previous week" : `${weeks} weeks back`;
+}
+
+// Short label that marks an order as system-submitted, never by the branch.
+export function autoSubmitLabel(o: AutoSource): string {
+  if (o.auto_submit_source === "DRAFT") return "Auto-Submitted — Unsent Draft";
+  if (o.auto_submit_source === "LATEST") return "Auto-Submitted — Latest Previous Order";
+  return "Auto-Submitted — Previous Week's Order";
+}
+
+// One-line explanation of where an auto-submitted order came from.
+export function autoSubmitDescription(o: AutoSource): string {
   if (o.auto_submit_source === "DRAFT") return "Not submitted by the cutoff — the unsent draft was submitted automatically.";
-  const from = o.auto_source_order_date
-    ? new Date(o.auto_source_order_date + "T00:00:00").toLocaleDateString(undefined, {
-        weekday: "short",
-        day: "numeric",
-        month: "short",
-      })
-    : "earlier";
-  const which = o.auto_submit_source === "LATEST" ? "latest previous order" : "same day last week's order";
-  return `Not submitted by the cutoff — copied automatically from the ${which} (placed ${from}).`;
+  const from = o.auto_source_order_date ? shortDate(o.auto_source_order_date) : "an earlier date";
+  if (o.auto_submit_source === "LATEST") {
+    return `Not submitted by the cutoff — copied automatically from the latest previous order (placed ${from}).`;
+  }
+  const week = weeksBackLabel(o.auto_weeks_back);
+  return `Not submitted by the cutoff — copied automatically from the same-weekday order placed ${from}${
+    week ? ` (${week})` : ""
+  }.`;
 }
 
 export type AutoSubmittedOrder = {
@@ -180,11 +203,13 @@ export type AutoSubmittedOrder = {
   delivery_date: string;
   auto_submit_source: "LAST_WEEK" | "LATEST" | "DRAFT";
   auto_source_order_date: string | null;
+  auto_weeks_back: number | null;
   line_count: number;
 };
 
-// A branch that missed the cutoff with nothing to auto-submit (no draft and
-// no previous order to copy), and still has no order for that date.
+// "No Previous Order Found": a branch that missed the cutoff with nothing to
+// auto-submit (no draft, and no order on the same weekday within the
+// lookback window), and still has no order for that date.
 export type MissedOrderNotice = {
   notice_id: number;
   branch_id: number;
@@ -196,6 +221,7 @@ export type MissedOrderNotice = {
 export type AutoSubmitAttention = {
   orders: AutoSubmittedOrder[];
   missed: MissedOrderNotice[];
+  lookback_weeks: number;
 };
 
 // Everything from the auto-submit job Admin hasn't dealt with yet: orders
