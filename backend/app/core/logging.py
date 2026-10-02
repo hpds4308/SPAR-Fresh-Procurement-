@@ -16,3 +16,6 @@ def configure_logging() -> None:
     )
     # Quiet noisy third-party loggers
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+    # pdfplumber's PDF parser logs every token it reads at DEBUG — reading
+    # one HARTI bulletin took minutes and flooded the log in development.
+    logging.getLogger("pdfminer").setLevel(logging.WARNING)

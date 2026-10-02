@@ -18,6 +18,7 @@ from app.models.supplier_order import SupplierOrderItem  # noqa: F401
 from app.models.purchase_order import PurchaseOrder  # noqa: F401
 from app.models.message import Message  # noqa: F401
 from app.models.market_reference_price import MarketReferencePrice  # noqa: F401
+from app.models.local_market_price import LocalMarketPrice  # noqa: F401
 from app.models.safety_stock import BranchSafetyStock  # noqa: F401
 from app.models.promotion import PromotionType, ProductPromotion  # noqa: F401
 from app.models.system import SystemSetting, AuditLog  # noqa: F401

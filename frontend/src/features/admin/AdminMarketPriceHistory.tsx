@@ -15,13 +15,22 @@ const RANGE_PRESETS = [
   { label: "30 days", days: 30 },
 ];
 
+// Local calendar date, not toISOString() — that converts to UTC, which in
+// Sri Lanka (UTC+5:30) turns local midnight into the previous day and
+// shifted every column back one, dropping today's prices off the end.
+function localISO(d: Date): string {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
 function todayISO(): string {
-  return new Date().toISOString().slice(0, 10);
+  return localISO(new Date());
 }
 function daysAgoISO(n: number): string {
   const d = new Date();
   d.setDate(d.getDate() - n);
-  return d.toISOString().slice(0, 10);
+  return localISO(d);
 }
 function formatShort(iso: string): string {
   const d = new Date(iso + "T00:00:00");
@@ -71,7 +80,7 @@ export default function AdminMarketPriceHistory() {
     const d = new Date(startDate + "T00:00:00");
     const end = new Date(endDate + "T00:00:00");
     while (d <= end) {
-      out.push(d.toISOString().slice(0, 10));
+      out.push(localISO(d));
       d.setDate(d.getDate() + 1);
     }
     return out;
@@ -172,7 +181,7 @@ export default function AdminMarketPriceHistory() {
           <EmptyState
             icon={<IconChart width={20} height={20} />}
             title="No prices recorded in this range"
-            description="Enter prices from the Keells Prices or Local Market Prices page — they'll show up here as a trend."
+            description="Sync prices on the Keells Prices or Local Market Prices page (Local Market shows each bulletin's final average) — they'll show up here as a trend."
           />
         ) : (
           <div className="overflow-x-auto">

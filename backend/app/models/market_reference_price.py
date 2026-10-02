@@ -15,10 +15,11 @@ class MarketReferencePrice(Base):
     reads or depends on this table — it's a pure reference, never used
     in any calculation, order, or price comparison logic.
 
-    `source` distinguishes where a row came from: "KEELLS" is entered by
-    hand (competitor retail pricing); "LOCAL_MARKET" is populated by the
-    daily wholesale-market auto-import (see harti_import_service.py),
-    which merges HARTI/Dambulla/Keppetipola/CBSL/GoviSaviya data.
+    `source` distinguishes where a row came from: "KEELLS" is the Keells
+    retail-price sync (see keells_scrape_service.py); "LOCAL_MARKET" is
+    the final four-market average from each HARTI daily bulletin (see
+    harti_import_service.py — the per-market detail behind it lives in
+    local_market_prices), keyed by the bulletin's report date.
     """
 
     __tablename__ = "market_reference_prices"

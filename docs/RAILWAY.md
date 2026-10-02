@@ -125,8 +125,11 @@ the `*.up.railway.app` ones, and redeploy both services.
   railway run --service Postgres pg_dump -Fc "$DATABASE_URL" > backup.dump
   ```
 - **`harti-price-import`** (the daily local-market-price import) isn't
-  deployed by the steps above — it's optional and informational-only. To
-  add it: **+ New** → **GitHub Repo** → this repo, **Root Directory**:
+  deployed by the steps above — it's optional and informational-only.
+  Without it, Admin can still pull the newest HARTI bulletin with "Fetch
+  latest from HARTI" (or upload the PDF) on the Local Market Prices tab,
+  which runs the same import from the backend service itself. To add
+  the scheduled version: **+ New** → **GitHub Repo** → this repo, **Root Directory**:
   `backend`, same `DATABASE_URL`/`APP_ENV` variables as the backend
   service, and **Settings → Deploy → Custom Start Command**:
   `python -m scripts.import_harti_prices`. No public domain needed for
