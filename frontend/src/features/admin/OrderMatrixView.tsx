@@ -179,7 +179,7 @@ export default function OrderMatrixView({
     <div className="bg-white rounded-2xl shadow-[0_10px_30px_-12px_rgba(21,56,38,0.15)] border border-sage-100 overflow-hidden">
       <div className="p-4 border-b border-sage-100 flex flex-wrap items-center gap-3 justify-between">
         <div className="flex flex-wrap items-center gap-3">
-          <label className="text-sm text-crate-800/70">Order Date</label>
+          <label className="text-sm text-crate-800/70">Delivery Date</label>
           <select
             value={selectedDate}
             onChange={(e) => setSelectedDate(e.target.value)}

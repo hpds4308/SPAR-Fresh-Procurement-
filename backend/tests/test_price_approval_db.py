@@ -325,6 +325,35 @@ def test_approve_endpoint_end_to_end(client, db_session, ctx, auth_headers):
     assert client.get("/api/v1/price-approvals/admin", headers=supplier_h).status_code == 403
 
 
+def test_approve_needs_only_tick_and_signature(client, db_session, ctx, auth_headers):
+    """No typed name or password: the agreement tick and drawn signature are enough."""
+    _adjust_all(db_session, ctx)
+    rev = _send(db_session, ctx)
+    resp = client.post(
+        f"/api/v1/price-approvals/mine/{rev.id}/approve",
+        headers=auth_headers(ctx["supplier_user"]),
+        json={"snapshot_hash": rev.snapshot_hash, "signature_image": SIGNATURE, "agreed": True},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["status"] == "APPROVED"
+    assert body["signer_name"] is None
+    assert body["signature_image"] == SIGNATURE
+
+
+def test_approve_still_requires_a_drawn_signature(client, db_session, ctx, auth_headers):
+    _adjust_all(db_session, ctx)
+    rev = _send(db_session, ctx)
+    resp = client.post(
+        f"/api/v1/price-approvals/mine/{rev.id}/approve",
+        headers=auth_headers(ctx["supplier_user"]),
+        json={"snapshot_hash": rev.snapshot_hash, "signature_image": "", "agreed": True},
+    )
+    assert resp.status_code in (400, 422), resp.text
+    db_session.refresh(rev)
+    assert rev.status == svc.PENDING
+
+
 def test_approve_requires_agreement_tick(client, db_session, ctx, auth_headers):
     _adjust_all(db_session, ctx)
     rev = _send(db_session, ctx)

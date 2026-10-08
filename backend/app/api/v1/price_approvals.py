@@ -108,7 +108,7 @@ def my_approve(
     current_user: User = Depends(require_roles("SUPPLIER")),
     db: Session = Depends(get_db),
 ):
-    """E-sign: typed name + drawn signature + password re-entry, against the exact sheet the supplier saw."""
+    """E-sign: agreement tick + drawn signature, against the exact sheet the supplier saw."""
     rev = svc.approve(
         db,
         current_user,

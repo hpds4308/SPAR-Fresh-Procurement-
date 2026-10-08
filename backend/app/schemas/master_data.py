@@ -32,6 +32,10 @@ class MasterDataRowOut(BaseModel):
     target_gp_percent: float  # e.g. 0.30 = 30%; defaults to 0.30 until Admin overrides
     selling_price: float | None
     computed_gp_percent: float | None  # (selling_price - cost_price) / selling_price, live-derived
+    # Most recent Keells retail price for this product (any date) and the
+    # date it was recorded for — a read-only reference, edited on Keells Prices.
+    keells_price: float | None = None
+    keells_price_date: date | None = None
     cost_price: float | None  # Highest current price among suppliers who've quoted this — never manually set
     # Which supplier's quote is currently winning Cost Price, and the delivery
     # date they submitted it for — None whenever cost_price itself is None.

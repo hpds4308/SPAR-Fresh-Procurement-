@@ -208,7 +208,7 @@ def admin_supplier_price_preview(
     admin: User = Depends(require_roles("ADMIN")),
     db: Session = Depends(get_db),
 ):
-    """This supplier's resolved price for every product they've ever quoted — shown as a reference
+    """This supplier's resolved prices from their last submitted price list — shown as a reference
     column on the Order Builder while Admin is still deciding quantities, before saving any lines."""
     resolved = supplier_order_service.get_supplier_price_preview(db, supplier_id, delivery_date)
     return [

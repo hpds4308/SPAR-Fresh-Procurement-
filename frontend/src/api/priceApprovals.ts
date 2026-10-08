@@ -93,7 +93,7 @@ export function fetchMyPendingCount(): Promise<{ count: number }> {
 
 export function approveSheet(
   id: number,
-  body: { snapshot_hash: string; signer_name: string; signature_image: string; password: string; agreed: boolean }
+  body: { snapshot_hash: string; signature_image: string; agreed: boolean }
 ): Promise<PriceSheet> {
   return apiFetch(`/price-approvals/mine/${id}/approve`, { method: "POST", body: JSON.stringify(body) });
 }

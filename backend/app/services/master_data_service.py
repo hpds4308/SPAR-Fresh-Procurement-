@@ -3,8 +3,8 @@ Master Data Sheet: one row per product, combining Admin's own margin
 reference fields (target GP%, selling price) with a live view of every
 active supplier's most recent Adjusted Price — mirrors the client's
 existing spreadsheet workflow (Category / POS code / Description /
-Target GP% / Selling / GP% / Cost Price / one column per supplier's
-Adjusted CP).
+Target GP% / Selling / GP% / Keells Price / Cost Price / one column per
+supplier's Adjusted CP).
 
 Field ownership:
 - selling_price: set manually by Admin here.
@@ -18,6 +18,8 @@ Field ownership:
   recent SUBMITTED prices (never their Adjusted Price — see
   _latest_prices below for why that's a deliberate, separate figure).
   Computed live, never stored.
+- keells_price: NOT editable — the most recent Keells retail price for
+  the product, any date. Read-only mirror of Keells Prices.
 - Supplier Adjusted CP columns: read-only mirror of Supplier Prices,
   showing Admin's Adjusted Price where the supplier has approved it. Edit there, not
   here — there is exactly one place a supplier's price can be changed,
@@ -31,7 +33,7 @@ from app.core.errors import NotFoundError
 from app.models.pricing import SupplierPrice
 from app.models.product import Product, ProductCategory
 from app.models.supplier import Supplier
-from app.services import price_approval_service
+from app.services import price_approval_service, pricing_service
 from app.schemas.master_data import (
     MasterDataRowOut,
     MasterDataSheetOut,
@@ -92,6 +94,7 @@ def get_master_data_sheet(db: Session) -> MasterDataSheetOut:
         .all()
     )
     latest_prices, latest_submitted = _latest_prices(db)
+    keells = {r.product_id: r for r in pricing_service.get_last_reference_prices(db, "KEELLS")}
 
     rows = []
     for p in products:
@@ -118,6 +121,8 @@ def get_master_data_sheet(db: Session) -> MasterDataSheetOut:
         # Target GP% defaults to 30% for every product until Admin overrides it.
         target_gp = float(p.target_gp_percent) if p.target_gp_percent is not None else 0.30
 
+        keells_row = keells.get(p.id)
+
         rows.append(
             MasterDataRowOut(
                 product_id=p.id,
@@ -128,6 +133,8 @@ def get_master_data_sheet(db: Session) -> MasterDataSheetOut:
                 target_gp_percent=target_gp,
                 selling_price=selling_price,
                 computed_gp_percent=computed_gp,
+                keells_price=float(keells_row.price) if keells_row else None,
+                keells_price_date=keells_row.delivery_date if keells_row else None,
                 cost_price=cost_price,
                 cost_price_supplier_name=cost_price_supplier_name,
                 cost_price_date=cost_price_date,
@@ -213,6 +220,7 @@ def build_master_data_excel(db: Session) -> bytes:
         "Target GP%",
         "Selling Price",
         "GP% After Selling Price Change",
+        "Keells Price",
         "Cost Price",
     ] + [s.supplier_name for s in sheet.suppliers]
     ws.append(header)
@@ -232,6 +240,7 @@ def build_master_data_excel(db: Session) -> bytes:
             row.target_gp_percent,
             row.selling_price,
             row.computed_gp_percent,
+            row.keells_price,
             row.cost_price,
         ] + [row.supplier_prices.get(s.supplier_id) for s in sheet.suppliers]
         ws.append(values)
@@ -244,12 +253,12 @@ def build_master_data_excel(db: Session) -> bytes:
             cell = ws.cell(row=r, column=col)
             if cell.value is not None:
                 cell.number_format = "0.0%"
-        for col in (6, 8) + tuple(range(9, 9 + len(sheet.suppliers))):
+        for col in (6, 8, 9) + tuple(range(10, 10 + len(sheet.suppliers))):
             cell = ws.cell(row=r, column=col)
             if cell.value is not None:
                 cell.number_format = '"Rs. "#,##0.00'
 
-    widths = [12, 16, 12, 32, 11, 12, 14, 11] + [16] * len(sheet.suppliers)
+    widths = [12, 16, 12, 32, 11, 12, 14, 12, 11] + [16] * len(sheet.suppliers)
     for i, width in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = width
     ws.freeze_panes = "E2"

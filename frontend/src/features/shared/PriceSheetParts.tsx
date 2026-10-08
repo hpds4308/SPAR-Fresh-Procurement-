@@ -150,7 +150,7 @@ export function SignatureRecord({ sheet }: { sheet: PriceSheet }) {
         )}
         <dl className="text-sm grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
           <dt className="text-crate-800/50">Signed by</dt>
-          <dd className="text-crate-950 font-medium">{sheet.signer_name}</dd>
+          <dd className="text-crate-950 font-medium">{sheet.signer_name ?? sheet.responded_by_name ?? "—"}</dd>
           <dt className="text-crate-800/50">Account</dt>
           <dd className="text-crate-950">{sheet.responded_by_name ?? "—"}</dd>
           <dt className="text-crate-800/50">Signed at</dt>
@@ -190,7 +190,8 @@ export function PriceSheetDocument({ sheet, priceLabel }: { sheet: PriceSheet; p
       <PriceSheetItemsTable items={sheet.items} priceLabel={priceLabel} />
       {sheet.status === "APPROVED" && (
         <p className="text-sm text-crate-800/80">
-          {sheet.signer_name} agreed on behalf of {sheet.supplier_name} to supply the items above at the SPAR prices
+          {sheet.signer_name ? `${sheet.signer_name} agreed on behalf of ${sheet.supplier_name}` : `${sheet.supplier_name} agreed`}{" "}
+          to supply the items above at the SPAR prices
           shown for delivery on {formatLongDate(sheet.delivery_date)}.
         </p>
       )}

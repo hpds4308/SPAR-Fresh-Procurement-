@@ -154,7 +154,7 @@ export default function AdminPriceApprovals({ onChanged }: { onChanged?: () => v
                   <td className="px-4 py-2.5 text-crate-800/60 whitespace-nowrap">{formatDateTime(s.sent_at)}</td>
                   <td className="px-4 py-2.5 text-crate-800/70 min-w-[10rem] max-w-[18rem]">
                     {s.status === "APPROVED" ? (
-                      <>Signed by {s.signer_name}</>
+                      <>Signed by {s.signer_name ?? s.responded_by_name ?? s.supplier_name}</>
                     ) : s.status === "REJECTED" ? (
                       <span className="text-tomato-600 line-clamp-2" title={s.rejection_reason ?? undefined}>
                         {s.rejection_reason}

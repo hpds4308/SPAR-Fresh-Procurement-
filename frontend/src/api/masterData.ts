@@ -14,6 +14,8 @@ export type MasterDataRow = {
   target_gp_percent: number;
   selling_price: number | null;
   computed_gp_percent: number | null;
+  keells_price: number | null;
+  keells_price_date: string | null;
   cost_price: number | null;
   cost_price_supplier_name: string | null;
   cost_price_date: string | null;

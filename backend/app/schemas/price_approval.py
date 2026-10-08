@@ -50,19 +50,21 @@ class ApproveRevisionRequest(BaseModel):
     # The hash of the sheet the supplier was looking at — if Admin changed
     # anything since, approval is refused rather than signing different figures.
     snapshot_hash: str = Field(min_length=64, max_length=64)
-    signer_name: str = Field(min_length=2, max_length=150)
+    # The agreement tick and drawn signature are all a supplier needs to
+    # approve. A typed name and password re-entry are optional — still
+    # recorded / verified when an older client sends them.
+    signer_name: str | None = Field(default=None, max_length=150)
     # PNG data URL from the signature pad.
     signature_image: str = Field(max_length=400_000)
-    password: str = Field(min_length=1, max_length=200)
+    password: str | None = Field(default=None, max_length=200)
     agreed: bool
 
     @field_validator("signer_name")
     @classmethod
-    def strip_name(cls, v: str) -> str:
-        v = " ".join(v.split())
-        if len(v) < 2:
-            raise ValueError("Type your full name.")
-        return v
+    def strip_name(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        return " ".join(v.split()) or None
 
     @field_validator("agreed")
     @classmethod

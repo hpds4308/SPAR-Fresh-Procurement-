@@ -266,3 +266,44 @@ def test_line_total_uses_quantity_times_effective_price(
         ),
     )
     assert result.items[0].line_total == 100.0  # 4 * 25
+
+
+def test_price_preview_shows_only_the_last_submitted_list(db_session, make_supplier, make_product, make_user):
+    """The Order Builder's Supplier Price column lists only the supplier's most recent
+    price list on or before the order's delivery date — not every item they ever quoted."""
+    from app.models.pricing import SupplierPrice
+
+    supplier = make_supplier()
+    supplier_user = make_user(role="SUPPLIER", supplier=supplier)
+    old_only, both, future_only = make_product(), make_product(), make_product()
+    older, latest, later = DELIVERY_DATE - timedelta(days=4), DELIVERY_DATE - timedelta(days=2), DELIVERY_DATE + timedelta(days=2)
+    for product, day, price in [
+        (old_only, older, 10),
+        (both, older, 20),
+        (both, latest, 25),
+        (future_only, later, 30),
+    ]:
+        db_session.add(
+            SupplierPrice(
+                supplier_id=supplier.id,
+                product_id=product.id,
+                delivery_date=day,
+                price=price,
+                unit_code="KG",
+                submitted_by=supplier_user.id,
+            )
+        )
+    db_session.commit()
+
+    preview = supplier_order_service.get_supplier_price_preview(db_session, supplier.id, DELIVERY_DATE)
+    assert set(preview) == {both.id}
+    assert preview[both.id].price == 25
+    assert preview[both.id].as_of == latest
+    assert preview[both.id].is_estimated is True
+
+    # Nothing on or before the date -> their latest list at all.
+    early = supplier_order_service.get_supplier_price_preview(db_session, supplier.id, older - timedelta(days=1))
+    assert set(early) == {future_only.id}
+
+    exact = supplier_order_service.get_supplier_price_preview(db_session, supplier.id, latest)
+    assert set(exact) == {both.id} and exact[both.id].is_estimated is False

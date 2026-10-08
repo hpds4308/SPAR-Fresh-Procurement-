@@ -133,22 +133,28 @@ def get_assigned_quantities_by_branch(
 
 def get_supplier_price_preview(db: Session, supplier_id: int, delivery_date: date) -> dict[int, "_ResolvedPrice"]:
     """
-    Every product this supplier has ANY known price for (submitted or
-    Admin-adjusted, any date) — powers a live "Supplier Price" reference
-    column on the Order Builder so Admin can see what this supplier
-    charges while still deciding quantities, before any order line is
-    saved. Uses the exact same resolution rule as a saved line's
-    effective_price (see _resolve_prices below), just run across the
-    supplier's whole catalogue instead of one specific set of products.
+    This supplier's last submitted price list — the most recent delivery
+    date they quoted for, up to and including `delivery_date` (or their
+    latest list at all, if every quote is for a later date). Powers the
+    "Supplier Price" reference column on the Order Builder so Admin sees
+    only what the supplier last quoted, not every item they ever priced.
+    Each price is resolved the same way as a saved line's effective_price
+    (sent Adjusted Price, else their own quote), and flagged as an
+    estimate when the list is for an earlier date than this order.
     """
-    product_ids = {
-        pid
-        for (pid,) in db.query(SupplierPrice.product_id)
-        .filter(SupplierPrice.supplier_id == supplier_id)
-        .distinct()
+    base = db.query(func.max(SupplierPrice.delivery_date)).filter(SupplierPrice.supplier_id == supplier_id)
+    list_date = base.filter(SupplierPrice.delivery_date <= delivery_date).scalar() or base.scalar()
+    if list_date is None:
+        return {}
+    rows = (
+        db.query(SupplierPrice)
+        .filter(SupplierPrice.supplier_id == supplier_id, SupplierPrice.delivery_date == list_date)
         .all()
+    )
+    return {
+        r.product_id: _ResolvedPrice(_price_from_row(r), is_estimated=list_date != delivery_date, as_of=list_date)
+        for r in rows
     }
-    return _resolve_prices(db, supplier_id, delivery_date, product_ids)
 
 
 class _ResolvedPrice:

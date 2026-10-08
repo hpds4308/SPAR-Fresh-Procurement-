@@ -325,6 +325,10 @@ export default function AdminMasterData() {
               <th className="text-right px-3 py-2.5 whitespace-nowrap">Target GP%</th>
               <th className="text-right px-3 py-2.5 whitespace-nowrap">Selling Price</th>
               <th className="text-right px-3 py-2.5 whitespace-nowrap">GP%</th>
+              <th className="text-right px-3 py-2.5 whitespace-nowrap bg-green-100/60">
+                Keells Price
+                <div className="text-[9px] font-normal normal-case text-crate-800/35">Latest entered</div>
+              </th>
               <th className="text-right px-3 py-2.5 whitespace-nowrap">
                 Cost Price
                 <div className="text-[9px] font-normal normal-case text-crate-800/35">Highest submitted price</div>
@@ -407,6 +411,20 @@ export default function AdminMasterData() {
                       <span className="text-crate-800/20">—</span>
                     )}
                   </td>
+                  <td className="px-3 py-2 text-right text-crate-800/70 whitespace-nowrap bg-green-100/30">
+                    {row.keells_price !== null ? (
+                      <div className="flex flex-col items-end">
+                        <span>Rs. {row.keells_price.toFixed(2)}</span>
+                        {row.keells_price_date && (
+                          <span className="text-[9px] text-crate-800/40 leading-none mt-0.5">
+                            {new Date(row.keells_price_date + "T00:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short" })}
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-crate-800/20">—</span>
+                    )}
+                  </td>
                   <td className="px-3 py-2 text-right text-crate-800/70 whitespace-nowrap">
                     {row.cost_price !== null ? (
                       <div className="flex flex-col items-end">
@@ -441,7 +459,8 @@ export default function AdminMasterData() {
       <p className="text-[11px] text-crate-800/35 px-1">
         POS Code is fixed, sourced from the original uploaded product data — not editable here. Cost Price is
         the highest current SUBMITTED price among suppliers who've quoted an item — not their Adjusted Price —
-        it's computed, not editable. Supplier columns mirror Supplier Prices and are read-only here; edit them
+        it's computed, not editable. Keells Price is the latest price entered on Keells Prices — edit it
+        there. Supplier columns mirror Supplier Prices and are read-only here; edit them
         there. Target GP% defaults to 30% until you set your own.
       </p>
 
@@ -460,7 +479,7 @@ export default function AdminMasterData() {
         onClose={() => setConfirmClearOpen(false)}
         onConfirm={handleClearAll}
         title="Clear all visible rows?"
-        description={`This clears Target GP% and Selling Price for all ${filteredRows.length} currently visible item${filteredRows.length === 1 ? "" : "s"} — Target GP% will fall back to the 30% default. POS Code, Cost Price, and supplier prices are unaffected. This can't be undone.`}
+        description={`This clears Target GP% and Selling Price for all ${filteredRows.length} currently visible item${filteredRows.length === 1 ? "" : "s"} — Target GP% will fall back to the 30% default. POS Code, Keells Price, Cost Price, and supplier prices are unaffected. This can't be undone.`}
         confirmLabel="Clear All"
         danger
         loading={clearing}

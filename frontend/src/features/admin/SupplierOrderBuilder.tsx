@@ -72,10 +72,9 @@ export default function SupplierOrderBuilder({
 
   // Grid quantities, keyed by "productId:branchId".
   const [qty, setQty] = useState<Record<string, string>>({});
-  // Optional per-cell agreed price / notes, same key. Only meaningful for
-  // cells with a quantity.
+  // Per-cell agreed price / notes, same key. No longer editable here — only
+  // carried through from a saved order or "Fill from assignments".
   const [extra, setExtra] = useState<Record<string, ExtraDetail>>({});
-  const [showPricesFor, setShowPricesFor] = useState<Set<string>>(new Set());
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -251,11 +250,6 @@ export default function SupplierOrderBuilder({
     setQty((prev) => ({ ...prev, [key]: value }));
   }
 
-  function setCellDetail(productId: number, branchId: number, field: keyof ExtraDetail, value: string) {
-    const key = cellKey(productId, branchId);
-    setExtra((prev) => ({ ...prev, [key]: { ...(prev[key] ?? { agreed_price: "", notes: "" }), [field]: value } }));
-  }
-
   function fillFromDemand() {
     if (!matrix) return;
     setQty((prev) => {
@@ -300,8 +294,8 @@ export default function SupplierOrderBuilder({
   }
 
   // The tick's other half: clears every branch cell for one item — its
-  // quantities, any agreed price/notes on them, and the open price/notes
-  // panel — without touching any other row.
+  // quantities and any agreed price/notes on them — without touching any
+  // other row.
   function clearRowQty(productId: number) {
     if (!matrix) return;
     setQty((prev) => {
@@ -312,11 +306,6 @@ export default function SupplierOrderBuilder({
     setExtra((prev) => {
       const next = { ...prev };
       for (const b of matrix.branches) delete next[cellKey(productId, b.branch_id)];
-      return next;
-    });
-    setShowPricesFor((prev) => {
-      const next = new Set(prev);
-      for (const b of matrix.branches) next.delete(cellKey(productId, b.branch_id));
       return next;
     });
   }
@@ -530,7 +519,7 @@ export default function SupplierOrderBuilder({
           </div>
         </div>
         <p className="text-xs text-crate-800/40 mt-3">
-          {deliveryDate ? `${formatDate(deliveryDate)}. ` : ""}Pick the supplier and order date first — the
+          {deliveryDate ? `${formatDate(deliveryDate)}. ` : ""}Pick the supplier and delivery date first — the
           order below is saved for that combination.
         </p>
       </div>
@@ -547,7 +536,7 @@ export default function SupplierOrderBuilder({
                 disabled={!supplierId}
                 className="accent-crate-700 disabled:opacity-40"
               />
-              Only items this supplier has priced
+              Only items on this supplier's last price list
             </label>
           <div className="relative">
             <input
@@ -584,9 +573,9 @@ export default function SupplierOrderBuilder({
           <p className="text-sm text-crate-800/40 text-center py-6">No active branches to order for.</p>
         ) : rows.length === 0 && onlyPriced && rowProductIds.length > 0 ? (
           <p className="text-sm text-crate-800/40 text-center py-6">
-            This supplier hasn't priced any of the {rowProductIds.length} item
-            {rowProductIds.length === 1 ? "" : "s"} on this order yet. Uncheck "Only items this supplier has
-            priced" above to see them anyway, or use "+ Add item".
+            None of the {rowProductIds.length} item
+            {rowProductIds.length === 1 ? "" : "s"} on this order are on this supplier's last price list. Uncheck "Only items on this supplier's last
+            price list" above to see them anyway, or use "+ Add item".
           </p>
         ) : rows.length === 0 ? (
           <p className="text-sm text-crate-800/40 text-center py-6">
@@ -727,40 +716,6 @@ export default function SupplierOrderBuilder({
                                 >
                                   adds to their order
                                 </span>
-                              )}
-                              {hasQty && (
-                                <button
-                                  onClick={() =>
-                                    setShowPricesFor((prev) => {
-                                      const next = new Set(prev);
-                                      next.has(key) ? next.delete(key) : next.add(key);
-                                      return next;
-                                    })
-                                  }
-                                  className="text-[10px] text-crate-800/35 hover:text-crate-700 transition-colors duration-150"
-                                >
-                                  {extra[key]?.agreed_price ? `@ Rs.${extra[key].agreed_price}` : "+ price/notes"}
-                                </button>
-                              )}
-                              {hasQty && showPricesFor.has(key) && (
-                                <div className="flex flex-col items-stretch gap-1 pt-1 w-32">
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    step="0.01"
-                                    placeholder="Agreed price"
-                                    value={extra[key]?.agreed_price ?? ""}
-                                    onChange={(e) => setCellDetail(productId, b.branch_id, "agreed_price", e.target.value)}
-                                    className="border border-sage-300 bg-white rounded-lg px-1.5 py-1 text-center text-xs focus:outline-none focus:ring-2 focus:ring-crate-700/30 focus:border-crate-700"
-                                  />
-                                  <input
-                                    type="text"
-                                    placeholder="Notes"
-                                    value={extra[key]?.notes ?? ""}
-                                    onChange={(e) => setCellDetail(productId, b.branch_id, "notes", e.target.value)}
-                                    className="border border-sage-300 bg-white rounded-lg px-1.5 py-1 text-center text-xs focus:outline-none focus:ring-2 focus:ring-crate-700/30 focus:border-crate-700"
-                                  />
-                                </div>
                               )}
                             </div>
                           </td>

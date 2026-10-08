@@ -8,7 +8,6 @@ import {
   fetchMySheets,
   rejectSheet,
 } from "../../api/priceApprovals";
-import { useAuth } from "../auth/AuthContext";
 import EmptyState from "../shared/EmptyState";
 import { IconShield } from "../shared/Icons";
 import {
@@ -221,17 +220,13 @@ function StatusNote({ sheet }: { sheet: PriceSheet }) {
 }
 
 function SignForm({ sheet, onCancel, onDone }: { sheet: PriceSheet; onCancel: () => void; onDone: (s: PriceSheet) => void }) {
-  const { user } = useAuth();
   const padRef = useRef<SignaturePadHandle>(null);
-  const [name, setName] = useState("");
-  const [password, setPassword] = useState("");
   const [agreed, setAgreed] = useState(false);
   const [hasInk, setHasInk] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const trimmedName = name.trim().replace(/\s+/g, " ");
-  const ready = agreed && trimmedName.length >= 2 && hasInk && password.length > 0;
+  const ready = agreed && hasInk;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -242,15 +237,12 @@ function SignForm({ sheet, onCancel, onDone }: { sheet: PriceSheet; onCancel: ()
     try {
       const updated = await approveSheet(sheet.id, {
         snapshot_hash: sheet.snapshot_hash,
-        signer_name: trimmedName,
         signature_image: image,
-        password,
         agreed: true,
       });
       onDone(updated);
     } catch (err) {
       setError(errorText(err, "Could not record your signature. Please try again."));
-      setPassword("");
     } finally {
       setSubmitting(false);
     }
@@ -261,7 +253,7 @@ function SignForm({ sheet, onCancel, onDone }: { sheet: PriceSheet; onCancel: ()
       <div>
         <h3 className="font-display font-semibold text-crate-950">Approve and sign</h3>
         <p className="text-sm text-crate-800/60 mt-1">
-          Your signature, name and the exact prices above are saved together as a record of this agreement.
+          Your signature and the exact prices above are saved together as a record of this agreement.
         </p>
       </div>
 
@@ -280,13 +272,6 @@ function SignForm({ sheet, onCancel, onDone }: { sheet: PriceSheet; onCancel: ()
       </label>
 
       <div>
-        <label className="block text-xs font-semibold text-crate-800/50 uppercase tracking-wide mb-1.5" htmlFor="signer-name">
-          Full name
-        </label>
-        <input id="signer-name" className={input} value={name} onChange={(e) => setName(e.target.value)} maxLength={150} autoComplete="name" />
-      </div>
-
-      <div>
         <div className="flex items-center justify-between mb-1.5">
           <span className="block text-xs font-semibold text-crate-800/50 uppercase tracking-wide">Signature</span>
           <button type="button" onClick={() => padRef.current?.clear()} className="text-xs text-crate-700 hover:underline">
@@ -294,23 +279,6 @@ function SignForm({ sheet, onCancel, onDone }: { sheet: PriceSheet; onCancel: ()
           </button>
         </div>
         <SignaturePad ref={padRef} onChange={setHasInk} />
-      </div>
-
-      <div>
-        <label className="block text-xs font-semibold text-crate-800/50 uppercase tracking-wide mb-1.5" htmlFor="signer-password">
-          Your password
-        </label>
-        <input
-          id="signer-password"
-          type="password"
-          className={input}
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          autoComplete="current-password"
-        />
-        <p className="text-xs text-crate-800/40 mt-1">
-          Confirms it's you ({user?.username}) signing, not someone else using this device.
-        </p>
       </div>
 
       {error && <p className="text-sm text-tomato-600">{error}</p>}

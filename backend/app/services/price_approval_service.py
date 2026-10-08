@@ -7,9 +7,8 @@ Flow (as agreed with the client):
    adjusted price for that supplier and delivery date that isn't already
    agreed goes out together as one price sheet (SupplierPriceRevision), so
    the supplier signs once rather than once per item.
-3. The supplier reviews the sheet and either approves it — typing their
-   name, drawing a signature and re-entering their password — or rejects
-   it with a reason.
+3. The supplier reviews the sheet and either approves it — ticking the
+   agreement and drawing a signature — or rejects it with a reason.
 4. Only an APPROVED adjusted price counts as the agreed price (Master Data
    uses it). If the supplier rejects, or doesn't respond before the
    delivery date arrives, the supplier's own submitted price applies.
@@ -361,16 +360,17 @@ def approve(
     revision_id: int,
     *,
     snapshot_hash: str,
-    signer_name: str,
+    signer_name: str | None,
     signature_image: str,
-    password: str,
+    password: str | None,
     ip_address: str | None,
     user_agent: str | None,
 ) -> SupplierPriceRevision:
     rev = _get_own(db, supplier_user, revision_id)
     _require_open(rev, snapshot_hash)
     _check_signature_image(signature_image)
-    _check_password(db, supplier_user, password)
+    if password is not None:
+        _check_password(db, supplier_user, password)
     _check_live_rows_match(db, rev)
 
     rev.status = APPROVED
@@ -392,7 +392,7 @@ def approve(
         entity_id=rev.id,
         description=(
             f"Price sheet #{rev.id} ({len(rev.items)} item(s), delivery {rev.delivery_date.isoformat()}) "
-            f"e-signed by {signer_name}. Snapshot SHA-256 {rev.snapshot_hash}."
+            f"e-signed by {signer_name or supplier_user.username}. Snapshot SHA-256 {rev.snapshot_hash}."
         ),
         ip_address=rev.signer_ip,
     )
