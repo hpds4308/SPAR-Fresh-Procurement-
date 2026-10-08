@@ -20,6 +20,9 @@ from app.models.user import User
 
 BRANCH_ORDER_DEADLINE = "branch_order_deadline"
 SUPPLIER_PRICE_DEADLINE = "supplier_price_deadline"
+# Weekdays suppliers may submit prices on, stored as comma-separated
+# date.weekday() numbers (Monday=0 .. Sunday=6), e.g. "0,2,4".
+SUPPLIER_PRICE_DAYS = "supplier_price_days"
 SUPPORT_PHONE = "support_phone"
 MASTER_DATA_EMAIL = "master_data_email"
 
@@ -39,6 +42,29 @@ def _validate_time(value: str) -> None:
         raise ValidationFailedError("That's not a valid time of day.")
 
 
+WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+
+def parse_weekdays(value: str) -> list[int]:
+    """"0,2,4" -> [0, 2, 4]: sorted, de-duplicated, each 0..6, at least one."""
+    parts = [p.strip() for p in value.split(",") if p.strip()]
+    if not parts or not all(p.isdigit() and 0 <= int(p) <= 6 for p in parts):
+        raise ValidationFailedError("Choose at least one day of the week.")
+    return sorted({int(p) for p in parts})
+
+
+def weekdays_label(weekdays: list[int]) -> str:
+    """[0, 2, 4] -> "Monday, Wednesday and Friday"."""
+    names = [WEEKDAY_NAMES[d] for d in weekdays]
+    if len(names) == 1:
+        return names[0]
+    return ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def _validate_weekdays(value: str) -> str:
+    return ",".join(str(d) for d in parse_weekdays(value))
+
+
 def _validate_phone(value: str) -> None:
     if not value.strip():
         raise ValidationFailedError("Phone number can't be empty.")
@@ -55,6 +81,8 @@ def _validate_email(value: str) -> None:
 _KEYS = {
     BRANCH_ORDER_DEADLINE: (_validate_time, lambda: env_settings.BRANCH_ORDER_DEADLINE),
     SUPPLIER_PRICE_DEADLINE: (_validate_time, lambda: env_settings.SUPPLIER_PRICE_DEADLINE),
+    # Monday, Wednesday and Friday — the rule as originally agreed with the client.
+    SUPPLIER_PRICE_DAYS: (_validate_weekdays, lambda: "0,2,4"),
     SUPPORT_PHONE: (_validate_phone, lambda: "076 562 2317"),
     # No first-run default — "Send to Master Data" stays disabled with a
     # clear message until Admin sets a real address on the Settings page.
@@ -79,7 +107,9 @@ def set_setting(db: Session, admin: User, key: str, value: str) -> str:
         raise ValidationFailedError(f"Unknown setting: {key}")
     validate_fn, _ = _KEYS[key]
     value = value.strip()
-    validate_fn(value)
+    # A validator may hand back a normalized form to store (e.g. weekdays
+    # "4,0,2,2" -> "0,2,4"); the rest just raise on bad input.
+    value = validate_fn(value) or value
 
     row = db.query(SystemSetting).filter(SystemSetting.key == key).first()
     if row:

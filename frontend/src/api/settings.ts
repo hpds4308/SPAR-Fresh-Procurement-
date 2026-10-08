@@ -3,6 +3,8 @@ import { apiFetch } from "./client";
 export type Settings = {
   branch_order_deadline: string;
   supplier_price_deadline: string;
+  // Weekdays suppliers may submit prices on, comma-separated, Monday=0 .. Sunday=6 (e.g. "0,2,4").
+  supplier_price_days: string;
   support_phone: string;
 };
 

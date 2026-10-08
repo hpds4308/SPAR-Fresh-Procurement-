@@ -71,7 +71,7 @@ export function colomboWeekday(): number {
   return new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Colombo" })).getDay(); // 0=Sun
 }
 
-/** Supplier price submission is only allowed Mon/Wed/Fri (pricing_service.SUBMISSION_WEEKDAYS). */
+/** Supplier price submission is only allowed Mon/Wed/Fri by default (Admin can change the days in Settings). */
 export function isSupplierSubmissionDay(): boolean {
   return [1, 3, 5].includes(colomboWeekday());
 }

@@ -23,6 +23,8 @@ def admin_user(make_user):
 @pytest.fixture()
 def open_price_window(db_session, admin_user):
     db_session.add(SystemSetting(key="supplier_price_deadline", value="23:59", updated_by=admin_user.id))
+    # Every weekday, so these tests don't depend on what day they run.
+    db_session.add(SystemSetting(key="supplier_price_days", value="0,1,2,3,4,5,6", updated_by=admin_user.id))
     db_session.commit()
 
 

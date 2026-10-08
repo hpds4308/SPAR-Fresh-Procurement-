@@ -7,7 +7,7 @@ from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from app.core.config import settings as env_settings
-from app.services import pricing_service
+from app.services import pricing_service, settings_service
 from tests.conftest import FakeDB
 
 BUSINESS_TZ = ZoneInfo("Asia/Colombo")
@@ -92,6 +92,42 @@ def test_current_cycle_delivery_date_follows_latest_submission_day():
         now = datetime(2026, 6, day, 9, 0, tzinfo=BUSINESS_TZ)
         window = pricing_service.get_price_window(db, now=now)
         assert window.current_cycle_delivery_date == datetime(2026, 6, expected_delivery_day).date(), day
+
+
+def _with_submission_days(monkeypatch, value: str) -> None:
+    """As if Admin had saved `value` as the supplier price days setting."""
+    real_get_setting = settings_service.get_setting
+
+    def fake_get_setting(db, key):
+        if key == settings_service.SUPPLIER_PRICE_DAYS:
+            return value
+        return real_get_setting(db, key)
+
+    monkeypatch.setattr(settings_service, "get_setting", fake_get_setting)
+
+
+def test_admin_chosen_days_replace_monday_wednesday_friday(monkeypatch):
+    """Admin picks Tuesday + Thursday: 2026-06-18 (Thursday) opens, 2026-06-15 (Monday) doesn't."""
+    _with_submission_days(monkeypatch, "1,3")
+    db = FakeDB()
+    cutoff = _cutoff()
+    thursday = datetime.combine(datetime(2026, 6, 18).date(), cutoff, tzinfo=BUSINESS_TZ) - timedelta(minutes=1)
+    monday = datetime.combine(datetime(2026, 6, 15).date(), cutoff, tzinfo=BUSINESS_TZ) - timedelta(minutes=1)
+
+    window = pricing_service.get_price_window(db, now=thursday)
+    assert window.is_open is True
+    assert window.submission_days == [1, 3]
+    assert window.submission_days_label == "Tuesday and Thursday"
+    assert pricing_service.get_price_window(db, now=monday).is_open is False
+
+
+def test_current_cycle_follows_admin_chosen_days(monkeypatch):
+    """With only Thursday chosen, the following Wednesday is still last Thursday's cycle."""
+    _with_submission_days(monkeypatch, "3")
+    db = FakeDB()
+    wednesday = datetime(2026, 6, 24, 9, 0, tzinfo=BUSINESS_TZ)
+    window = pricing_service.get_price_window(db, now=wednesday)
+    assert window.current_cycle_delivery_date == datetime(2026, 6, 20).date()  # Thu 18th + 2
 
 
 def test_pricing_and_order_delivery_dates_line_up():

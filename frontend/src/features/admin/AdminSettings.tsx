@@ -58,6 +58,7 @@ export default function AdminSettings() {
         setDrafts({
           branch_order_deadline: s.branch_order_deadline,
           supplier_price_deadline: s.supplier_price_deadline,
+          supplier_price_days: s.supplier_price_days,
           support_phone: s.support_phone,
         });
       })
@@ -131,6 +132,13 @@ export default function AdminSettings() {
                   {state === "error" && <span className="text-xs text-tomato-600">Failed</span>}
                 </div>
                 <p className="text-xs text-crate-800/40 mt-1.5">{field.hint}</p>
+                {field.key === "supplier_price_deadline" && settings && (
+                  <SupplierPriceDaysField
+                    value={settings.supplier_price_days}
+                    state={fieldState.supplier_price_days ?? "idle"}
+                    onChange={(days) => save("supplier_price_days", days)}
+                  />
+                )}
               </div>
             );
           })}
@@ -141,6 +149,73 @@ export default function AdminSettings() {
       {error && <p className="text-tomato-600 text-sm px-1">{error}</p>}
 
       <LateSubmissionPanel />
+    </div>
+  );
+}
+
+// date.weekday() numbering, as the backend stores it: Monday=0 .. Sunday=6.
+const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+/**
+ * Which days of the week suppliers can submit prices on (before the cutoff
+ * above). Each click saves straight away; the last selected day can't be
+ * cleared, so there's always at least one submission day.
+ */
+function SupplierPriceDaysField({
+  value,
+  state,
+  onChange,
+}: {
+  value: string;
+  state: FieldState;
+  onChange: (days: string) => void;
+}) {
+  const selected = new Set(value.split(",").filter((d) => d !== "").map(Number));
+
+  function toggle(day: number) {
+    const next = new Set(selected);
+    if (next.has(day)) {
+      if (next.size === 1) return;
+      next.delete(day);
+    } else {
+      next.add(day);
+    }
+    onChange(Array.from(next).sort((a, b) => a - b).join(","));
+  }
+
+  return (
+    <div className="mt-5">
+      <label className="block text-xs font-semibold uppercase tracking-wide text-crate-800/60 mb-1.5">
+        Supplier price submission days
+      </label>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {WEEKDAYS.map((name, day) => {
+          const on = selected.has(day);
+          return (
+            <button
+              key={day}
+              type="button"
+              aria-pressed={on}
+              disabled={state === "saving"}
+              onClick={() => toggle(day)}
+              className={`w-12 rounded-full py-1.5 text-sm font-medium border transition-colors duration-150 disabled:opacity-60 ${
+                on
+                  ? "bg-crate-700 border-crate-700 text-white hover:bg-crate-800"
+                  : "bg-sage-50/60 border-sage-300 text-crate-800/60 hover:bg-sage-100"
+              }`}
+            >
+              {name}
+            </button>
+          );
+        })}
+        {state === "saving" && <span className="text-xs text-crate-800/35 ml-1">Saving…</span>}
+        {state === "saved" && <span className="text-xs text-crate-700 ml-1">✓ Saved</span>}
+        {state === "error" && <span className="text-xs text-tomato-600 ml-1">Failed</span>}
+      </div>
+      <p className="text-xs text-crate-800/40 mt-1.5">
+        Suppliers can only submit prices on the selected days, before the cutoff above. At least one day must
+        stay selected.
+      </p>
     </div>
   );
 }

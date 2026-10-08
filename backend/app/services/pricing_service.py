@@ -32,10 +32,14 @@ from app.services import price_approval_service
 
 BUSINESS_TZ = ZoneInfo("Asia/Colombo")
 
-# Business rule (as agreed with the client): suppliers only submit prices on
-# Monday, Wednesday and Friday — date.weekday() has Monday=0 .. Sunday=6.
-SUBMISSION_WEEKDAYS = {0, 2, 4}
-SUBMISSION_DAYS_LABEL = "Monday, Wednesday and Friday"
+
+def get_submission_weekdays(db: Session) -> list[int]:
+    """The weekdays suppliers may submit prices on (date.weekday(): Monday=0
+    .. Sunday=6) — Admin-chosen on the Settings page, Monday/Wednesday/Friday
+    until changed there."""
+    return settings_service.parse_weekdays(
+        settings_service.get_setting(db, settings_service.SUPPLIER_PRICE_DAYS)
+    )
 
 
 def _parse_cutoff(cutoff_str: str) -> time:
@@ -43,17 +47,17 @@ def _parse_cutoff(cutoff_str: str) -> time:
     return time(hour=int(hh), minute=int(mm))
 
 
-def _most_recent_submission_date(on_date: date) -> date:
-    """The most recent Monday/Wednesday/Friday on or before `on_date` — the
+def _most_recent_submission_date(on_date: date, weekdays: list[int]) -> date:
+    """The most recent submission weekday on or before `on_date` — the
     submission day whose prices are still the current ones to show. Walking
-    back at most 2 days always lands on a submission weekday."""
+    back at most 6 days always lands on one, since at least one is set."""
     d = on_date
-    while d.weekday() not in SUBMISSION_WEEKDAYS:
+    while d.weekday() not in weekdays:
         d -= timedelta(days=1)
     return d
 
 
-def _current_cycle_delivery_date(now: datetime) -> date:
+def _current_cycle_delivery_date(now: datetime, weekdays: list[int]) -> date:
     """
     The delivery date tied to the most recently opened submission cycle —
     e.g. on a Tuesday this is still Monday's delivery date (Monday + 2),
@@ -64,7 +68,7 @@ def _current_cycle_delivery_date(now: datetime) -> date:
     cycle that's actually live instead of a delivery date nothing has been
     submitted for yet.
     """
-    submission_date = _most_recent_submission_date(now.date())
+    submission_date = _most_recent_submission_date(now.date(), weekdays)
     return submission_date + timedelta(days=2)
 
 
@@ -88,14 +92,17 @@ def get_price_window(db: Session, now: datetime | None = None) -> PriceWindowOut
     """Delivery date is always 2 days after the submission date — gives suppliers lead time."""
     now = now.astimezone(BUSINESS_TZ) if now else datetime.now(BUSINESS_TZ)
     cutoff_str = settings_service.get_setting(db, settings_service.SUPPLIER_PRICE_DEADLINE)
-    is_open = now.weekday() in SUBMISSION_WEEKDAYS and now.time() < _parse_cutoff(cutoff_str)
+    weekdays = get_submission_weekdays(db)
+    is_open = now.weekday() in weekdays and now.time() < _parse_cutoff(cutoff_str)
     delivery_date = now.date() + timedelta(days=2)
     return PriceWindowOut(
         is_open=is_open,
         delivery_date=delivery_date,
         cutoff_time=cutoff_str,
         server_time=now.isoformat(),
-        current_cycle_delivery_date=_current_cycle_delivery_date(now),
+        current_cycle_delivery_date=_current_cycle_delivery_date(now, weekdays),
+        submission_days=weekdays,
+        submission_days_label=settings_service.weekdays_label(weekdays),
     )
 
 
@@ -107,7 +114,7 @@ def submit_prices(db: Session, supplier_user: User, payload: PriceSubmitRequest)
     if not window.is_open:
         raise ValidationFailedError(
             f"Price submission for {window.delivery_date.isoformat()} is closed. "
-            f"Suppliers can submit prices on {SUBMISSION_DAYS_LABEL} only, "
+            f"Suppliers can submit prices on {window.submission_days_label} only, "
             f"before the daily cutoff of {window.cutoff_time}."
         )
 

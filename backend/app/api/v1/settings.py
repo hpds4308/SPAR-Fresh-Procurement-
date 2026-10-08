@@ -25,6 +25,7 @@ def get_settings(db: Session = Depends(get_db)):
     return SettingsOut(
         branch_order_deadline=values[settings_service.BRANCH_ORDER_DEADLINE],
         supplier_price_deadline=values[settings_service.SUPPLIER_PRICE_DEADLINE],
+        supplier_price_days=values[settings_service.SUPPLIER_PRICE_DAYS],
         support_phone=values[settings_service.SUPPORT_PHONE],
     )
 
@@ -86,5 +87,6 @@ def update_setting(
     return SettingsOut(
         branch_order_deadline=values[settings_service.BRANCH_ORDER_DEADLINE],
         supplier_price_deadline=values[settings_service.SUPPLIER_PRICE_DEADLINE],
+        supplier_price_days=values[settings_service.SUPPLIER_PRICE_DAYS],
         support_phone=values[settings_service.SUPPORT_PHONE],
     )

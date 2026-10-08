@@ -59,3 +59,26 @@ def test_set_setting_rejects_unknown_key():
     db = FakeDB()
     with pytest.raises(ValidationFailedError):
         settings_service.set_setting(db, admin=None, key="not_a_real_setting", value="x")
+
+
+def test_supplier_price_days_default_is_monday_wednesday_friday():
+    db = FakeDB()
+    value = settings_service.get_setting(db, settings_service.SUPPLIER_PRICE_DAYS)
+    assert settings_service.parse_weekdays(value) == [0, 2, 4]
+
+
+def test_weekdays_are_normalized_sorted_and_deduplicated():
+    assert settings_service._validate_weekdays("4, 0,2,2") == "0,2,4"
+    assert settings_service._validate_weekdays("3") == "3"
+
+
+@pytest.mark.parametrize("bad", ["", " , ", "7", "-1", "mon", "1,x"])
+def test_invalid_weekdays_rejected(bad):
+    with pytest.raises(ValidationFailedError):
+        settings_service._validate_weekdays(bad)
+
+
+def test_weekdays_label():
+    assert settings_service.weekdays_label([0, 2, 4]) == "Monday, Wednesday and Friday"
+    assert settings_service.weekdays_label([3]) == "Thursday"
+    assert settings_service.weekdays_label([1, 3]) == "Tuesday and Thursday"

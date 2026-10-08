@@ -49,10 +49,14 @@ class PriceWindowOut(BaseModel):
     delivery_date: date
     cutoff_time: str  # "HH:MM"
     server_time: str  # ISO datetime
-    # The delivery date of the most recently opened Mon/Wed/Fri submission
-    # cycle (may equal delivery_date, or be earlier when today isn't a
-    # submission day) — what Admin's browse views should default to.
+    # The delivery date of the most recently opened submission cycle (may
+    # equal delivery_date, or be earlier when today isn't a submission day)
+    # — what Admin's browse views should default to.
     current_cycle_delivery_date: date
+    # The Admin-chosen submission weekdays (Monday=0 .. Sunday=6) and the
+    # same as words, e.g. "Monday, Wednesday and Friday", for the closed message.
+    submission_days: list[int]
+    submission_days_label: str
 
 
 class LastPriceOut(BaseModel):

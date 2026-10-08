@@ -6,10 +6,13 @@ export type PriceWindow = {
   delivery_date: string;
   cutoff_time: string;
   server_time: string;
-  // Delivery date of the most recently opened Mon/Wed/Fri submission cycle —
-  // use this (not delivery_date) to default an admin browse view so it lands
-  // on the cycle that's actually live.
+  // Delivery date of the most recently opened submission cycle — use this
+  // (not delivery_date) to default an admin browse view so it lands on the
+  // cycle that's actually live.
   current_cycle_delivery_date: string;
+  // Admin-chosen submission weekdays (Monday=0 .. Sunday=6), and as words.
+  submission_days: number[];
+  submission_days_label: string;
 };
 
 export type SupplierPrice = {

@@ -214,7 +214,7 @@ export default function PriceForm({ onSubmitted }: { onSubmitted: () => void }) 
       <div className="bg-white rounded-2xl shadow-[0_10px_30px_-12px_rgba(21,56,38,0.15)] border border-sage-100 p-6">
         <p className="text-crate-800 font-semibold">Price submission is closed right now.</p>
         <p className="text-crate-800/60 text-sm mt-1">
-          Suppliers can submit prices on Monday, Wednesday and Friday only, before the daily
+          Suppliers can submit prices on {window_.submission_days_label} only, before the daily
           cutoff of {window_.cutoff_time}.
         </p>
       </div>
