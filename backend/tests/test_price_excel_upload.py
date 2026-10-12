@@ -149,3 +149,39 @@ def test_preview_then_submit_saves_prices(client, auth_headers, supplier_user, m
     res = client.post("/api/v1/pricing", headers=headers, json={"prices": entries})
     assert res.status_code == 200, res.text
     assert res.json()[0]["price"] == 180.0
+
+
+def test_template_is_vlookup_friendly(client, auth_headers, supplier_user, make_product):
+    numeric = make_product(product_code="4503253")
+    res = client.get("/api/v1/pricing/excel-template", headers=auth_headers(supplier_user))
+    ws = openpyxl.load_workbook(io.BytesIO(res.content)).active
+    assert not ws.protection.sheet
+    assert not ws.data_validations.dataValidation
+    codes = [r[0] for r in ws.iter_rows(min_row=5, values_only=True)]
+    assert 4503253 in codes  # stored as a number, so VLOOKUP against numeric codes matches
+    assert numeric.product_code == "4503253"
+
+
+def test_vlookup_misses_count_as_blank(client, auth_headers, supplier_user, make_product):
+    a = make_product()
+    b = make_product()
+    body = _upload(client, auth_headers(supplier_user), _xlsx_bytes([(a.product_code, "x", 90), (b.product_code, "x", "#N/A")])).json()
+    assert body["valid_line_count"] == 1
+    assert body["error_count"] == 0
+    assert body["blank_price_count"] == 1
+
+
+def test_finds_prices_sheet_when_another_sheet_is_active(client, auth_headers, supplier_user, make_product):
+    a = make_product()
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Prices"
+    ws.append(list(HEADERS))
+    ws.append([a.product_code, "x", 55])
+    mine = wb.create_sheet("MyPrices")
+    mine.append(["Code", "Rate"])
+    wb.active = mine
+    buf = io.BytesIO()
+    wb.save(buf)
+    body = _upload(client, auth_headers(supplier_user), buf.getvalue()).json()
+    assert body["valid_line_count"] == 1

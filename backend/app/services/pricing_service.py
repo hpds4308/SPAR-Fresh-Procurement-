@@ -279,22 +279,23 @@ _EXCEL_PRICE_REQUIRED = {"product_code", "price"}
 _EXCEL_HEADER_SEARCH_ROWS = 10
 _SPAR_LOGO_PATH = Path(__file__).resolve().parent.parent / "assets" / "spar-logo.png"
 _SPAR_GREEN = "157946"
+_EXCEL_ERROR_VALUES = {"#N/A", "#REF!", "#VALUE!", "#DIV/0!", "#NAME?", "#NULL!", "#NUM!", "#SPILL!", "#CALC!", "#GETTING_DATA"}
 
 
 def build_price_template(db: Session) -> bytes:
     """
     The blank price sheet a supplier downloads: SPAR logo and title, then
     one row per active product in the same order as the Submit Prices page
-    (category, then name). Only the Price column is editable, so a supplier
-    can't accidentally change a product code and have that row rejected on
-    upload.
+    (category, then name). Deliberately left unprotected and without data
+    validation: suppliers fill the Price column with VLOOKUPs against their
+    own price lists, which needs helper columns, pasted data, and formulas
+    that return #N/A for products they don't carry.
     """
     import io
 
     from openpyxl import Workbook
     from openpyxl.drawing.image import Image as XLImage
-    from openpyxl.styles import Alignment, Font, PatternFill, Protection
-    from openpyxl.worksheet.datavalidation import DataValidation
+    from openpyxl.styles import Alignment, Font, PatternFill
 
     products = (
         db.query(Product)
@@ -339,36 +340,21 @@ def build_price_template(db: Session) -> bytes:
 
     price_fill = PatternFill(start_color="FFF9E6", end_color="FFF9E6", fill_type="solid")
     for p in products:
-        ws.append([p.product_code, categories.get(p.category_id, ""), p.description, None])
+        # All-digit codes go in as numbers so a VLOOKUP against a supplier's
+        # own sheet (where codes are almost always typed as numbers) matches;
+        # a code with a leading zero or letters has to stay text.
+        code = int(p.product_code) if p.product_code.isdigit() and not p.product_code.startswith("0") else p.product_code
+        ws.append([code, categories.get(p.category_id, ""), p.description, None])
+        ws.cell(row=ws.max_row, column=1).number_format = "0" if isinstance(code, int) else "@"
         price_cell = ws.cell(row=ws.max_row, column=last_col)
-        price_cell.protection = Protection(locked=False)
         price_cell.fill = price_fill
         price_cell.number_format = "#,##0.00"
-
-    if products:
-        validation = DataValidation(
-            type="decimal",
-            operator="between",
-            formula1="0.01",
-            formula2="99999999.99",
-            allow_blank=True,
-            showErrorMessage=True,
-            errorTitle="Invalid price",
-            error="Enter a price greater than zero, or leave it blank if you don't supply this product.",
-        )
-        validation.add(f"D{header_row + 1}:D{ws.max_row}")
-        ws.add_data_validation(validation)
 
     ws.column_dimensions["A"].width = 16
     ws.column_dimensions["B"].width = 14
     ws.column_dimensions["C"].width = 40
     ws.column_dimensions["D"].width = 14
     ws.freeze_panes = f"A{header_row + 1}"
-    # No password — this guards against slips, not a determined user.
-    ws.protection.sheet = True
-    ws.protection.formatColumns = False
-    ws.protection.sort = False
-    ws.protection.autoFilter = False
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -377,8 +363,11 @@ def build_price_template(db: Session) -> bytes:
 
 def _parse_excel_price(raw) -> tuple[float | None, str | None]:
     """Blank is (None, None) — the supplier isn't quoting that product.
-    Accepts plain numbers and text like "Rs. 1,250.00"."""
+    Accepts plain numbers and text like "Rs. 1,250.00". An Excel error value
+    (#N/A from a VLOOKUP that found nothing, etc.) also counts as blank."""
     if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return None, None
+    if isinstance(raw, str) and raw.strip().upper() in _EXCEL_ERROR_VALUES:
         return None, None
     if isinstance(raw, bool):
         return None, f"'{raw}' is not a valid price."
@@ -424,19 +413,31 @@ def parse_price_excel(db: Session, supplier_user: User, file_bytes: bytes) -> Ex
 
     try:
         workbook = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
-        rows = workbook.active.iter_rows(values_only=True)
+        # Suppliers often add a sheet of their own prices to VLOOKUP from and
+        # save with that sheet open, so the active sheet isn't necessarily
+        # ours: try the template's "Prices" sheet, then the active one, then
+        # the rest, and use the first that has the header row.
+        sheets = sorted(
+            workbook.worksheets,
+            key=lambda ws: (ws.title != "Prices", ws.title != workbook.active.title),
+        )
         header_map: dict[int, str] = {}
         header_row_number = 0
-        for header_row_number, row in enumerate(rows, start=1):
-            candidate: dict[int, str] = {}
-            for idx, cell in enumerate(row):
-                key = _EXCEL_PRICE_ALIASES.get(str(cell).strip().lower()) if cell is not None else None
-                if key and key not in candidate.values():
-                    candidate[idx] = key
-            if _EXCEL_PRICE_REQUIRED <= set(candidate.values()):
-                header_map = candidate
-                break
-            if header_row_number >= _EXCEL_HEADER_SEARCH_ROWS:
+        rows = iter(())
+        for sheet in sheets:
+            rows = sheet.iter_rows(values_only=True)
+            for header_row_number, row in enumerate(rows, start=1):
+                candidate: dict[int, str] = {}
+                for idx, cell in enumerate(row):
+                    key = _EXCEL_PRICE_ALIASES.get(str(cell).strip().lower()) if cell is not None else None
+                    if key and key not in candidate.values():
+                        candidate[idx] = key
+                if _EXCEL_PRICE_REQUIRED <= set(candidate.values()):
+                    header_map = candidate
+                    break
+                if header_row_number >= _EXCEL_HEADER_SEARCH_ROWS:
+                    break
+            if header_map:
                 break
     except Exception:
         raise ValidationFailedError("Could not read this file — make sure it's a valid .xlsx file.")
