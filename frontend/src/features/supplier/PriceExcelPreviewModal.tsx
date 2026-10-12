@@ -53,9 +53,16 @@ export default function PriceExcelPreviewModal({
 
         <div className="flex-1 overflow-y-auto">
           {preview.lines.length === 0 ? (
-            <p className="p-6 text-sm text-crate-800/50 text-center">
-              No prices were found in this file. Fill in the Price column of the template and upload it again.
-            </p>
+            <div className="p-6 text-sm text-center">
+              <p className="font-medium text-tomato-600">The Price column in this file is empty.</p>
+              <p className="text-crate-800/60 mt-1">
+                {preview.blank_price_count > 0
+                  ? `All ${preview.blank_price_count} products have no price (or a VLOOKUP that found no match, #N/A). `
+                  : ""}
+                Make sure you saved your prices in Excel and are uploading that saved file — not a fresh copy of the
+                template.
+              </p>
+            </div>
           ) : (
             <table className="w-full text-sm">
               <thead className="sticky top-0 bg-sage-50 text-xs text-crate-800/60">
