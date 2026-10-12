@@ -159,3 +159,53 @@ export function setAdjustedPrice(
     body: JSON.stringify({ adjusted_price: adjustedPrice }),
   });
 }
+
+// ---- Excel price upload ----
+
+export type ExcelPriceLine = {
+  row_number: number;
+  product_code: string;
+  description: string | null;
+  unit_code: string | null;
+  price: number | null;
+  product_id: number | null;
+  error: string | null;
+};
+
+export type ExcelPricePreview = {
+  lines: ExcelPriceLine[];
+  valid_line_count: number;
+  error_count: number;
+  blank_price_count: number;
+};
+
+// Parses a filled-in price template — saves nothing. Valid rows are then
+// sent through submitPrices like manual entry.
+export function previewPriceExcel(file: File): Promise<ExcelPricePreview> {
+  const body = new FormData();
+  body.append("file", file);
+  return apiFetch("/pricing/preview-excel", { method: "POST", body });
+}
+
+export async function downloadPriceTemplate(): Promise<void> {
+  const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+  const access = localStorage.getItem("spar_access_token");
+  const res = await fetch(`${API_BASE}/api/v1/pricing/excel-template`, {
+    headers: access ? { Authorization: `Bearer ${access}` } : {},
+  });
+  if (!res.ok) {
+    throw new Error("Could not download the price template.");
+  }
+  const blob = await res.blob();
+  // Set here too because a cross-origin response doesn't expose Content-Disposition.
+  const filename = "spar-price-template.xlsx";
+
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.URL.revokeObjectURL(url);
+}

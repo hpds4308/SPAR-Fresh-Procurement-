@@ -1,6 +1,6 @@
 from datetime import date
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
@@ -20,6 +20,7 @@ from app.schemas.pricing import (
     KeellsSyncResultOut,
     ReferencePriceOut,
     ReferencePriceSetRequest,
+    ExcelPricePreviewOut,
 )
 from app.services import pricing_service
 from app.services import price_approval_service
@@ -67,6 +68,42 @@ def submit_prices(
 ):
     rows = pricing_service.submit_prices(db, current_user, payload)
     return _supplier_price_out(db, rows)
+
+
+# Generous ceiling for the price template — a few hundred products is well
+# under 100 KB; this only rejects something clearly wrong before parsing.
+MAX_PRICE_EXCEL_BYTES = 5 * 1024 * 1024
+
+
+@router.get("/excel-template")
+def download_price_template(
+    current_user: User = Depends(require_roles("SUPPLIER", "ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """Blank price sheet (Product Code, Product, Price) listing every active product."""
+    content = pricing_service.build_price_template(db)
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="spar-price-template.xlsx"'},
+    )
+
+
+@router.post("/preview-excel", response_model=ExcelPricePreviewOut)
+async def preview_price_excel(
+    file: UploadFile = File(...),
+    current_user: User = Depends(require_roles("SUPPLIER")),
+    db: Session = Depends(get_db),
+):
+    """
+    Parses a filled-in price template into a row-by-row preview — never
+    saves anything. The supplier confirms and the valid rows are submitted
+    through POST /pricing, the same as manual entry.
+    """
+    contents = await file.read(MAX_PRICE_EXCEL_BYTES + 1)
+    if len(contents) > MAX_PRICE_EXCEL_BYTES:
+        raise ValidationFailedError("That file is too large — please upload the price template as-is.")
+    return await run_in_threadpool(pricing_service.parse_price_excel, db, current_user, contents)
 
 
 @router.get("/mine", response_model=list[SupplierPriceOut])

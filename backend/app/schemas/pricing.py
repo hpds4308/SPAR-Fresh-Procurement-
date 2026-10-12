@@ -152,3 +152,36 @@ class AdjustPriceRequest(BaseModel):
             raise ValueError(f"Adjusted price can't exceed {MAX_NUMERIC_10_2:,.2f}.")
         return round(v, 2)
 
+
+
+class ExcelPriceLinePreview(BaseModel):
+    """
+    One row of an uploaded supplier price Excel, after validation. product_id
+    is None whenever the row couldn't be matched/parsed cleanly, in which
+    case `error` explains why and the other fields are whatever could still
+    be read, for context.
+    """
+
+    row_number: int
+    product_code: str
+    description: str | None = None
+    unit_code: str | None = None
+    price: float | None = None
+    product_id: int | None = None
+    error: str | None = None
+
+
+class ExcelPricePreviewOut(BaseModel):
+    """
+    Result of parsing an uploaded price Excel — never saves anything by
+    itself. The supplier reviews this and confirms, and the valid rows then
+    go through the normal POST /pricing submission like manual entry, so
+    the window/cutoff rules are never bypassed.
+    """
+
+    lines: list[ExcelPriceLinePreview]
+    valid_line_count: int
+    error_count: int
+    # Rows with a product code but no price — the supplier isn't quoting
+    # that product, so they're left out rather than reported as errors.
+    blank_price_count: int

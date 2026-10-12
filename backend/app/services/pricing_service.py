@@ -14,6 +14,7 @@ overwrites the previous quote (upsert), so a supplier can correct a typo
 or adjust before the window closes without creating duplicate rows.
 """
 from datetime import datetime, date, timedelta, time, timezone
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.exc import IntegrityError
@@ -26,7 +27,13 @@ from app.models.market_reference_price import MarketReferencePrice
 from app.models.product import Product, ProductCategory, ProductUnit
 from app.models.supplier import Supplier
 from app.models.user import User
-from app.schemas.pricing import PriceSubmitRequest, PriceWindowOut
+from app.schemas._limits import MAX_NUMERIC_10_2
+from app.schemas.pricing import (
+    ExcelPriceLinePreview,
+    ExcelPricePreviewOut,
+    PriceSubmitRequest,
+    PriceWindowOut,
+)
 from app.services import settings_service
 from app.services import price_approval_service
 
@@ -245,6 +252,256 @@ def get_last_prices(db: Session, supplier_user: User) -> list[SupplierPrice]:
         if row.product_id not in latest_by_product:
             latest_by_product[row.product_id] = row
     return list(latest_by_product.values())
+
+
+# ---- Excel price upload — an alternate way for a supplier to fill in
+# their prices: download the template (every active product), fill in the
+# Price column, upload it back. ----
+
+EXCEL_PRICE_HEADERS = ("Product Code", "Category", "Product", "Price")
+_EXCEL_PRICE_ALIASES = {
+    "product code": "product_code",
+    "code": "product_code",
+    "item code": "product_code",
+    "product": "description",
+    "product name": "description",
+    "product description": "description",
+    "description": "description",
+    "price": "price",
+    "price (rs.)": "price",
+    "price (rs)": "price",
+    "price rs": "price",
+    "unit price": "price",
+}
+_EXCEL_PRICE_REQUIRED = {"product_code", "price"}
+# The template has a logo and title above the header, and a supplier may
+# add lines of their own; look this far down for it.
+_EXCEL_HEADER_SEARCH_ROWS = 10
+_SPAR_LOGO_PATH = Path(__file__).resolve().parent.parent / "assets" / "spar-logo.png"
+_SPAR_GREEN = "157946"
+
+
+def build_price_template(db: Session) -> bytes:
+    """
+    The blank price sheet a supplier downloads: SPAR logo and title, then
+    one row per active product in the same order as the Submit Prices page
+    (category, then name). Only the Price column is editable, so a supplier
+    can't accidentally change a product code and have that row rejected on
+    upload.
+    """
+    import io
+
+    from openpyxl import Workbook
+    from openpyxl.drawing.image import Image as XLImage
+    from openpyxl.styles import Alignment, Font, PatternFill, Protection
+    from openpyxl.worksheet.datavalidation import DataValidation
+
+    products = (
+        db.query(Product)
+        .filter(Product.status == "ACTIVE")
+        .order_by(Product.category_id, Product.description)
+        .all()
+    )
+    categories = {c.id: c.name for c in db.query(ProductCategory).all()}
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Prices"
+    last_col = len(EXCEL_PRICE_HEADERS)
+
+    # Rows 1-3: logo, title, instructions. The upload parser finds the
+    # header row below them by its column names.
+    ws.row_dimensions[1].height = 42
+    logo = XLImage(str(_SPAR_LOGO_PATH))
+    logo.width, logo.height = 280, 44  # source is 1014x161
+    ws.add_image(logo, "A1")
+
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=last_col)
+    ws["A2"] = "Supplier Price List — Fruits & Vegetables"
+    ws["A2"].font = Font(bold=True, size=14, color=_SPAR_GREEN)
+    ws.row_dimensions[2].height = 22
+
+    ws.merge_cells(start_row=3, start_column=1, end_row=3, end_column=last_col)
+    ws["A3"] = (
+        "Enter your price in Rs. in the yellow Price column. Leave it blank for products you don't supply. "
+        "Don't change the product codes."
+    )
+    ws["A3"].font = Font(italic=True, size=9, color="666666")
+    ws["A3"].alignment = Alignment(wrap_text=True, vertical="top")
+    ws.row_dimensions[3].height = 26
+
+    header_row = 4
+    for col, title in enumerate(EXCEL_PRICE_HEADERS, start=1):
+        cell = ws.cell(row=header_row, column=col, value=title)
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill(start_color=_SPAR_GREEN, end_color=_SPAR_GREEN, fill_type="solid")
+        cell.alignment = Alignment(horizontal="center")
+
+    price_fill = PatternFill(start_color="FFF9E6", end_color="FFF9E6", fill_type="solid")
+    for p in products:
+        ws.append([p.product_code, categories.get(p.category_id, ""), p.description, None])
+        price_cell = ws.cell(row=ws.max_row, column=last_col)
+        price_cell.protection = Protection(locked=False)
+        price_cell.fill = price_fill
+        price_cell.number_format = "#,##0.00"
+
+    if products:
+        validation = DataValidation(
+            type="decimal",
+            operator="between",
+            formula1="0.01",
+            formula2="99999999.99",
+            allow_blank=True,
+            showErrorMessage=True,
+            errorTitle="Invalid price",
+            error="Enter a price greater than zero, or leave it blank if you don't supply this product.",
+        )
+        validation.add(f"D{header_row + 1}:D{ws.max_row}")
+        ws.add_data_validation(validation)
+
+    ws.column_dimensions["A"].width = 16
+    ws.column_dimensions["B"].width = 14
+    ws.column_dimensions["C"].width = 40
+    ws.column_dimensions["D"].width = 14
+    ws.freeze_panes = f"A{header_row + 1}"
+    # No password — this guards against slips, not a determined user.
+    ws.protection.sheet = True
+    ws.protection.formatColumns = False
+    ws.protection.sort = False
+    ws.protection.autoFilter = False
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def _parse_excel_price(raw) -> tuple[float | None, str | None]:
+    """Blank is (None, None) — the supplier isn't quoting that product.
+    Accepts plain numbers and text like "Rs. 1,250.00"."""
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return None, None
+    if isinstance(raw, bool):
+        return None, f"'{raw}' is not a valid price."
+    if isinstance(raw, (int, float)):
+        value = float(raw)
+    else:
+        text = str(raw).strip().lower().replace(",", "").replace("rs.", "").replace("rs", "").strip()
+        try:
+            value = float(text)
+        except ValueError:
+            return None, f"'{raw}' is not a valid price."
+    if value <= 0:
+        return None, "Price must be greater than zero (leave it blank if you don't supply this product)."
+    if value > MAX_NUMERIC_10_2:
+        return None, f"Price exceeds the maximum allowed value ({MAX_NUMERIC_10_2:,.2f})."
+    return round(value, 2), None
+
+
+def parse_price_excel(db: Session, supplier_user: User, file_bytes: bytes) -> ExcelPricePreviewOut:
+    """
+    Parses an uploaded price Excel into a row-by-row preview — never saves
+    anything. The supplier confirms the preview and the valid rows are then
+    submitted through submit_prices like manual entry, so the submission
+    window and cutoff are enforced exactly the same way.
+    """
+    import io
+
+    import openpyxl
+
+    from app.services.order_service import (
+        MAX_EXCEL_ROWS_SCANNED,
+        _reject_oversized_workbook,
+    )
+
+    if not supplier_user.supplier_id:
+        raise PermissionDeniedError("Only supplier accounts can upload prices.")
+
+    too_big = "This file is too large or has too many rows — please upload the price template as-is."
+    try:
+        _reject_oversized_workbook(file_bytes)
+    except ValidationFailedError:
+        raise ValidationFailedError(too_big)
+
+    try:
+        workbook = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
+        rows = workbook.active.iter_rows(values_only=True)
+        header_map: dict[int, str] = {}
+        header_row_number = 0
+        for header_row_number, row in enumerate(rows, start=1):
+            candidate: dict[int, str] = {}
+            for idx, cell in enumerate(row):
+                key = _EXCEL_PRICE_ALIASES.get(str(cell).strip().lower()) if cell is not None else None
+                if key and key not in candidate.values():
+                    candidate[idx] = key
+            if _EXCEL_PRICE_REQUIRED <= set(candidate.values()):
+                header_map = candidate
+                break
+            if header_row_number >= _EXCEL_HEADER_SEARCH_ROWS:
+                break
+    except Exception:
+        raise ValidationFailedError("Could not read this file — make sure it's a valid .xlsx file.")
+
+    if not header_map:
+        raise ValidationFailedError(
+            "Could not find the header row — the sheet needs a Product Code and a Price column. "
+            "Download the price template and fill in the Price column."
+        )
+
+    products_by_code = {p.product_code: p for p in db.query(Product).filter(Product.status == "ACTIVE").all()}
+    units = {u.id: u.code for u in db.query(ProductUnit).all()}
+
+    lines: list[ExcelPriceLinePreview] = []
+    blank_price_count = 0
+    seen_codes: set[str] = set()
+    try:
+        for row_number, raw_row in enumerate(rows, start=header_row_number + 1):
+            if row_number > MAX_EXCEL_ROWS_SCANNED:
+                raise ValidationFailedError(too_big)
+            values = {header_map[i]: raw_row[i] for i in range(len(raw_row)) if i in header_map}
+            raw_code = values.get("product_code")
+            # A whole-number code typed into a General cell comes back as a float (1001.0).
+            if isinstance(raw_code, float) and raw_code.is_integer():
+                raw_code = int(raw_code)
+            product_code = str(raw_code or "").strip()
+            if not product_code:
+                continue  # blank trailing row
+            description = str(values["description"]).strip() if values.get("description") is not None else None
+
+            price, price_error = _parse_excel_price(values.get("price"))
+            if price is None and price_error is None:
+                blank_price_count += 1
+                continue
+
+            line = ExcelPriceLinePreview(
+                row_number=row_number, product_code=product_code, description=description, price=price
+            )
+            product = products_by_code.get(product_code)
+            if product_code in seen_codes:
+                line.error = "Duplicate product code — already appears earlier in this file."
+            elif not product:
+                line.error = "Unknown or inactive product code."
+            elif price_error:
+                line.error = price_error
+                line.description = product.description
+                line.unit_code = units.get(product.unit_id)
+            else:
+                line.product_id = product.id
+                line.description = product.description
+                line.unit_code = units.get(product.unit_id)
+            seen_codes.add(product_code)
+            lines.append(line)
+    except ValidationFailedError:
+        raise
+    except Exception:
+        raise ValidationFailedError("Could not read this file — make sure it's a valid .xlsx file.")
+
+    valid = sum(1 for line in lines if line.error is None)
+    return ExcelPricePreviewOut(
+        lines=lines,
+        valid_line_count=valid,
+        error_count=len(lines) - valid,
+        blank_price_count=blank_price_count,
+    )
 
 
 def list_all_prices(

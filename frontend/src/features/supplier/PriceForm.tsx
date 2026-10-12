@@ -1,8 +1,19 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError } from "../../api/client";
 import { Product, fetchProducts } from "../../api/orders";
-import { LastPrice, PriceWindow, fetchLastPrices, fetchPriceWindow, fetchMyPrices, submitPrices } from "../../api/pricing";
+import {
+  ExcelPricePreview,
+  LastPrice,
+  PriceWindow,
+  downloadPriceTemplate,
+  fetchLastPrices,
+  fetchPriceWindow,
+  fetchMyPrices,
+  previewPriceExcel,
+  submitPrices,
+} from "../../api/pricing";
 import { CategoryBadge } from "../shared/ui/CategoryBadge";
+import PriceExcelPreviewModal from "./PriceExcelPreviewModal";
 
 function formatDate(iso: string): string {
   const d = new Date(iso + "T00:00:00");
@@ -19,6 +30,33 @@ function productImageUrl(productCode: string): string {
 }
 
 const PREVIEW_SIZE = 180;
+
+const outlineButton =
+  "border border-sage-300 text-crate-800 rounded-full px-4 py-2 text-sm font-medium hover:bg-sage-50 active:scale-[0.98] disabled:opacity-40 disabled:hover:bg-transparent transition-all duration-150";
+
+function TemplateDownloadButton() {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function handleClick() {
+    setError(null);
+    setBusy(true);
+    try {
+      await downloadPriceTemplate();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not download the price template.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <span className="inline-flex items-center gap-2">
+      <button onClick={handleClick} disabled={busy} className={outlineButton}>
+        {busy ? "Downloading…" : "Download Excel template"}
+      </button>
+      {error && <span className="text-tomato-600 text-xs">{error}</span>}
+    </span>
+  );
+}
 
 export default function PriceForm({ onSubmitted }: { onSubmitted: () => void }) {
   const [products, setProducts] = useState<Product[]>([]);
@@ -40,6 +78,13 @@ export default function PriceForm({ onSubmitted }: { onSubmitted: () => void }) 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  // Excel upload: the parsed file waiting for the supplier to confirm.
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [excel, setExcel] = useState<{ fileName: string; preview: ExcelPricePreview } | null>(null);
+  const [excelSubmitting, setExcelSubmitting] = useState(false);
+  const [excelError, setExcelError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -201,6 +246,58 @@ export default function PriceForm({ onSubmitted }: { onSubmitted: () => void }) 
     }
   }
 
+  async function handleExcelChosen(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // so choosing the same file again still fires onChange
+    if (!file) return;
+    setUploadError(null);
+    setUploading(true);
+    try {
+      const preview = await previewPriceExcel(file);
+      setExcelError(null);
+      setExcel({ fileName: file.name, preview });
+    } catch (err) {
+      setUploadError(err instanceof ApiError ? err.message : "Could not read that Excel file. Please try again.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  function excelEntries() {
+    return (excel?.preview.lines ?? [])
+      .filter((l) => !l.error && l.product_id !== null && l.price !== null)
+      .map((l) => ({ product_id: l.product_id as number, price: l.price as number }));
+  }
+
+  async function handleExcelSubmit() {
+    const entries = excelEntries();
+    if (entries.length === 0) return;
+    setExcelError(null);
+    setExcelSubmitting(true);
+    try {
+      await submitPrices(entries);
+      const next: Record<number, string> = {};
+      for (const e of entries) next[e.product_id] = String(e.price);
+      setPrices(next);
+      setExcel(null);
+      setSuccess(true);
+      onSubmitted();
+    } catch (err) {
+      setExcelError(err instanceof ApiError ? err.message : "Could not submit prices. Please try again.");
+    } finally {
+      setExcelSubmitting(false);
+    }
+  }
+
+  function handleExcelLoadIntoForm() {
+    const next: Record<number, string> = {};
+    for (const e of excelEntries()) next[e.product_id] = String(e.price);
+    setPrices(next);
+    setSearch("");
+    setCategory("ALL");
+    setExcel(null);
+  }
+
   if (loading) {
     return (
       <div className="bg-white rounded-2xl shadow-[0_10px_30px_-12px_rgba(21,56,38,0.15)] border border-sage-100 p-8 text-crate-800/40 text-sm text-center">
@@ -217,6 +314,10 @@ export default function PriceForm({ onSubmitted }: { onSubmitted: () => void }) 
           Suppliers can submit prices on {window_.submission_days_label} only, before the daily
           cutoff of {window_.cutoff_time}.
         </p>
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <TemplateDownloadButton />
+          <span className="text-xs text-crate-800/50">Fill it in now and upload it when submission opens.</span>
+        </div>
       </div>
     );
   }
@@ -242,6 +343,18 @@ export default function PriceForm({ onSubmitted }: { onSubmitted: () => void }) 
   return (
     <div className="bg-white rounded-2xl shadow-[0_10px_30px_-12px_rgba(21,56,38,0.15)] border border-sage-100 overflow-hidden">
       {previewPopup}
+      {excel && (
+        <PriceExcelPreviewModal
+          fileName={excel.fileName}
+          preview={excel.preview}
+          deliveryDateLabel={window_ ? formatDate(window_.delivery_date) : null}
+          submitting={excelSubmitting}
+          error={excelError}
+          onSubmit={handleExcelSubmit}
+          onLoadIntoForm={handleExcelLoadIntoForm}
+          onClose={() => setExcel(null)}
+        />
+      )}
       <div className="p-6 border-b border-sage-100">
         {window_ && (
           <p className="text-sm text-crate-800/70">
@@ -250,6 +363,29 @@ export default function PriceForm({ onSubmitted }: { onSubmitted: () => void }) 
             before then
           </p>
         )}
+        <div className="mt-4 rounded-xl border border-dashed border-sage-300 bg-sage-50/50 p-4 flex flex-col sm:flex-row sm:items-center gap-3">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-crate-800">Prefer Excel?</p>
+            <p className="text-xs text-crate-800/55 mt-0.5">
+              Download the template, fill in the Price column (leave blank for products you don't supply), then
+              upload it here.
+            </p>
+            {uploadError && <p className="text-xs text-tomato-600 mt-1.5">{uploadError}</p>}
+          </div>
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <TemplateDownloadButton />
+            <input
+              ref={fileInput}
+              type="file"
+              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              className="hidden"
+              onChange={handleExcelChosen}
+            />
+            <button onClick={() => fileInput.current?.click()} disabled={uploading} className={outlineButton}>
+              {uploading ? "Reading file…" : "Upload Excel"}
+            </button>
+          </div>
+        </div>
         <div className="flex flex-col sm:flex-row gap-3 mt-4">
           <input
             placeholder="Search products…"
