@@ -1,3 +1,4 @@
+import logging
 from datetime import date
 
 from fastapi import APIRouter, Depends, File, Response, UploadFile
@@ -27,6 +28,7 @@ from app.services import price_approval_service
 from app.services import keells_scrape_service
 
 router = APIRouter(prefix="/pricing", dependencies=[Depends(get_current_user)])
+logger = logging.getLogger("spar.pricing")
 
 
 def _supplier_price_out(db: Session, rows: list[SupplierPrice]) -> list[SupplierPriceOut]:
@@ -103,7 +105,21 @@ async def preview_price_excel(
     contents = await file.read(MAX_PRICE_EXCEL_BYTES + 1)
     if len(contents) > MAX_PRICE_EXCEL_BYTES:
         raise ValidationFailedError("That file is too large — please upload the price template as-is.")
-    return await run_in_threadpool(pricing_service.parse_price_excel, db, current_user, contents)
+    # Logged either way so a supplier's "it didn't work" can be traced
+    # without needing their file.
+    try:
+        result = await run_in_threadpool(pricing_service.parse_price_excel, db, current_user, contents)
+    except ValidationFailedError as e:
+        logger.warning(
+            "Price upload rejected: supplier=%s file=%r bytes=%d reason=%s",
+            current_user.supplier_id, file.filename, len(contents), e.message,
+        )
+        raise
+    logger.info(
+        "Price upload read: supplier=%s file=%r valid=%d errors=%d blank=%d",
+        current_user.supplier_id, file.filename, result.valid_line_count, result.error_count, result.blank_price_count,
+    )
+    return result
 
 
 @router.get("/mine", response_model=list[SupplierPriceOut])

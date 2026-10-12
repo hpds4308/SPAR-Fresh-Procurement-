@@ -276,7 +276,7 @@ _EXCEL_PRICE_ALIASES = {
 _EXCEL_PRICE_REQUIRED = {"product_code", "price"}
 # The template has a logo and title above the header, and a supplier may
 # add lines of their own; look this far down for it.
-_EXCEL_HEADER_SEARCH_ROWS = 10
+_EXCEL_HEADER_SEARCH_ROWS = 30
 _SPAR_LOGO_PATH = Path(__file__).resolve().parent.parent / "assets" / "spar-logo.png"
 _SPAR_GREEN = "157946"
 _EXCEL_ERROR_VALUES = {"#N/A", "#REF!", "#VALUE!", "#DIV/0!", "#NAME?", "#NULL!", "#NUM!", "#SPILL!", "#CALC!", "#GETTING_DATA"}
@@ -386,6 +386,62 @@ def _parse_excel_price(raw) -> tuple[float | None, str | None]:
     return round(value, 2), None
 
 
+def _price_header_key(cell) -> str | None:
+    """Which template column a heading means. Exact names first, then a
+    forgiving match ("Price (LKR)", "Item Code", "Rate") because suppliers
+    rename headings; a POS code column is never mistaken for the product code."""
+    if cell is None:
+        return None
+    text = " ".join(str(cell).strip().lower().replace("*", "").replace(":", "").split())
+    if not text:
+        return None
+    if text in _EXCEL_PRICE_ALIASES:
+        return _EXCEL_PRICE_ALIASES[text]
+    if "pos" in text.split():
+        return None
+    if "code" in text:
+        return "product_code"
+    if "price" in text or "rate" in text:
+        return "price"
+    if "product" in text or "description" in text or "item" in text:
+        return "description"
+    return None
+
+
+def _price_sheets(file_bytes: bytes):
+    """Yields each sheet of the upload as an iterator of row tuples, the
+    template's "Prices" sheet first. Also takes a CSV; an old .xls gets a
+    clear message instead of a generic read failure."""
+    import csv
+    import io
+
+    import openpyxl
+
+    if file_bytes[:4] == bytes.fromhex("d0cf11e0"):
+        raise ValidationFailedError(
+            "This is an old Excel 97-2003 (.xls) file. Open it in Excel, choose File > Save As > "
+            "Excel Workbook (.xlsx), and upload that copy."
+        )
+    if file_bytes[:2] != b"PK":
+        try:
+            text = file_bytes.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            text = file_bytes.decode("latin-1")
+        rows = list(csv.reader(io.StringIO(text)))
+        if not rows:
+            raise ValidationFailedError("This file is empty.")
+        yield iter([tuple(r) for r in rows])
+        return
+
+    workbook = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
+    # Suppliers often add a sheet of their own prices to VLOOKUP from and
+    # save with that sheet open, so the active sheet isn't necessarily ours.
+    active_title = workbook.active.title if workbook.active is not None else None
+    for sheet in sorted(workbook.worksheets, key=lambda ws: (ws.title != "Prices", ws.title != active_title)):
+        sheet.reset_dimensions()  # some non-Excel tools write a wrong size; read every row that's there
+        yield sheet.iter_rows(values_only=True)
+
+
 def parse_price_excel(db: Session, supplier_user: User, file_bytes: bytes) -> ExcelPricePreviewOut:
     """
     Parses an uploaded price Excel into a row-by-row preview — never saves
@@ -393,10 +449,6 @@ def parse_price_excel(db: Session, supplier_user: User, file_bytes: bytes) -> Ex
     submitted through submit_prices like manual entry, so the submission
     window and cutoff are enforced exactly the same way.
     """
-    import io
-
-    import openpyxl
-
     from app.services.order_service import (
         MAX_EXCEL_ROWS_SCANNED,
         _reject_oversized_workbook,
@@ -411,41 +463,44 @@ def parse_price_excel(db: Session, supplier_user: User, file_bytes: bytes) -> Ex
     except ValidationFailedError:
         raise ValidationFailedError(too_big)
 
+    header_map: dict[int, str] = {}
+    header_row_number = 0
+    rows = iter(())
+    # The heading row that came closest, quoted back if no header is found.
+    seen_headers: list[str] = []
+    best_match = -1
     try:
-        workbook = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
-        # Suppliers often add a sheet of their own prices to VLOOKUP from and
-        # save with that sheet open, so the active sheet isn't necessarily
-        # ours: try the template's "Prices" sheet, then the active one, then
-        # the rest, and use the first that has the header row.
-        sheets = sorted(
-            workbook.worksheets,
-            key=lambda ws: (ws.title != "Prices", ws.title != workbook.active.title),
-        )
-        header_map: dict[int, str] = {}
-        header_row_number = 0
-        rows = iter(())
-        for sheet in sheets:
-            rows = sheet.iter_rows(values_only=True)
+        for sheet_rows in _price_sheets(file_bytes):
+            rows = sheet_rows
             for header_row_number, row in enumerate(rows, start=1):
                 candidate: dict[int, str] = {}
                 for idx, cell in enumerate(row):
-                    key = _EXCEL_PRICE_ALIASES.get(str(cell).strip().lower()) if cell is not None else None
+                    key = _price_header_key(cell)
                     if key and key not in candidate.values():
                         candidate[idx] = key
                 if _EXCEL_PRICE_REQUIRED <= set(candidate.values()):
                     header_map = candidate
                     break
+                headings = [str(c).strip() for c in row if c is not None and str(c).strip()]
+                if headings and len(candidate) > best_match:
+                    best_match, seen_headers = len(candidate), headings
                 if header_row_number >= _EXCEL_HEADER_SEARCH_ROWS:
                     break
             if header_map:
                 break
+    except ValidationFailedError:
+        raise
     except Exception:
-        raise ValidationFailedError("Could not read this file — make sure it's a valid .xlsx file.")
+        raise ValidationFailedError(
+            "Could not read this file. Open it in Excel, choose File > Save As > Excel Workbook (.xlsx), "
+            "and upload that copy."
+        )
 
     if not header_map:
+        found = f" Found these headings: {', '.join(seen_headers[:8])}." if seen_headers else ""
         raise ValidationFailedError(
-            "Could not find the header row — the sheet needs a Product Code and a Price column. "
-            "Download the price template and fill in the Price column."
+            "Could not find the Product Code and Price columns — keep the template's heading row "
+            "(Product Code, Category, Product, Price) as it is and put your prices under Price." + found
         )
 
     products_by_code = {p.product_code: p for p in db.query(Product).filter(Product.status == "ACTIVE").all()}
@@ -464,6 +519,8 @@ def parse_price_excel(db: Session, supplier_user: User, file_bytes: bytes) -> Ex
             if isinstance(raw_code, float) and raw_code.is_integer():
                 raw_code = int(raw_code)
             product_code = str(raw_code or "").strip()
+            if product_code.endswith(".0") and product_code[:-2].isdigit():
+                product_code = product_code[:-2]
             if not product_code:
                 continue  # blank trailing row
             description = str(values["description"]).strip() if values.get("description") is not None else None

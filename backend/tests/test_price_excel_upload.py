@@ -127,7 +127,7 @@ def test_header_below_title_rows_and_numeric_codes(client, auth_headers, supplie
 def test_missing_columns_rejected(client, auth_headers, supplier_user):
     res = _upload(client, auth_headers(supplier_user), _xlsx_bytes([("A", "B")], headers=("Product Code", "Product")))
     assert res.status_code == 422
-    assert "header row" in res.json()["detail"]
+    assert "Product Code and Price columns" in res.json()["detail"]
 
 
 def test_garbage_file_rejected(client, auth_headers, supplier_user):
@@ -185,3 +185,24 @@ def test_finds_prices_sheet_when_another_sheet_is_active(client, auth_headers, s
     wb.save(buf)
     body = _upload(client, auth_headers(supplier_user), buf.getvalue()).json()
     assert body["valid_line_count"] == 1
+
+
+def test_renamed_headings_still_read(client, auth_headers, supplier_user, make_product):
+    a = make_product()
+    body = _upload(client, auth_headers(supplier_user), _xlsx_bytes([(a.product_code, "x", 40)], headers=("Item Code", "Item Name", "Price (LKR)"))).json()
+    assert body["valid_line_count"] == 1
+
+
+def test_csv_upload_read(client, auth_headers, supplier_user, make_product):
+    a = make_product()
+    content = f"Product Code,Product,Price
+{a.product_code},x,65
+".encode()
+    body = _upload(client, auth_headers(supplier_user), content, filename="prices.csv").json()
+    assert body["valid_line_count"] == 1
+
+
+def test_old_xls_gets_clear_message(client, auth_headers, supplier_user):
+    res = _upload(client, auth_headers(supplier_user), bytes.fromhex("d0cf11e0") + bytes(100), filename="prices.xls")
+    assert res.status_code == 422
+    assert ".xls" in res.json()["detail"]

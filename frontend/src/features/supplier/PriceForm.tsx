@@ -377,7 +377,7 @@ export default function PriceForm({ onSubmitted }: { onSubmitted: () => void }) 
             <input
               ref={fileInput}
               type="file"
-              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              accept=".xlsx,.xls,.csv"
               className="hidden"
               onChange={handleExcelChosen}
             />
