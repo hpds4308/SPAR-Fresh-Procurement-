@@ -259,3 +259,15 @@ export function IconReceipt(props: IconProps) {
     props
   );
 }
+
+export function IconList(props: IconProps) {
+  return base(
+    <>
+      <path d="M7.5 5.5h9M7.5 10h9M7.5 14.5h9" />
+      <circle cx="4" cy="5.5" r="0.9" />
+      <circle cx="4" cy="10" r="0.9" />
+      <circle cx="4" cy="14.5" r="0.9" />
+    </>,
+    props
+  );
+}

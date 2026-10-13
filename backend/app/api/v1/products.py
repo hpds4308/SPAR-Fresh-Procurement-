@@ -2,10 +2,11 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.security import get_current_user
+from app.core.security import get_current_user, require_roles
 from app.models.product import Product, ProductCategory, ProductUnit
 from app.models.user import User
-from app.schemas.product import ProductOut
+from app.schemas.product import ProductAdminOut, ProductCreate, ProductOptionsOut, ProductOut
+from app.services import product_service
 
 router = APIRouter(prefix="/products", dependencies=[Depends(get_current_user)])
 
@@ -35,3 +36,54 @@ def list_products(db: Session = Depends(get_db), current_user: User = Depends(ge
         )
         for p in products
     ]
+
+
+# --------------------------------------------------------------------------
+# Admin Product List — view every item, add new ones, remove / restore
+# --------------------------------------------------------------------------
+
+
+@router.get("/all", response_model=list[ProductAdminOut])
+def list_all_products(
+    _admin: User = Depends(require_roles("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """Every product, including removed ones."""
+    return product_service.list_all(db)
+
+
+@router.get("/options", response_model=ProductOptionsOut)
+def product_options(
+    _admin: User = Depends(require_roles("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """Categories and units to choose from when adding a product."""
+    return product_service.options(db)
+
+
+@router.post("", response_model=ProductAdminOut, status_code=201)
+def create_product(
+    payload: ProductCreate,
+    admin: User = Depends(require_roles("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    return product_service.create(db, admin, payload)
+
+
+@router.delete("/{product_id}", response_model=ProductAdminOut)
+def remove_product(
+    product_id: int,
+    admin: User = Depends(require_roles("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """Takes the product off the list (marks it INACTIVE); its history is kept."""
+    return product_service.remove(db, admin, product_id)
+
+
+@router.post("/{product_id}/restore", response_model=ProductAdminOut)
+def restore_product(
+    product_id: int,
+    admin: User = Depends(require_roles("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    return product_service.restore(db, admin, product_id)

@@ -2,7 +2,7 @@ import { ReactNode, useEffect, useState } from "react";
 import DashboardShell from "../shared/DashboardShell";
 import { useTabParam } from "../shared/useTabParam";
 import { SidebarItem } from "../shared/Sidebar";
-import { IconBasket, IconTruck, IconTag, IconChart, IconChat, IconClock, IconGrid, IconStore, IconBranches, IconLog, IconSettings, IconUser, IconPercent, IconShield, IconReceipt } from "../shared/Icons";
+import { IconBasket, IconTruck, IconTag, IconChart, IconChat, IconClock, IconGrid, IconStore, IconBranches, IconLog, IconSettings, IconUser, IconPercent, IconShield, IconReceipt, IconList } from "../shared/Icons";
 import { fetchAdminUnreadCount } from "../../api/messages";
 import { fetchAdminAttentionCount } from "../../api/priceApprovals";
 import { fetchUnreviewedAutoOrders } from "../../api/orders";
@@ -18,11 +18,12 @@ import AdminMarketPrices from "./AdminMarketPrices";
 import AdminMarketPriceHistory from "./AdminMarketPriceHistory";
 import AdminMasterData from "./AdminMasterData";
 import AdminPromotions from "./AdminPromotions";
+import AdminProductList from "./AdminProductList";
 import AdminMessages from "./AdminMessages";
 import AdminAuditLog from "./AdminAuditLog";
 import AdminSettings from "./AdminSettings";
 import AdminUsers from "./AdminUsers";
-const TABS = ["orders", "orderHistory", "supplierOrders", "purchaseOrders", "supplierPrices", "priceApprovals", "keellsPrices", "marketPrices", "marketPriceHistory", "masterData", "promotions", "messages", "reports", "auditLog", "settings", "users"] as const;
+const TABS = ["orders", "orderHistory", "supplierOrders", "purchaseOrders", "supplierPrices", "priceApprovals", "keellsPrices", "marketPrices", "marketPriceHistory", "masterData", "productList", "promotions", "messages", "reports", "auditLog", "settings", "users"] as const;
 type Tab = (typeof TABS)[number];
 
 const iconProps = { width: 17, height: 17 };
@@ -109,6 +110,7 @@ export default function AdminDashboard() {
     { id: "marketPrices", label: "Local Market Prices", icon: <IconBranches {...iconProps} /> },
     { id: "marketPriceHistory", label: "Price History", icon: <IconChart {...iconProps} /> },
     { id: "masterData", label: "Master Data Sheet", icon: <IconGrid {...iconProps} /> },
+    { id: "productList", label: "Product List", icon: <IconList {...iconProps} /> },
     { id: "promotions", label: "Promotions", icon: <IconPercent {...iconProps} /> },
     { id: "messages", label: "Messages", icon: <IconChat {...iconProps} />, badge: unread },
     { id: "reports", label: "Reports", icon: <IconChart {...iconProps} /> },
@@ -226,6 +228,15 @@ export default function AdminDashboard() {
             Master Data Sheet
           </h2>
           <AdminMasterData />
+        </>
+      )}
+      {keepAlive(
+        "productList",
+        <>
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-crate-800/60 mb-3">
+            Product List
+          </h2>
+          <AdminProductList />
         </>
       )}
       {keepAlive(
