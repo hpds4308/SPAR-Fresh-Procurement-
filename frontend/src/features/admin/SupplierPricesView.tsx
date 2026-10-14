@@ -18,6 +18,10 @@ import { ConfirmDialog } from "../shared/ui/Modal";
 import { ProductPromotion } from "../shared/ui/PromotionBadge";
 import SupplierColumnFilter, { ColumnFilter, FILTER_LABELS, SortDir, cellMatches } from "./SupplierColumnFilter";
 
+// MKT Price column: a market reference worked out from the Keells (retail)
+// price — 70% of it.
+const MKT_FACTOR = 0.7;
+
 function formatDate(iso: string): string {
   const d = new Date(iso + "T00:00:00");
   return d.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" });
@@ -81,11 +85,12 @@ export default function SupplierPricesView() {
   // (no real row exists for this date until Admin interacts with the field).
   const [carriedForwardIds, setCarriedForwardIds] = useState<Set<number>>(new Set());
 
-  // Frozen-column left offset for Keells Price, measured from the real
-  // rendered width of the Item header cell rather than hardcoded, so it
-  // stays aligned however the table lays the Item column out.
+  // Frozen-column left offsets for Keells Price and MKT Price, measured
+  // from the real rendered widths of the header cells before them rather
+  // than hardcoded, so they stay aligned however the table lays out.
   const itemHeadRef = useRef<HTMLTableCellElement>(null);
-  const [stickyOffsets, setStickyOffsets] = useState({ keells: 0 });
+  const keellsHeadRef = useRef<HTMLTableCellElement>(null);
+  const [stickyOffsets, setStickyOffsets] = useState({ keells: 0, mkt: 0 });
 
   useEffect(() => {
     fetchSuppliers().then(setSuppliers).catch(() => {});
@@ -254,7 +259,8 @@ export default function SupplierPricesView() {
   useLayoutEffect(() => {
     function measure() {
       const itemWidth = itemHeadRef.current?.offsetWidth ?? 0;
-      setStickyOffsets((prev) => (prev.keells === itemWidth ? prev : { keells: itemWidth }));
+      const mkt = itemWidth + (keellsHeadRef.current?.offsetWidth ?? 0);
+      setStickyOffsets((prev) => (prev.keells === itemWidth && prev.mkt === mkt ? prev : { keells: itemWidth, mkt }));
     }
     measure();
     window.addEventListener("resize", measure);
@@ -493,14 +499,23 @@ export default function SupplierPricesView() {
                   Item
                 </th>
                 <th
+                  ref={keellsHeadRef}
                   rowSpan={2}
                   style={{ left: stickyOffsets.keells }}
-                  className="sticky z-30 bg-green-100 px-4 py-2.5 text-center border-l border-r border-sage-200 align-middle normal-case tracking-normal shadow-[4px_0_6px_-4px_rgba(21,56,38,0.12)] min-w-[8rem]"
+                  className="sticky z-30 bg-green-100 px-4 py-2.5 text-center border-l border-sage-200 align-middle normal-case tracking-normal min-w-[8rem]"
                 >
                   <span className="font-semibold text-crate-800 text-sm">Keells Price</span>
                   <p className="text-[10px] text-crate-800/35 font-normal normal-case mt-0.5">
                     Edit on Keells Prices page
                   </p>
+                </th>
+                <th
+                  rowSpan={2}
+                  style={{ left: stickyOffsets.mkt }}
+                  className="sticky z-30 bg-amber-50 px-4 py-2.5 text-center border-l border-r border-sage-200 align-middle normal-case tracking-normal shadow-[4px_0_6px_-4px_rgba(21,56,38,0.12)] min-w-[7rem]"
+                >
+                  <span className="font-semibold text-crate-800 text-sm">MKT Price</span>
+                  <p className="text-[10px] text-crate-800/35 font-normal normal-case mt-0.5">Keells price × 70%</p>
                 </th>
                 {supplierColumns.map((s) => {
                   const unsentCount = unsentCellsForSupplier(s.id).length;
@@ -594,7 +609,7 @@ export default function SupplierPricesView() {
             <tbody className="divide-y divide-sage-100">
               {visibleRows.length === 0 && (
                 <tr>
-                  <td colSpan={2 + supplierCount * 2} className="sticky left-0 px-4 py-10 text-left text-sm text-crate-800/50">
+                  <td colSpan={3 + supplierCount * 2} className="sticky left-0 px-4 py-10 text-left text-sm text-crate-800/50">
                     No items match these filters.{" "}
                     <button
                       onClick={() => {
@@ -628,7 +643,7 @@ export default function SupplierPricesView() {
                   </td>
                   <td
                     style={{ left: stickyOffsets.keells }}
-                    className="sticky z-10 bg-green-100 px-3 py-1.5 border-l border-r border-sage-200 shadow-[4px_0_6px_-4px_rgba(21,56,38,0.12)]"
+                    className="sticky z-10 bg-green-100 px-3 py-1.5 border-l border-sage-200"
                   >
                     <div className="flex flex-col items-center gap-0.5">
                       {referenceDrafts[p.product_id] ? (
@@ -644,6 +659,21 @@ export default function SupplierPricesView() {
                         </span>
                       )}
                     </div>
+                  </td>
+                  <td
+                    style={{ left: stickyOffsets.mkt }}
+                    className="sticky z-10 bg-amber-50 px-3 py-1.5 text-center border-l border-r border-sage-200 shadow-[4px_0_6px_-4px_rgba(21,56,38,0.12)]"
+                  >
+                    {referenceDrafts[p.product_id] ? (
+                      <span
+                        className={`text-sm ${carriedForwardIds.has(p.product_id) ? "text-mango-600/90" : "text-crate-800/80"}`}
+                        title="Keells price × 0.7"
+                      >
+                        Rs. {(Number(referenceDrafts[p.product_id]) * MKT_FACTOR).toFixed(2)}
+                      </span>
+                    ) : (
+                      <span className="text-sm text-crate-800/20">—</span>
+                    )}
                   </td>
                   {supplierColumns.flatMap((s) => {
                     const cell = p.cells.get(s.id);
