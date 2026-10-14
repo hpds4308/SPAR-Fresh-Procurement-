@@ -35,7 +35,7 @@ def admin_unread_count(
     admin: User = Depends(require_roles("ADMIN")),
     db: Session = Depends(get_db),
 ):
-    return UnreadCountOut(count=message_service.admin_unread_count(db))
+    return message_service.admin_unread_count(db)
 
 
 # ---- Admin side: one thread per branch ----
@@ -94,7 +94,7 @@ def admin_get_pair_conversation(
     admin: User = Depends(require_roles("ADMIN")),
     db: Session = Depends(get_db),
 ):
-    """Read-only for Admin, and doesn't mark anything read for the supplier or branch."""
+    """Read-only for Admin. Marks the chat read for Admin, never for the supplier or branch."""
     return message_service.list_pair_for_admin(db, supplier_id, branch_id)
 
 
@@ -143,7 +143,7 @@ def send_my_message(
     return message_service.send_as_supplier(db, current_user, payload.body)
 
 
-@router.get("/mine/unread-count", response_model=UnreadCountOut)
+@router.get("/mine/unread-count", response_model=UnreadCountOut, response_model_exclude_none=True)
 def my_unread_count(
     current_user: User = Depends(require_roles("SUPPLIER", "BRANCH")),
     db: Session = Depends(get_db),

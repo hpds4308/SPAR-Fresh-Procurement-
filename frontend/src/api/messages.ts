@@ -34,7 +34,18 @@ export function fetchAdminThreads(): Promise<SupplierThread[]> {
   return apiFetch("/messages/admin/threads");
 }
 
-export function fetchAdminUnreadCount(): Promise<{ count: number }> {
+// `count` is the one total badge; the rest split it per Messages tab, plus
+// who wrote the newest unread supplier <-> branch message ("Bloomax → Kandy").
+export type AdminUnreadCount = {
+  count: number;
+  suppliers: number;
+  branches: number;
+  supplier_branch: number;
+  latest_supplier_branch: string | null;
+  latest_supplier_branch_id: number | null;
+};
+
+export function fetchAdminUnreadCount(): Promise<AdminUnreadCount> {
   return apiFetch("/messages/admin/unread-count");
 }
 
@@ -116,6 +127,7 @@ export type PairConversation = {
   branch_id: number;
   branch_name: string;
   message_count: number;
+  unread_count: number; // not yet seen by Admin
   last_message_body: string;
   last_message_at: string;
   last_sender_role: "SUPPLIER" | "BRANCH";

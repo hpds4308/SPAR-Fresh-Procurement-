@@ -4,6 +4,7 @@ import {
   Message,
   PairConversation,
   fetchAdminThread,
+  fetchAdminUnreadCount,
   fetchPairConversation,
   fetchPairConversations,
   fetchAdminThreads,
@@ -28,7 +29,32 @@ const PARTY_TABS: { value: PartyType; label: string }[] = [
   { value: "PAIR", label: "Supplier ↔ Branch" },
 ];
 
+// Unread per tab, so Admin can see which tab a new message is on.
+function useUnreadByTab(): Record<PartyType, number> {
+  const [counts, setCounts] = useState<Record<PartyType, number>>({ SUPPLIER: 0, BRANCH: 0, PAIR: 0 });
+  useEffect(() => {
+    const load = () =>
+      fetchAdminUnreadCount()
+        .then((r) => setCounts({ SUPPLIER: r.suppliers, BRANCH: r.branches, PAIR: r.supplier_branch }))
+        .catch(() => {});
+    load();
+    const id = setInterval(load, THREADS_POLL_MS);
+    return () => clearInterval(id);
+  }, []);
+  return counts;
+}
+
+function UnreadDot({ count }: { count: number }) {
+  if (count <= 0) return null;
+  return (
+    <span className="shrink-0 inline-flex items-center justify-center min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-tomato-500 text-white text-[10px] font-bold">
+      {count > 99 ? "99+" : count}
+    </span>
+  );
+}
+
 function PartyTabs({ value, onChange }: { value: PartyType; onChange: (v: PartyType) => void }) {
+  const unread = useUnreadByTab();
   return (
     <div className="px-3 pt-3 pb-2 border-b border-sage-100 shrink-0">
       <div className="grid grid-cols-3 gap-1 bg-sage-100 rounded-2xl p-0.5">
@@ -36,11 +62,16 @@ function PartyTabs({ value, onChange }: { value: PartyType; onChange: (v: PartyT
           <button
             key={t.value}
             onClick={() => onChange(t.value)}
-            className={`text-[11px] leading-tight font-semibold rounded-2xl px-1 py-1.5 transition-colors duration-150 ${
+            className={`relative text-[11px] leading-tight font-semibold rounded-2xl px-1 py-1.5 transition-colors duration-150 ${
               value === t.value ? "bg-white text-crate-950 shadow-sm" : "text-crate-800/50 hover:text-crate-800"
             }`}
           >
             {t.label}
+            {value !== t.value && unread[t.value] > 0 && (
+              <span className="absolute -top-1 -right-0.5">
+                <UnreadDot count={unread[t.value]} />
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -301,6 +332,12 @@ function PairConversations({ tabs }: { tabs: React.ReactNode }) {
         .then((data) => {
           setMessages(data);
           setError(null);
+          // Opening it marks it read for Admin — clear its badge right away.
+          setConversations((prev) =>
+            prev.map((c) =>
+              c.supplier_id === selectedSupplierId && c.branch_id === selectedBranchId ? { ...c, unread_count: 0 } : c
+            )
+          );
         })
         .catch((err) => setError(err instanceof ApiError ? err.message : "Could not load this conversation."));
     setMessagesLoading(true);
@@ -338,9 +375,12 @@ function PairConversations({ tabs }: { tabs: React.ReactNode }) {
                     isActive ? "bg-sage-100" : "hover:bg-sage-50"
                   }`}
                 >
-                  <p className={`text-sm truncate ${isActive ? "font-semibold text-crate-950" : "text-crate-800"}`}>
-                    {c.supplier_name} <span className="text-crate-800/40">↔</span> {c.branch_name}
-                  </p>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className={`text-sm truncate ${isActive ? "font-semibold text-crate-950" : "text-crate-800"}`}>
+                      {c.supplier_name} <span className="text-crate-800/40">↔</span> {c.branch_name}
+                    </span>
+                    <UnreadDot count={c.unread_count} />
+                  </div>
                   <p className="text-xs text-crate-800/40 truncate mt-0.5">
                     {c.last_sender_role === "SUPPLIER" ? c.supplier_name : c.branch_name}: {c.last_message_body}
                     <span className="ml-1.5 text-crate-800/30">· {relativeTime(c.last_message_at)}</span>

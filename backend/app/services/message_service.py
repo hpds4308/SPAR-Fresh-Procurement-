@@ -8,11 +8,13 @@ branch pair. Sending and reading are both scoped through here so the API
 layer never has to reason about who's allowed to see what — a supplier
 user can only ever touch their own supplier_id's threads, a branch user
 only their own branch_id's; Admin can touch any Admin thread and read
-(but not post in) every supplier<->branch thread.
+(but not post in) every supplier<->branch thread. Admin is notified of
+supplier<->branch messages too (unread badge), and opening one of those
+chats marks it read for Admin only.
 """
 from datetime import datetime, timezone
 
-from sqlalchemy import and_, or_
+from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
 from app.core.errors import PermissionDeniedError, NotFoundError
@@ -26,6 +28,7 @@ from app.schemas.message import (
     MessageOut,
     PairConversationOut,
     SupplierThreadOut,
+    UnreadCountOut,
 )
 
 # Which thread a message belongs to (see models/message.py).
@@ -286,18 +289,37 @@ def list_admin_branch_threads(db: Session) -> list[BranchThreadOut]:
     return threads
 
 
-def admin_unread_count(db: Session) -> int:
-    """Combined across both supplier and branch threads — Admin sees one
-    unread badge, not one per counterparty type. Supplier<->branch chats
-    don't count: Admin only looks in on those."""
-    return (
+def admin_unread_count(db: Session) -> UnreadCountOut:
+    """
+    Messages Admin hasn't read yet — in their own supplier and branch
+    threads, and in supplier<->branch chats (Admin is notified of those
+    too). `count` is the one total badge; the rest split it per Messages
+    tab, plus who wrote the newest unread supplier<->branch message.
+    """
+    unread = (
         db.query(Message)
-        .filter(
-            Message.sender_role.in_(["SUPPLIER", "BRANCH"]),
-            Message.read_by_admin_at.is_(None),
-            or_(_ADMIN_SUPPLIER, _ADMIN_BRANCH),
-        )
-        .count()
+        .filter(Message.sender_role.in_(["SUPPLIER", "BRANCH"]), Message.read_by_admin_at.is_(None))
+        .order_by(Message.created_at.desc(), Message.id.desc())
+        .all()
+    )
+    suppliers = sum(1 for m in unread if m.branch_id is None)
+    branches = sum(1 for m in unread if m.supplier_id is None)
+    pair = [m for m in unread if m.supplier_id is not None and m.branch_id is not None]
+    latest = None
+    if pair:
+        m = pair[0]
+        supplier = db.get(Supplier, m.supplier_id)
+        branch = db.get(Branch, m.branch_id)
+        s_name = supplier.supplier_name if supplier else "Supplier"
+        b_name = branch.branch_name if branch else "Branch"
+        latest = f"{s_name} → {b_name}" if m.sender_role == "SUPPLIER" else f"{b_name} → {s_name}"
+    return UnreadCountOut(
+        count=len(unread),
+        suppliers=suppliers,
+        branches=branches,
+        supplier_branch=len(pair),
+        latest_supplier_branch=latest,
+        latest_supplier_branch_id=pair[0].id if pair else None,
     )
 
 
@@ -485,6 +507,7 @@ def list_pair_conversations(db: Session) -> list[PairConversationOut]:
         last = msgs[-1]
         out.append(
             PairConversationOut(
+                unread_count=sum(1 for m in msgs if m.read_by_admin_at is None),
                 supplier_id=supplier_id,
                 supplier_name=suppliers.get(supplier_id, "—"),
                 branch_id=branch_id,
@@ -499,10 +522,20 @@ def list_pair_conversations(db: Session) -> list[PairConversationOut]:
     return out
 
 
-def list_pair_for_admin(db: Session, supplier_id: int, branch_id: int) -> list[MessageOut]:
-    """Admin reading one supplier<->branch chat. Doesn't mark anything read for either side."""
+def list_pair_for_admin(db: Session, supplier_id: int, branch_id: int, mark_read: bool = True) -> list[MessageOut]:
+    """
+    Admin reading one supplier<->branch chat. Marks it read for Admin only
+    — never for the supplier or the branch.
+    """
     _require_supplier_exists(db, supplier_id)
     _require_branch_exists(db, branch_id)
     messages = _pair_messages(db, supplier_id, branch_id)
+    if mark_read:
+        unread = [m for m in messages if m.read_by_admin_at is None]
+        if unread:
+            now = datetime.now(timezone.utc)
+            for m in unread:
+                m.read_by_admin_at = now
+            db.commit()
     names = _usernames(db, messages)
     return [_to_out(m, names.get(m.sender_user_id, "—")) for m in messages]

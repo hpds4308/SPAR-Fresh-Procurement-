@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useState } from "react";
+import { ReactNode, useEffect, useRef, useState } from "react";
 import DashboardShell from "../shared/DashboardShell";
 import { useTabParam } from "../shared/useTabParam";
 import { SidebarItem } from "../shared/Sidebar";
@@ -6,6 +6,7 @@ import { IconBasket, IconTruck, IconTag, IconChart, IconChat, IconClock, IconGri
 import { fetchAdminUnreadCount } from "../../api/messages";
 import { fetchAdminAttentionCount } from "../../api/priceApprovals";
 import { fetchUnreviewedAutoOrders } from "../../api/orders";
+import { useToast } from "../shared/ui/Toast";
 import OrderMatrixView from "./OrderMatrixView";
 import AdminOrderHistory from "./AdminOrderHistory";
 import ReportsView from "./ReportsView";
@@ -32,6 +33,10 @@ const UNREAD_POLL_MS = 15000;
 export default function AdminDashboard() {
   const [tab, setTab] = useTabParam(TABS, "orders");
   const [unread, setUnread] = useState(0);
+  const toast = useToast();
+  // Newest supplier <-> branch message already announced, so each one pops
+  // up only once.
+  const announcedPairMessage = useRef<number | null>(null);
   // Rejected price sheets for upcoming deliveries not yet followed up.
   const [rejectedSheets, setRejectedSheets] = useState(0);
   // Orders auto-submitted for branches that missed the cutoff, not yet reviewed.
@@ -67,7 +72,14 @@ export default function AdminDashboard() {
     function poll() {
       fetchAdminUnreadCount()
         .then((r) => {
-          if (!cancelled) setUnread(r.count);
+          if (cancelled) return;
+          setUnread(r.count);
+          const latest = r.latest_supplier_branch_id;
+          if (latest !== null && latest !== announcedPairMessage.current) {
+            announcedPairMessage.current = latest;
+            const more = r.supplier_branch > 1 ? ` (${r.supplier_branch} unread)` : "";
+            toast.show("info", `New supplier ↔ branch message: ${r.latest_supplier_branch}${more}. See Messages.`);
+          }
         })
         .catch(() => {});
       fetchAdminAttentionCount()

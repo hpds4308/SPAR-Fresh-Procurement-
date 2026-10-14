@@ -78,21 +78,36 @@ def test_pair_chats_stay_out_of_admin_threads(db_session, ctx):
     assert [m.body for m in svc.list_for_branch(db_session, ctx["branch_user"], mark_read=False)] == ["Branch to admin"]
     assert [m.body for m in svc.list_for_admin(db_session, ctx["supplier"].id, mark_read=False)] == ["To admin"]
     assert [m.body for m in svc.list_for_admin_branch(db_session, ctx["branch"].id, mark_read=False)] == ["Branch to admin"]
-    # Admin's badge counts only messages sent to Admin.
-    assert svc.admin_unread_count(db_session) == 2
+    # Admin's badge covers all three, split per Messages tab.
+    unread = svc.admin_unread_count(db_session)
+    assert (unread.count, unread.suppliers, unread.branches, unread.supplier_branch) == (3, 1, 1, 1)
 
 
-def test_admin_sees_pair_chats_without_marking_them_read(db_session, ctx):
+def test_admin_is_notified_of_pair_chats(db_session, ctx):
     svc.send_to_peer(db_session, ctx["supplier_user"], ctx["branch"].id, "Delivery delayed")
+
+    unread = svc.admin_unread_count(db_session)
+    assert (unread.count, unread.supplier_branch) == (1, 1)
+    assert unread.latest_supplier_branch == f"{ctx['supplier'].supplier_name} → {ctx['branch'].branch_name}"
+    assert unread.latest_supplier_branch_id is not None
 
     [conv] = svc.list_pair_conversations(db_session)
     assert (conv.supplier_id, conv.branch_id) == (ctx["supplier"].id, ctx["branch"].id)
-    assert conv.message_count == 1
+    assert (conv.message_count, conv.unread_count) == (1, 1)
     assert conv.last_sender_role == "SUPPLIER"
 
+    # Opening it clears Admin's badge — but not the branch's.
     bodies = [m.body for m in svc.list_pair_for_admin(db_session, ctx["supplier"].id, ctx["branch"].id)]
     assert bodies == ["Delivery delayed"]
+    assert svc.admin_unread_count(db_session).count == 0
+    assert svc.list_pair_conversations(db_session)[0].unread_count == 0
     assert svc.branch_unread_count(db_session, ctx["branch_user"]) == 1
+
+
+def test_branch_reply_names_branch_first(db_session, ctx):
+    svc.send_to_peer(db_session, ctx["branch_user"], ctx["supplier"].id, "Need more onions")
+    unread = svc.admin_unread_count(db_session)
+    assert unread.latest_supplier_branch == f"{ctx['branch'].branch_name} → {ctx['supplier'].supplier_name}"
 
 
 def test_pair_chat_endpoints(client, ctx, auth_headers):
@@ -107,6 +122,9 @@ def test_pair_chat_endpoints(client, ctx, auth_headers):
     assert client.get("/api/v1/messages/mine/unread-count", headers=branch_h).json() == {"count": 1}
     resp = client.get(f"/api/v1/messages/mine/with/{ctx['supplier'].id}", headers=branch_h)
     assert [m["body"] for m in resp.json()] == ["Hi"]
+
+    resp = client.get("/api/v1/messages/admin/unread-count", headers=admin_h)
+    assert resp.json()["count"] == 1 and resp.json()["supplier_branch"] == 1
 
     resp = client.get("/api/v1/messages/admin/supplier-branch", headers=admin_h)
     assert resp.status_code == 200 and len(resp.json()) == 1

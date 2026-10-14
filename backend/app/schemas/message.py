@@ -54,6 +54,7 @@ class PairConversationOut(BaseModel):
     branch_id: int
     branch_name: str
     message_count: int
+    unread_count: int = 0  # not yet seen by Admin
     last_message_body: str
     last_message_at: datetime
     last_sender_role: str
@@ -61,3 +62,11 @@ class PairConversationOut(BaseModel):
 
 class UnreadCountOut(BaseModel):
     count: int
+    # Admin only — `count` split per Messages tab, and who wrote the newest
+    # unread supplier<->branch message (e.g. "Bloomax → Kandy") with its id,
+    # so the dashboard can pop up a notice once per new message.
+    suppliers: int | None = None
+    branches: int | None = None
+    supplier_branch: int | None = None
+    latest_supplier_branch: str | None = None
+    latest_supplier_branch_id: int | None = None
