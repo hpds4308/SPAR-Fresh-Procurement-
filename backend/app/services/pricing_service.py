@@ -609,7 +609,7 @@ def list_all_prices(
         product = products.get(r.product_id)
         price = float(r.price)
         second_lowest = second_lowest_by_product.get(r.product_id)
-        approval_status, revision = statuses[r.id]
+        approval_status, revision, counter_price = statuses[r.id]
         result.append(
             {
                 "id": r.id,
@@ -626,7 +626,8 @@ def list_all_prices(
                 "sent_to_supplier": r.sent_to_supplier_at is not None,
                 "approval_status": approval_status,
                 "revision_id": revision.id if revision else None,
-                "rejection_reason": revision.rejection_reason if revision else None,
+                "rejection_reason": revision.rejection_reason if revision and approval_status == "REJECTED" else None,
+                "counter_price": counter_price,
                 "delivery_date": r.delivery_date,
                 "is_lowest_for_product": price == lowest_by_product.get(r.product_id),
                 "second_lowest_price": second_lowest,

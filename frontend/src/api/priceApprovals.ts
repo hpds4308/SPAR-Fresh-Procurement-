@@ -1,11 +1,15 @@
 import { apiFetch } from "./client";
 
 // Stored statuses, plus EXPIRED — a PENDING sheet whose delivery date has
-// arrived. See backend price_approval_service.py.
-export type SheetStatus = "PENDING" | "APPROVED" | "REJECTED" | "VOIDED" | "WITHDRAWN" | "EXPIRED";
+// arrived. PARTIAL: the supplier approved some items and rejected the rest.
+// See backend price_approval_service.py.
+export type SheetStatus = "PENDING" | "APPROVED" | "PARTIAL" | "REJECTED" | "VOIDED" | "WITHDRAWN" | "EXPIRED";
+
+export type ItemDecision = "APPROVED" | "REJECTED";
 
 // Row-level status on the price tables: no adjustment (null), DRAFT (not
-// sent), or the status of the sheet it was sent on.
+// sent), the status of the sheet it was sent on, or — once the supplier
+// has answered — that item's own APPROVED/REJECTED.
 export type RowApprovalStatus = "DRAFT" | "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED" | null;
 
 export type PriceSheetItem = {
@@ -16,6 +20,10 @@ export type PriceSheetItem = {
   unit_code: string;
   supplier_price: number;
   adjusted_price: number;
+  // The supplier's answer, once they've responded. counter_price is the
+  // final price they gave for a rejected item (null: their own price applies).
+  decision: ItemDecision | null;
+  counter_price: number | null;
 };
 
 export type PriceSheetSummary = {
@@ -25,6 +33,8 @@ export type PriceSheetSummary = {
   delivery_date: string;
   status: SheetStatus;
   item_count: number;
+  approved_count: number;
+  rejected_count: number;
   sent_at: string;
   sent_by_name: string | null;
   responded_at: string | null;
@@ -91,13 +101,15 @@ export function fetchMyPendingCount(): Promise<{ count: number }> {
   return apiFetch("/price-approvals/mine/pending-count");
 }
 
-export function approveSheet(
+export function respondToSheet(
   id: number,
-  body: { snapshot_hash: string; signature_image: string; agreed: boolean }
+  body: {
+    snapshot_hash: string;
+    items: { supplier_price_id: number; decision: ItemDecision; counter_price?: number | null }[];
+    note?: string | null;
+    agreed: boolean;
+    signature_image?: string | null;
+  }
 ): Promise<PriceSheet> {
-  return apiFetch(`/price-approvals/mine/${id}/approve`, { method: "POST", body: JSON.stringify(body) });
-}
-
-export function rejectSheet(id: number, body: { snapshot_hash: string; reason: string }): Promise<PriceSheet> {
-  return apiFetch(`/price-approvals/mine/${id}/reject`, { method: "POST", body: JSON.stringify(body) });
+  return apiFetch(`/price-approvals/mine/${id}/respond`, { method: "POST", body: JSON.stringify(body) });
 }

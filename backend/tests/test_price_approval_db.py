@@ -369,3 +369,167 @@ def test_approve_requires_agreement_tick(client, db_session, ctx, auth_headers):
         },
     )
     assert resp.status_code == 422
+
+
+# ---- Item-by-item responses ----
+
+
+def _respond(db_session, ctx, rev, decisions, **overrides):
+    kwargs = dict(
+        snapshot_hash=rev.snapshot_hash,
+        decisions=decisions,
+        note=None,
+        signature_image=SIGNATURE,
+        agreed=True,
+        ip_address="203.0.113.7",
+        user_agent="pytest",
+    )
+    kwargs.update(overrides)
+    return svc.respond(db_session, ctx["supplier_user"], rev.id, **kwargs)
+
+
+def _decide(ctx, *decisions):
+    """One (decision, counter_price) per ctx row, in order."""
+    return [
+        {"supplier_price_id": row.id, "decision": d, "counter_price": c}
+        for row, (d, c) in zip(ctx["rows"], decisions)
+    ]
+
+
+def test_partial_response_approves_some_and_rejects_others(db_session, ctx):
+    _adjust_all(db_session, ctx)  # 100 -> 90, 110 -> 95
+    rev = _respond(db_session, ctx, _send(db_session, ctx), _decide(ctx, ("APPROVED", None), ("REJECTED", 105)))
+
+    assert rev.status == svc.PARTIAL
+    assert rev.signature_image == SIGNATURE
+    assert _status(db_session, ctx["rows"][0]) == svc.APPROVED
+    assert _status(db_session, ctx["rows"][1]) == svc.REJECTED
+    statuses = svc.row_statuses(db_session, ctx["rows"])
+    assert statuses[ctx["rows"][1].id][2] == 105.0
+
+    # Approved item: SPAR's price. Rejected item: the supplier's new final price.
+    latest, _ = master_data_service._latest_prices(db_session)
+    assert latest[(ctx["supplier"].id, ctx["rows"][0].product_id)] == 90.0
+    assert latest[(ctx["supplier"].id, ctx["rows"][1].product_id)] == 105.0
+    assert svc.admin_attention_count(db_session) == 1
+
+    out = svc.to_out(db_session, [rev], detail=True)[0]
+    assert (out["approved_count"], out["rejected_count"]) == (1, 1)
+    by_id = {i["supplier_price_id"]: i for i in out["items"]}
+    assert by_id[ctx["rows"][1].id]["counter_price"] == 105.0
+
+
+def test_rejected_item_without_new_price_falls_back_to_own_price(db_session, ctx):
+    _adjust_all(db_session, ctx)
+    _respond(db_session, ctx, _send(db_session, ctx), _decide(ctx, ("APPROVED", None), ("REJECTED", None)))
+    latest, _ = master_data_service._latest_prices(db_session)
+    assert latest[(ctx["supplier"].id, ctx["rows"][1].product_id)] == 110.0
+
+
+def test_rejecting_everything_needs_no_signature(db_session, ctx):
+    _adjust_all(db_session, ctx)
+    rev = _respond(
+        db_session,
+        ctx,
+        _send(db_session, ctx),
+        _decide(ctx, ("REJECTED", 98), ("REJECTED", None)),
+        signature_image=None,
+        agreed=False,
+        note="Transport costs went up",
+    )
+    assert rev.status == svc.REJECTED
+    assert rev.signature_image is None
+    assert rev.rejection_reason == "Transport costs went up"
+
+
+def test_approving_any_item_needs_tick_and_signature(db_session, ctx):
+    _adjust_all(db_session, ctx)
+    rev = _send(db_session, ctx)
+    decisions = _decide(ctx, ("APPROVED", None), ("REJECTED", None))
+    with pytest.raises(ValidationFailedError):
+        _respond(db_session, ctx, rev, decisions, signature_image=None)
+    with pytest.raises(ValidationFailedError):
+        _respond(db_session, ctx, rev, decisions, agreed=False)
+
+
+def test_every_item_must_be_answered(db_session, ctx):
+    _adjust_all(db_session, ctx)
+    rev = _send(db_session, ctx)
+    with pytest.raises(ValidationFailedError):
+        _respond(db_session, ctx, rev, _decide(ctx, ("APPROVED", None)))
+
+
+def test_new_price_equal_to_spar_price_is_refused(db_session, ctx):
+    _adjust_all(db_session, ctx)
+    rev = _send(db_session, ctx)
+    with pytest.raises(ValidationFailedError):
+        _respond(db_session, ctx, rev, _decide(ctx, ("APPROVED", None), ("REJECTED", 95)))
+
+
+def test_rejected_item_is_resent_alone_and_approved_item_stays_agreed(db_session, ctx):
+    _adjust_all(db_session, ctx)
+    first = _respond(db_session, ctx, _send(db_session, ctx), _decide(ctx, ("APPROVED", None), ("REJECTED", 105)))
+
+    # Admin adjusts the rejected item again — the approved one is untouched.
+    pricing_service.set_adjusted_price(db_session, ctx["admin"], ctx["rows"][1].id, 100)
+    db_session.refresh(first)
+    assert first.status == svc.PARTIAL
+    assert _status(db_session, ctx["rows"][0]) == svc.APPROVED
+    assert _status(db_session, ctx["rows"][1]) == svc.DRAFT
+
+    second = _send(db_session, ctx)
+    assert [i["supplier_price_id"] for i in second.items] == [ctx["rows"][1].id]
+    assert svc.admin_attention_count(db_session) == 0
+
+
+def test_editing_an_approved_item_on_partial_sheet_voids_it(db_session, ctx):
+    _adjust_all(db_session, ctx)
+    rev = _respond(db_session, ctx, _send(db_session, ctx), _decide(ctx, ("APPROVED", None), ("REJECTED", 105)))
+    pricing_service.set_adjusted_price(db_session, ctx["admin"], ctx["rows"][0].id, 85)
+    db_session.refresh(rev)
+    assert rev.status == svc.VOIDED
+    assert _status(db_session, ctx["rows"][0]) == svc.DRAFT
+    assert _status(db_session, ctx["rows"][1]) == svc.DRAFT
+
+
+def test_supplier_orders_use_new_price_for_rejected_items(db_session, ctx):
+    from app.services import supplier_order_service
+
+    _adjust_all(db_session, ctx)
+    _respond(db_session, ctx, _send(db_session, ctx), _decide(ctx, ("APPROVED", None), ("REJECTED", 105)))
+    resolved = supplier_order_service._resolve_prices(
+        db_session, ctx["supplier"].id, ctx["delivery"], {r.product_id for r in ctx["rows"]}
+    )
+    assert resolved[ctx["rows"][0].product_id].price == 90.0
+    assert resolved[ctx["rows"][1].product_id].price == 105.0
+
+
+def test_respond_endpoint_end_to_end(client, db_session, ctx, auth_headers):
+    _adjust_all(db_session, ctx)
+    rev = _send(db_session, ctx)
+    supplier_h = auth_headers(ctx["supplier_user"])
+    resp = client.post(
+        f"/api/v1/price-approvals/mine/{rev.id}/respond",
+        headers=supplier_h,
+        json={
+            "snapshot_hash": rev.snapshot_hash,
+            "items": [
+                {"supplier_price_id": ctx["rows"][0].id, "decision": "APPROVED"},
+                {"supplier_price_id": ctx["rows"][1].id, "decision": "REJECTED", "counter_price": 105},
+            ],
+            "note": "  Can't go below 105  ",
+            "agreed": True,
+            "signature_image": SIGNATURE,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["status"] == "PARTIAL"
+    assert body["rejection_reason"] == "Can't go below 105"
+    decisions = {i["supplier_price_id"]: i["decision"] for i in body["items"]}
+    assert decisions == {ctx["rows"][0].id: "APPROVED", ctx["rows"][1].id: "REJECTED"}
+
+    resp = client.get(f"/api/v1/pricing/mine?delivery_date={ctx['delivery'].isoformat()}", headers=supplier_h)
+    by_id = {r["id"]: r for r in resp.json()}
+    assert by_id[ctx["rows"][1].id]["approval_status"] == "REJECTED"
+    assert by_id[ctx["rows"][1].id]["counter_price"] == 105.0

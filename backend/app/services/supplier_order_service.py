@@ -34,7 +34,7 @@ from app.schemas.supplier_order import (
     BranchOrderGroup,
     MySupplierOrdersOut,
 )
-from app.services import order_service
+from app.services import order_service, price_approval_service
 
 
 def list_suppliers(db: Session) -> list[Supplier]:
@@ -151,8 +151,9 @@ def get_supplier_price_preview(db: Session, supplier_id: int, delivery_date: dat
         .filter(SupplierPrice.supplier_id == supplier_id, SupplierPrice.delivery_date == list_date)
         .all()
     )
+    rejected = price_approval_service.rejected_item_prices(db, rows)
     return {
-        r.product_id: _ResolvedPrice(_price_from_row(r), is_estimated=list_date != delivery_date, as_of=list_date)
+        r.product_id: _ResolvedPrice(_price_from_row(r, rejected), is_estimated=list_date != delivery_date, as_of=list_date)
         for r in rows
     }
 
@@ -166,7 +167,14 @@ class _ResolvedPrice:
         self.as_of = as_of
 
 
-def _price_from_row(r: SupplierPrice) -> float:
+def _price_from_row(r: SupplierPrice, rejected: dict[int, float]) -> float:
+    """
+    `rejected` comes from price_approval_service.rejected_item_prices: an
+    adjusted price the supplier rejected gives way to the final price they
+    gave instead (or their own quote).
+    """
+    if r.id in rejected:
+        return rejected[r.id]
     if r.adjusted_price is not None and r.sent_to_supplier_at is not None:
         return float(r.adjusted_price)
     return float(r.price)
@@ -204,8 +212,9 @@ def _resolve_prices(
         .all()
     )
     out: dict[int, _ResolvedPrice] = {}
+    rejected = price_approval_service.rejected_item_prices(db, exact_rows)
     for r in exact_rows:
-        out[r.product_id] = _ResolvedPrice(_price_from_row(r), is_estimated=False, as_of=r.delivery_date)
+        out[r.product_id] = _ResolvedPrice(_price_from_row(r, rejected), is_estimated=False, as_of=r.delivery_date)
 
     missing = product_ids - set(out.keys())
     if missing:
@@ -216,11 +225,15 @@ def _resolve_prices(
             .all()
         )
         seen: set[int] = set()
+        latest = []
         for r in fallback_rows:
             if r.product_id in seen:
                 continue
             seen.add(r.product_id)
-            out[r.product_id] = _ResolvedPrice(_price_from_row(r), is_estimated=True, as_of=r.delivery_date)
+            latest.append(r)
+        rejected = price_approval_service.rejected_item_prices(db, latest)
+        for r in latest:
+            out[r.product_id] = _ResolvedPrice(_price_from_row(r, rejected), is_estimated=True, as_of=r.delivery_date)
 
     return out
 

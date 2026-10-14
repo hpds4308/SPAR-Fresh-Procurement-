@@ -52,10 +52,11 @@ def _latest_prices(
     delivery date:
 
     - `adjusted_or_submitted`: Adjusted Price if the supplier has
-      approved (e-signed) it, otherwise the submitted price. Shown in the
-      per-supplier "Adjusted CP" columns. A draft, unanswered, rejected or
+      approved (e-signed) it; for an item they rejected, the final price
+      they gave instead, if any; otherwise the submitted price. Shown in
+      the per-supplier "Adjusted CP" columns. A draft, unanswered or
       expired adjustment isn't an agreed price, so the supplier's own
-      price applies until they sign (see price_approval_service.py).
+      price applies until they answer (see price_approval_service.py).
     - `submitted_only`: (price, delivery_date) — always the supplier's own
       submitted price, never an adjustment, plus the date it was
       submitted for. Used for Cost Price specifically — Cost Price should
@@ -69,15 +70,14 @@ def _latest_prices(
         .order_by(SupplierPrice.supplier_id, SupplierPrice.product_id, SupplierPrice.delivery_date.desc(), SupplierPrice.id.desc())
         .all()
     )
-    approved = price_approval_service.approved_revision_ids(db, {r.revision_id for r in rows if r.revision_id})
+    agreed = price_approval_service.agreed_prices(db, rows)
     adjusted_or_submitted: dict[tuple[int, int], float] = {}
     submitted_only: dict[tuple[int, int], tuple[float, date]] = {}
     for r in rows:
         key = (r.supplier_id, r.product_id)
         if key in adjusted_or_submitted:
             continue
-        agreed = r.adjusted_price is not None and r.revision_id in approved
-        adjusted_or_submitted[key] = float(r.adjusted_price) if agreed else float(r.price)
+        adjusted_or_submitted[key] = agreed.get(r.id, float(r.price))
         submitted_only[key] = (float(r.price), r.delivery_date)
     return adjusted_or_submitted, submitted_only
 

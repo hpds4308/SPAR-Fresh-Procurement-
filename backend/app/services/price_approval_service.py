@@ -7,15 +7,20 @@ Flow (as agreed with the client):
    adjusted price for that supplier and delivery date that isn't already
    agreed goes out together as one price sheet (SupplierPriceRevision), so
    the supplier signs once rather than once per item.
-3. The supplier reviews the sheet and either approves it — ticking the
-   agreement and drawing a signature — or rejects it with a reason.
-4. Only an APPROVED adjusted price counts as the agreed price (Master Data
-   uses it). If the supplier rejects, or doesn't respond before the
-   delivery date arrives, the supplier's own submitted price applies.
+3. The supplier answers each item on the sheet: approve it, or reject it
+   and optionally give their own final price for it. If they approve at
+   least one item they tick the agreement and draw a signature. The sheet
+   becomes APPROVED (every item approved), REJECTED (every item rejected)
+   or PARTIAL (some of each).
+4. An approved item's adjusted price is the agreed price (Master Data uses
+   it). A rejected item uses the supplier's final price if they gave one,
+   else their own submitted price — as does every item when the supplier
+   doesn't respond before the delivery date arrives. Admin can adjust a
+   rejected item again and send it on a new sheet.
 
-An approved sheet is locked: if Admin changes any price on it afterwards,
+Approved items are locked: if Admin changes an approved price afterwards,
 the whole sheet is voided and its items go back to draft, to be sent and
-signed again. Sheets are never deleted — voided/withdrawn/rejected ones
+signed again. Changing a rejected item only takes that item off the sheet. Sheets are never deleted — voided/withdrawn/rejected ones
 stay as history, with the exact figures in their `items` snapshot.
 """
 import base64
@@ -43,10 +48,13 @@ BUSINESS_TZ = ZoneInfo("Asia/Colombo")
 PENDING = "PENDING"
 APPROVED = "APPROVED"
 REJECTED = "REJECTED"
+PARTIAL = "PARTIAL"  # some items approved, the rest rejected
 VOIDED = "VOIDED"
 WITHDRAWN = "WITHDRAWN"
 EXPIRED = "EXPIRED"  # computed only — never stored
 DRAFT = "DRAFT"  # row-level only: adjusted but not on any live sheet
+# Sheets the supplier has answered — each item on them is APPROVED or REJECTED.
+RESPONDED = (APPROVED, REJECTED, PARTIAL)
 
 # Same limits as the login lockout in auth_service — re-entering a password
 # to sign mustn't become a way around it.
@@ -102,6 +110,23 @@ def _build_items(db: Session, rows: list[SupplierPrice]) -> list[dict]:
     return items
 
 
+def item_responses(rev: SupplierPriceRevision) -> dict[int, dict]:
+    """
+    {supplier_price_id: {"decision", "counter_price"}} for an answered
+    sheet. Sheets answered before item-wise responses existed have no
+    `item_responses`: every item on them shares the sheet's status.
+    """
+    if rev.status not in RESPONDED:
+        return {}
+    if rev.item_responses:
+        return {r["supplier_price_id"]: r for r in rev.item_responses}
+    return {i["supplier_price_id"]: {"decision": rev.status, "counter_price": None} for i in rev.items}
+
+
+def _row_decision(rev: SupplierPriceRevision, row_id: int) -> dict | None:
+    return item_responses(rev).get(row_id)
+
+
 def _close(db: Session, rev: SupplierPriceRevision, status: str, reason: str) -> None:
     """Void/withdraw a sheet and put every price still on it back to draft. Caller commits."""
     rev.status = status
@@ -126,7 +151,10 @@ def on_adjusted_price_changed(db: Session, row: SupplierPrice) -> SupplierPriceR
         row.sent_to_supplier_at = None
         return None
     rev = db.get(SupplierPriceRevision, row.revision_id)
-    if rev and rev.status in (PENDING, APPROVED):
+    # A rejected item on a part-approved sheet just comes off it — the
+    # items the supplier did approve stay agreed.
+    decision = _row_decision(rev, row.id) if rev and rev.status == PARTIAL else None
+    if rev and (rev.status in (PENDING, APPROVED) or (decision and decision["decision"] == APPROVED)):
         product = db.get(Product, row.product_id)
         name = product.description if product else f"product #{row.product_id}"
         _close(db, rev, VOIDED, f"Admin changed the price of {name} after the sheet was sent.")
@@ -155,8 +183,15 @@ def on_supplier_resubmitted(db: Session, supplier_id: int, delivery_date: date) 
 # ---- Row-level status, for the admin and supplier price tables ----
 
 
-def row_statuses(db: Session, rows: list[SupplierPrice]) -> dict[int, tuple[str | None, SupplierPriceRevision | None]]:
-    """(approval status, sheet) per supplier_prices row id. Status is None when there's no adjusted price."""
+def row_statuses(
+    db: Session, rows: list[SupplierPrice]
+) -> dict[int, tuple[str | None, SupplierPriceRevision | None, float | None]]:
+    """
+    (approval status, sheet, supplier's final price) per supplier_prices
+    row id. Status is None when there's no adjusted price; on an answered
+    sheet it's this item's own APPROVED/REJECTED. The final price is only
+    set for a rejected item the supplier gave their own price for.
+    """
     rev_ids = {r.revision_id for r in rows if r.revision_id}
     revs = (
         {rev.id: rev for rev in db.query(SupplierPriceRevision).filter(SupplierPriceRevision.id.in_(rev_ids)).all()}
@@ -164,28 +199,70 @@ def row_statuses(db: Session, rows: list[SupplierPrice]) -> dict[int, tuple[str 
         else {}
     )
     now = _now()
-    out: dict[int, tuple[str | None, SupplierPriceRevision | None]] = {}
+    out: dict[int, tuple[str | None, SupplierPriceRevision | None, float | None]] = {}
     for r in rows:
         if r.adjusted_price is None:
-            out[r.id] = (None, None)
+            out[r.id] = (None, None, None)
             continue
         rev = revs.get(r.revision_id) if r.revision_id else None
         if rev is None or rev.status in (VOIDED, WITHDRAWN):
-            out[r.id] = (DRAFT, None)
+            out[r.id] = (DRAFT, None, None)
+            continue
+        decision = _row_decision(rev, r.id)
+        if decision:
+            out[r.id] = (decision["decision"], rev, decision.get("counter_price"))
         else:
-            out[r.id] = (effective_status(rev, now), rev)
+            out[r.id] = (effective_status(rev, now), rev, None)
     return out
 
 
-def approved_revision_ids(db: Session, revision_ids: set[int]) -> set[int]:
-    if not revision_ids:
-        return set()
-    return {
-        rid
-        for (rid,) in db.query(SupplierPriceRevision.id).filter(
-            SupplierPriceRevision.id.in_(revision_ids), SupplierPriceRevision.status == APPROVED
+def agreed_prices(db: Session, rows: list[SupplierPrice]) -> dict[int, float]:
+    """
+    The price agreed through a price sheet, per supplier_prices row id:
+    Admin's adjusted price for an approved item, or the supplier's own
+    final price for a rejected item they gave one for. Rows with neither
+    aren't in the result — their submitted price applies.
+    """
+    rev_ids = {r.revision_id for r in rows if r.revision_id and r.adjusted_price is not None}
+    if not rev_ids:
+        return {}
+    revs = {
+        rev.id: rev
+        for rev in db.query(SupplierPriceRevision).filter(
+            SupplierPriceRevision.id.in_(rev_ids), SupplierPriceRevision.status.in_(RESPONDED)
         )
     }
+    responses = {rid: item_responses(rev) for rid, rev in revs.items()}
+    out: dict[int, float] = {}
+    for r in rows:
+        if r.adjusted_price is None or r.revision_id not in responses:
+            continue
+        decision = responses[r.revision_id].get(r.id)
+        if not decision:
+            continue
+        if decision["decision"] == APPROVED:
+            out[r.id] = float(r.adjusted_price)
+        elif decision.get("counter_price") is not None:
+            out[r.id] = float(decision["counter_price"])
+    return out
+
+
+def rejected_item_prices(db: Session, rows: list[SupplierPrice]) -> dict[int, float]:
+    """
+    For rows whose adjusted price the supplier rejected: the price that
+    applies instead — the final price they gave, else their submitted
+    price. Rows they haven't rejected aren't in the result.
+    """
+    out: dict[int, float] = {}
+    for row_id, (status, _, counter_price) in row_statuses(db, rows).items():
+        if status == REJECTED:
+            out[row_id] = counter_price
+    by_id = {r.id: r for r in rows}
+    return {rid: (p if p is not None else float(by_id[rid].price)) for rid, p in out.items()}
+
+
+def _approved_row_ids(db: Session, rows: list[SupplierPrice]) -> set[int]:
+    return {row_id for row_id, (status, _, _) in row_statuses(db, rows).items() if status == APPROVED}
 
 
 # ---- Admin actions ----
@@ -210,8 +287,8 @@ def send_for_approval(db: Session, admin: User, supplier_id: int, delivery_date:
         .order_by(SupplierPrice.id)
         .all()
     )
-    approved = approved_revision_ids(db, {r.revision_id for r in rows if r.revision_id})
-    to_send = [r for r in rows if r.revision_id not in approved]
+    approved = _approved_row_ids(db, rows)
+    to_send = [r for r in rows if r.id not in approved]
     if not to_send:
         raise ValidationFailedError(
             f"There are no new adjusted prices to send to {supplier.supplier_name} for {delivery_date.isoformat()}."
@@ -354,6 +431,126 @@ def _check_live_rows_match(db: Session, rev: SupplierPriceRevision) -> None:
         raise ValidationFailedError("SPAR changed these prices after you opened them. Reload to see the latest.")
 
 
+MAX_PRICE = 10_000_000  # same ceiling as supplier_prices.price (Numeric(10, 2))
+
+
+def _check_decisions(rev: SupplierPriceRevision, decisions: list[dict]) -> list[dict]:
+    """
+    Validates one answer per item on the sheet and returns them in the
+    stored shape, in the sheet's item order.
+    """
+    items = {i["supplier_price_id"]: i for i in rev.items}
+    given: dict[int, dict] = {}
+    for d in decisions:
+        spid = d["supplier_price_id"]
+        if spid not in items:
+            raise ValidationFailedError("One of those items isn't on this price sheet. Reload to see the latest.")
+        if spid in given:
+            raise ValidationFailedError("Each item can only be answered once.")
+        given[spid] = d
+    missing = [i["product_description"] for i in rev.items if i["supplier_price_id"] not in given]
+    if missing:
+        raise ValidationFailedError(f"Approve or reject every item. Still to answer: {', '.join(missing)}.")
+
+    out = []
+    for item in rev.items:
+        d = given[item["supplier_price_id"]]
+        decision = d["decision"]
+        if decision not in (APPROVED, REJECTED):
+            raise ValidationFailedError("Each item must be approved or rejected.")
+        counter = d.get("counter_price")
+        if decision == APPROVED or counter is None:
+            counter = None
+        else:
+            counter = round(float(counter), 2)
+            if counter <= 0 or counter >= MAX_PRICE:
+                raise ValidationFailedError(f"Enter a valid new price for {item['product_description']}.")
+            if counter == round(float(item["adjusted_price"]), 2):
+                raise ValidationFailedError(
+                    f"Your new price for {item['product_description']} is the same as SPAR's. Approve it instead."
+                )
+        out.append({"supplier_price_id": item["supplier_price_id"], "decision": decision, "counter_price": counter})
+    return out
+
+
+def respond(
+    db: Session,
+    supplier_user: User,
+    revision_id: int,
+    *,
+    snapshot_hash: str,
+    decisions: list[dict],
+    note: str | None,
+    signature_image: str | None,
+    agreed: bool,
+    signer_name: str | None = None,
+    password: str | None = None,
+    ip_address: str | None,
+    user_agent: str | None,
+) -> SupplierPriceRevision:
+    """
+    The supplier's answer to a sheet, item by item: each item APPROVED or
+    REJECTED (optionally with their own final price). Approving anything
+    needs the agreement tick and a drawn signature; rejecting everything
+    needs neither.
+    """
+    rev = _get_own(db, supplier_user, revision_id)
+    _require_open(rev, snapshot_hash)
+    responses = _check_decisions(rev, decisions)
+    approved = [r for r in responses if r["decision"] == APPROVED]
+    rejected = [r for r in responses if r["decision"] == REJECTED]
+
+    if approved:
+        if not agreed:
+            raise ValidationFailedError("Tick the box to confirm you agree to the prices you approved.")
+        if not signature_image:
+            raise ValidationFailedError("Draw your signature in the box.")
+        _check_signature_image(signature_image)
+        if password is not None:
+            _check_password(db, supplier_user, password)
+    _check_live_rows_match(db, rev)
+
+    rev.status = APPROVED if not rejected else REJECTED if not approved else PARTIAL
+    rev.item_responses = responses
+    rev.responded_by = supplier_user.id
+    rev.responded_at = _now()
+    rev.rejection_reason = (note or None) if rejected else None
+    rev.signer_ip = (ip_address or "")[:255] or None
+    rev.signer_user_agent = (user_agent or "")[:500] or None
+    if approved:
+        rev.signer_name = signer_name
+        rev.signature_image = signature_image
+    db.commit()
+    db.refresh(rev)
+
+    names = {i["supplier_price_id"]: i["product_description"] for i in rev.items}
+
+    def describe(r: dict) -> str:
+        if r["counter_price"] is None:
+            return names[r["supplier_price_id"]]
+        return f"{names[r['supplier_price_id']]} (supplier's price {r['counter_price']:.2f})"
+
+    parts = [f"Price sheet #{rev.id} (delivery {rev.delivery_date.isoformat()})"]
+    if approved:
+        parts.append(f"{len(approved)} item(s) approved and e-signed by {signer_name or supplier_user.username}")
+    if rejected:
+        parts.append(f"{len(rejected)} item(s) rejected: {', '.join(describe(r) for r in rejected)}")
+    if note and rejected:
+        parts.append(f"Note: {note}")
+    action = {APPROVED: "PRICE_SHEET_APPROVED", REJECTED: "PRICE_SHEET_REJECTED", PARTIAL: "PRICE_SHEET_PARTIAL"}[rev.status]
+    write_audit_log(
+        db,
+        user_id=supplier_user.id,
+        role="SUPPLIER",
+        action=action,
+        entity_type="supplier_price_revision",
+        entity_id=rev.id,
+        description=". ".join(parts) + f". Snapshot SHA-256 {rev.snapshot_hash}.",
+        ip_address=rev.signer_ip,
+    )
+    return rev
+
+
 def approve(
     db: Session,
     supplier_user: User,
@@ -366,60 +563,39 @@ def approve(
     ip_address: str | None,
     user_agent: str | None,
 ) -> SupplierPriceRevision:
+    """Approve every item on the sheet at once."""
     rev = _get_own(db, supplier_user, revision_id)
-    _require_open(rev, snapshot_hash)
-    _check_signature_image(signature_image)
-    if password is not None:
-        _check_password(db, supplier_user, password)
-    _check_live_rows_match(db, rev)
-
-    rev.status = APPROVED
-    rev.responded_by = supplier_user.id
-    rev.responded_at = _now()
-    rev.signer_name = signer_name
-    rev.signature_image = signature_image
-    rev.signer_ip = (ip_address or "")[:255] or None
-    rev.signer_user_agent = (user_agent or "")[:500] or None
-    db.commit()
-    db.refresh(rev)
-
-    write_audit_log(
+    return respond(
         db,
-        user_id=supplier_user.id,
-        role="SUPPLIER",
-        action="PRICE_SHEET_APPROVED",
-        entity_type="supplier_price_revision",
-        entity_id=rev.id,
-        description=(
-            f"Price sheet #{rev.id} ({len(rev.items)} item(s), delivery {rev.delivery_date.isoformat()}) "
-            f"e-signed by {signer_name or supplier_user.username}. Snapshot SHA-256 {rev.snapshot_hash}."
-        ),
-        ip_address=rev.signer_ip,
+        supplier_user,
+        revision_id,
+        snapshot_hash=snapshot_hash,
+        decisions=[{"supplier_price_id": i["supplier_price_id"], "decision": APPROVED} for i in rev.items],
+        note=None,
+        signature_image=signature_image,
+        agreed=True,
+        signer_name=signer_name,
+        password=password,
+        ip_address=ip_address,
+        user_agent=user_agent,
     )
-    return rev
 
 
 def reject(db: Session, supplier_user: User, revision_id: int, *, snapshot_hash: str, reason: str) -> SupplierPriceRevision:
+    """Reject every item on the sheet at once, with a reason."""
     rev = _get_own(db, supplier_user, revision_id)
-    _require_open(rev, snapshot_hash)
-
-    rev.status = REJECTED
-    rev.responded_by = supplier_user.id
-    rev.responded_at = _now()
-    rev.rejection_reason = reason
-    db.commit()
-    db.refresh(rev)
-
-    write_audit_log(
+    return respond(
         db,
-        user_id=supplier_user.id,
-        role="SUPPLIER",
-        action="PRICE_SHEET_REJECTED",
-        entity_type="supplier_price_revision",
-        entity_id=rev.id,
-        description=f"Price sheet #{rev.id} rejected: {reason}",
+        supplier_user,
+        revision_id,
+        snapshot_hash=snapshot_hash,
+        decisions=[{"supplier_price_id": i["supplier_price_id"], "decision": REJECTED} for i in rev.items],
+        note=reason,
+        signature_image=None,
+        agreed=False,
+        ip_address=None,
+        user_agent=None,
     )
-    return rev
 
 
 # ---- Reads ----
@@ -475,7 +651,7 @@ def supplier_pending_count(db: Session, supplier_user: User) -> int:
 
 
 def admin_attention_count(db: Session) -> int:
-    """Rejected sheets for upcoming deliveries that Admin hasn't followed up with a newer sheet yet."""
+    """Sheets with rejected items, for upcoming deliveries, that Admin hasn't followed up with a newer sheet yet."""
     today = _now().date()
     revs = (
         db.query(SupplierPriceRevision.id, SupplierPriceRevision.supplier_id, SupplierPriceRevision.delivery_date, SupplierPriceRevision.status)
@@ -487,7 +663,7 @@ def admin_attention_count(db: Session) -> int:
         key = (supplier_id, delivery_date)
         if key not in latest or rid > latest[key][0]:
             latest[key] = (rid, status)
-    return sum(1 for _, status in latest.values() if status == REJECTED)
+    return sum(1 for _, status in latest.values() if status in (REJECTED, PARTIAL))
 
 
 def to_out(db: Session, revs: list[SupplierPriceRevision], detail: bool = False) -> list[dict]:
@@ -498,6 +674,7 @@ def to_out(db: Session, revs: list[SupplierPriceRevision], detail: bool = False)
     now = _now()
     out = []
     for r in revs:
+        responses = item_responses(r)
         row = {
             "id": r.id,
             "supplier_id": r.supplier_id,
@@ -513,10 +690,19 @@ def to_out(db: Session, revs: list[SupplierPriceRevision], detail: bool = False)
             "rejection_reason": r.rejection_reason,
             "closed_reason": r.closed_reason,
             "expires_at": expires_at(r.delivery_date),
+            "approved_count": sum(1 for x in responses.values() if x["decision"] == APPROVED),
+            "rejected_count": sum(1 for x in responses.values() if x["decision"] == REJECTED),
         }
         if detail:
             row.update(
-                items=r.items,
+                items=[
+                    {
+                        **i,
+                        "decision": responses.get(i["supplier_price_id"], {}).get("decision"),
+                        "counter_price": responses.get(i["supplier_price_id"], {}).get("counter_price"),
+                    }
+                    for i in r.items
+                ],
                 snapshot_hash=r.snapshot_hash,
                 signature_image=r.signature_image,
                 signer_ip=r.signer_ip,

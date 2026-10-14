@@ -90,6 +90,9 @@ export default function PriceHistory({ refreshKey }: { refreshKey: number }) {
                   <span className="inline-flex items-center gap-1.5">
                     <span className="font-semibold text-crate-950">Rs. {p.adjusted_price.toFixed(2)}</span>
                     <RowApprovalBadge status={p.approval_status} />
+                    {p.approval_status === "REJECTED" && p.counter_price !== null && (
+                      <span className="text-xs text-crate-800/60 whitespace-nowrap">your price Rs. {p.counter_price.toFixed(2)}</span>
+                    )}
                   </span>
                 ) : (
                   <span className="text-crate-800/25">—</span>

@@ -30,6 +30,7 @@ const STATUS_FILTERS: { value: SheetStatus | ""; label: string }[] = [
   { value: "", label: "All" },
   { value: "PENDING", label: "Awaiting signature" },
   { value: "APPROVED", label: "Approved" },
+  { value: "PARTIAL", label: "Partly approved" },
   { value: "REJECTED", label: "Rejected" },
   { value: "EXPIRED", label: "Expired" },
   { value: "VOIDED", label: "Cancelled" },
@@ -155,9 +156,13 @@ export default function AdminPriceApprovals({ onChanged }: { onChanged?: () => v
                   <td className="px-4 py-2.5 text-crate-800/70 min-w-[10rem] max-w-[18rem]">
                     {s.status === "APPROVED" ? (
                       <>Signed by {s.signer_name ?? s.responded_by_name ?? s.supplier_name}</>
+                    ) : s.status === "PARTIAL" ? (
+                      <span title={s.rejection_reason ?? undefined}>
+                        {s.approved_count} approved · <span className="text-tomato-600">{s.rejected_count} rejected</span>
+                      </span>
                     ) : s.status === "REJECTED" ? (
                       <span className="text-tomato-600 line-clamp-2" title={s.rejection_reason ?? undefined}>
-                        {s.rejection_reason}
+                        {s.rejection_reason ?? `All ${s.rejected_count || s.item_count} rejected`}
                       </span>
                     ) : s.status === "VOIDED" || s.status === "WITHDRAWN" ? (
                       <span className="text-crate-800/40 line-clamp-2">{s.closed_reason}</span>
@@ -226,7 +231,7 @@ function AdminSheetDetail({ id, onBack, onChanged }: { id: number; onBack: () =>
                   Withdraw
                 </Button>
               )}
-              {sheet.status === "APPROVED" && (
+              {(sheet.status === "APPROVED" || sheet.status === "PARTIAL") && (
                 <Button variant="secondary" size="sm" onClick={() => window.print()}>
                   Print / Save as PDF
                 </Button>
@@ -234,11 +239,16 @@ function AdminSheetDetail({ id, onBack, onChanged }: { id: number; onBack: () =>
             </div>
           </div>
           <PriceSheetDocument sheet={sheet} priceLabel="Supplier price" />
-          {sheet.status === "REJECTED" && (
+          {(sheet.status === "REJECTED" || sheet.status === "PARTIAL") && (
             <p className="text-sm bg-tomato-500/10 text-tomato-600 rounded-xl px-4 py-3">
-              Rejected by {sheet.responded_by_name ?? "the supplier"}
-              {sheet.responded_at ? ` on ${formatDateTime(sheet.responded_at)}` : ""}: “{sheet.rejection_reason}”. Adjust
-              the prices on Supplier Prices and send again, or send as-is after agreeing by phone.
+              {sheet.status === "PARTIAL"
+                ? `${sheet.responded_by_name ?? "The supplier"} approved ${sheet.approved_count} item${
+                    sheet.approved_count === 1 ? "" : "s"
+                  } and rejected ${sheet.rejected_count}`
+                : `Rejected by ${sheet.responded_by_name ?? "the supplier"}`}
+              {sheet.responded_at ? ` on ${formatDateTime(sheet.responded_at)}` : ""}. For a rejected item the
+              supplier's new price applies (or their quoted price if they gave none). To change that, adjust the item on
+              Supplier Prices and send it again.
             </p>
           )}
           {sheet.status === "PENDING" && (

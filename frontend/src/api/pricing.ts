@@ -27,6 +27,8 @@ export type SupplierPrice = {
   adjusted_price: number | null;
   approval_status: RowApprovalStatus;
   revision_id: number | null;
+  // Your own final price for an item you rejected, if you gave one.
+  counter_price: number | null;
 };
 
 export function fetchPriceWindow(): Promise<PriceWindow> {
@@ -128,6 +130,9 @@ export type AdminSupplierPrice = {
   approval_status: RowApprovalStatus;
   revision_id: number | null;
   rejection_reason: string | null;
+  // The supplier's own final price for an item they rejected, if they gave
+  // one — it applies instead of their quoted price.
+  counter_price: number | null;
   delivery_date: string;
   is_lowest_for_product: boolean;
   // Next distinct price tier below the lowest (null if fewer than two

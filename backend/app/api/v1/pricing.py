@@ -38,7 +38,7 @@ def _supplier_price_out(db: Session, rows: list[SupplierPrice]) -> list[Supplier
     out = []
     for r in rows:
         sent = r.sent_to_supplier_at is not None and r.adjusted_price is not None
-        status, revision = statuses[r.id]
+        status, revision, counter_price = statuses[r.id]
         out.append(
             SupplierPriceOut(
                 id=r.id,
@@ -51,6 +51,7 @@ def _supplier_price_out(db: Session, rows: list[SupplierPrice]) -> list[Supplier
                 adjusted_price=float(r.adjusted_price) if sent else None,
                 approval_status=status if sent else None,
                 revision_id=revision.id if sent and revision else None,
+                counter_price=counter_price if sent else None,
             )
         )
     return out

@@ -20,9 +20,12 @@ class SupplierPriceRevision(Base):
 
     Status lifecycle (see price_approval_service.py):
       PENDING   sent, waiting for the supplier
-      APPROVED  supplier e-signed; locked. Admin editing any price on it
-                voids it and the new figures must be sent and signed again.
-      REJECTED  supplier declined, with a reason
+      APPROVED  supplier approved every item and e-signed; locked. Admin
+                editing any price on it voids it and the new figures must
+                be sent and signed again.
+      PARTIAL   supplier approved (and e-signed) some items and rejected
+                the rest — see `item_responses`
+      REJECTED  supplier rejected every item
       VOIDED    replaced by a newer sheet, or a price on it changed
       WITHDRAWN Admin took it back before the supplier responded
     A PENDING sheet whose delivery date has arrived is reported as EXPIRED
@@ -49,6 +52,11 @@ class SupplierPriceRevision(Base):
     signer_ip: Mapped[str | None] = mapped_column(String(255))  # X-Forwarded-For chain
     signer_user_agent: Mapped[str | None] = mapped_column(String(500))
     rejection_reason: Mapped[str | None] = mapped_column(Text)
+    # The supplier's answer per item: [{"supplier_price_id", "decision"
+    # (APPROVED/REJECTED), "counter_price" (their own final price for a
+    # rejected item, or null)}]. Null on sheets answered before item-wise
+    # responses existed — there every item shares the sheet's status.
+    item_responses: Mapped[list | None] = mapped_column(JSON)
     # Why a sheet was VOIDED/WITHDRAWN, and when.
     closed_reason: Mapped[str | None] = mapped_column(String(255))
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

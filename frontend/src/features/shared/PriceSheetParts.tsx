@@ -7,6 +7,7 @@ type Tone = "neutral" | "success" | "warning" | "danger" | "info";
 const SHEET_STATUS: Record<SheetStatus, { label: string; tone: Tone }> = {
   PENDING: { label: "Awaiting signature", tone: "warning" },
   APPROVED: { label: "Approved", tone: "success" },
+  PARTIAL: { label: "Partly approved", tone: "info" },
   REJECTED: { label: "Rejected", tone: "danger" },
   EXPIRED: { label: "Expired", tone: "neutral" },
   VOIDED: { label: "Cancelled", tone: "neutral" },
@@ -68,11 +69,35 @@ export function formatSignDeadline(deliveryDateIso: string): string {
   return `the end of ${d.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}`;
 }
 
-function rs(n: number): string {
+export function rs(n: number): string {
   return `Rs. ${n.toFixed(2)}`;
 }
 
+/** The supplier's answer to one item: Approved, or Rejected plus the final price they gave. */
+function ItemResponse({ item }: { item: PriceSheetItem }) {
+  if (!item.decision) return null;
+  if (item.decision === "APPROVED") {
+    return <span className="text-xs font-semibold text-crate-700">✓ Approved</span>;
+  }
+  return (
+    <span className="text-xs">
+      <span className="font-semibold text-tomato-600">✗ Rejected</span>
+      <span className="text-crate-800/60">
+        {" · "}
+        {item.counter_price !== null ? (
+          <>
+            new price <span className="font-semibold text-crate-950 tabular-nums">{rs(item.counter_price)}</span>
+          </>
+        ) : (
+          "own price applies"
+        )}
+      </span>
+    </span>
+  );
+}
+
 export function PriceSheetItemsTable({ items, priceLabel }: { items: PriceSheetItem[]; priceLabel: string }) {
+  const answered = items.some((i) => i.decision);
   return (
     <>
       {/* Phones: one stacked row per item, so the SPAR price is never scrolled off-screen. */}
@@ -93,15 +118,20 @@ export function PriceSheetItemsTable({ items, priceLabel }: { items: PriceSheetI
                 <span className="text-crate-800/40"> /{item.unit_code}</span>
               </span>
             </p>
+            {answered && (
+              <p className="mt-1">
+                <ItemResponse item={item} />
+              </p>
+            )}
           </li>
         ))}
       </ul>
-      <ItemsTable items={items} priceLabel={priceLabel} />
+      <ItemsTable items={items} priceLabel={priceLabel} answered={answered} />
     </>
   );
 }
 
-function ItemsTable({ items, priceLabel }: { items: PriceSheetItem[]; priceLabel: string }) {
+function ItemsTable({ items, priceLabel, answered }: { items: PriceSheetItem[]; priceLabel: string; answered: boolean }) {
   return (
     <div className="hidden sm:block overflow-x-auto">
       <table className="w-full text-sm">
@@ -111,7 +141,8 @@ function ItemsTable({ items, priceLabel }: { items: PriceSheetItem[]; priceLabel
             <th className="py-2 px-3 font-medium text-right">Unit</th>
             <th className="py-2 px-3 font-medium text-right">{priceLabel}</th>
             <th className="py-2 px-3 font-medium text-right">SPAR price</th>
-            <th className="py-2 pl-3 font-medium text-right">Difference</th>
+            <th className={`py-2 ${answered ? "px-3" : "pl-3"} font-medium text-right`}>Difference</th>
+            {answered && <th className="py-2 pl-3 font-medium">Response</th>}
           </tr>
         </thead>
         <tbody className="divide-y divide-sage-100">
@@ -127,9 +158,18 @@ function ItemsTable({ items, priceLabel }: { items: PriceSheetItem[]; priceLabel
                 <td className="py-2 px-3 text-right text-crate-800/50">{item.unit_code}</td>
                 <td className="py-2 px-3 text-right text-crate-800/70 tabular-nums">{rs(item.supplier_price)}</td>
                 <td className="py-2 px-3 text-right font-semibold text-crate-950 tabular-nums">{rs(item.adjusted_price)}</td>
-                <td className={`py-2 pl-3 text-right tabular-nums ${diff === 0 ? "text-crate-800/40" : "text-crate-800/70"}`}>
+                <td
+                  className={`py-2 ${answered ? "px-3" : "pl-3"} text-right tabular-nums ${
+                    diff === 0 ? "text-crate-800/40" : "text-crate-800/70"
+                  }`}
+                >
                   {diff === 0 ? "—" : `${diff > 0 ? "+" : "−"}${Math.abs(diff).toFixed(2)}`}
                 </td>
+                {answered && (
+                  <td className="py-2 pl-3 whitespace-nowrap">
+                    <ItemResponse item={item} />
+                  </td>
+                )}
               </tr>
             );
           })}
@@ -141,7 +181,7 @@ function ItemsTable({ items, priceLabel }: { items: PriceSheetItem[]; priceLabel
 
 /** The signed record: who signed, when, the drawn signature and the sheet's fingerprint. */
 export function SignatureRecord({ sheet }: { sheet: PriceSheet }) {
-  if (sheet.status !== "APPROVED" && !sheet.signature_image) return null;
+  if (sheet.status !== "APPROVED" && sheet.status !== "PARTIAL" && !sheet.signature_image) return null;
   return (
     <div className="rounded-xl border border-crate-700/20 bg-sage-50 p-4">
       <p className="text-xs font-semibold uppercase tracking-wide text-crate-800/50 mb-3">Electronic signature</p>
@@ -191,11 +231,16 @@ export function PriceSheetDocument({ sheet, priceLabel }: { sheet: PriceSheet; p
         </p>
       </div>
       <PriceSheetItemsTable items={sheet.items} priceLabel={priceLabel} />
-      {sheet.status === "APPROVED" && (
+      {(sheet.status === "APPROVED" || sheet.status === "PARTIAL") && (
         <p className="text-sm text-crate-800/80">
           {sheet.signer_name ? `${sheet.signer_name} agreed on behalf of ${sheet.supplier_name}` : `${sheet.supplier_name} agreed`}{" "}
-          to supply the items above at the SPAR prices
+          to supply {sheet.status === "PARTIAL" ? "the items marked Approved" : "the items above"} at the SPAR prices
           shown for delivery on {formatLongDate(sheet.delivery_date)}.
+        </p>
+      )}
+      {(sheet.status === "PARTIAL" || sheet.status === "REJECTED") && sheet.rejection_reason && (
+        <p className="text-sm text-crate-800/80">
+          Supplier's note on the rejected items: “{sheet.rejection_reason}”
         </p>
       )}
       <SignatureRecord sheet={sheet} />

@@ -280,6 +280,7 @@ export default function SupplierPricesView() {
                     approval_status: result.adjusted_price === null ? null : "DRAFT",
                     revision_id: null,
                     rejection_reason: null,
+                    counter_price: null,
                   }
                 : r
             )
@@ -408,8 +409,9 @@ export default function SupplierPricesView() {
           <p className="text-xs text-crate-800/40 mt-3">
             Showing quotes for {formatDate(deliveryDate)}. Set an Adjusted Price for one or more items, then click{" "}
             <span className="font-medium text-crate-700">Send for approval</span> at the top of that supplier's
-            column — they get one price sheet to approve and e-sign, or reject. Until they sign, their own quote
-            is the price that applies, and it stays that way if they don't respond before the delivery date.
+            column — they get one price sheet and approve (e-sign) or reject each item. A rejected item can come
+            back with the supplier's own final price, which then applies. Until they respond, their own quote is
+            the price that applies, and it stays that way if they don't respond before the delivery date.
           </p>
         )}
       </div>
@@ -465,7 +467,8 @@ export default function SupplierPricesView() {
                   const cells = cellsForSupplier(s.id);
                   const pendingCell = cells.find((c) => c.approval_status === "PENDING");
                   const approvedCount = cells.filter((c) => c.approval_status === "APPROVED").length;
-                  const rejectedCell = cells.find((c) => c.approval_status === "REJECTED");
+                  const rejectedCells = cells.filter((c) => c.approval_status === "REJECTED");
+                  const rejectedCell = rejectedCells[0];
                   return (
                     <th
                       key={s.id}
@@ -509,7 +512,8 @@ export default function SupplierPricesView() {
                             className="text-[10px] text-tomato-600 font-normal max-w-[14rem] truncate"
                             title={rejectedCell.rejection_reason ?? undefined}
                           >
-                            Rejected: {rejectedCell.rejection_reason}
+                            ✗ {rejectedCells.length} rejected
+                            {rejectedCell.rejection_reason ? `: ${rejectedCell.rejection_reason}` : ""}
                           </span>
                         )}
                         {allState === "error" && sendError[s.id] && (
@@ -653,6 +657,14 @@ export default function SupplierPricesView() {
                               title={cell.approval_status === "REJECTED" ? cell.rejection_reason ?? undefined : undefined}
                             >
                               <RowApprovalBadge status={cell.approval_status} />
+                            </span>
+                          )}
+                          {cell.approval_status === "REJECTED" && cell.counter_price !== null && (
+                            <span
+                              className="text-[10px] text-tomato-600 whitespace-nowrap"
+                              title="The supplier rejected your price and gave this final price instead"
+                            >
+                              Supplier: {cell.counter_price.toFixed(2)}
                             </span>
                           )}
                         </div>

@@ -39,6 +39,8 @@ class SupplierPriceOut(BaseModel):
     # PENDING / APPROVED / REJECTED / EXPIRED for a sent adjusted price, else None.
     approval_status: str | None = None
     revision_id: int | None = None
+    # The supplier's own final price for an item they rejected, if they gave one.
+    counter_price: float | None = None
 
     class Config:
         from_attributes = True
@@ -126,6 +128,9 @@ class AdminSupplierPriceOut(BaseModel):
     approval_status: str | None = None
     revision_id: int | None = None
     rejection_reason: str | None = None
+    # The supplier's own final price for an item they rejected, if they
+    # gave one — it applies instead of their submitted price.
+    counter_price: float | None = None
     delivery_date: date
     is_lowest_for_product: bool
     # The next distinct price tier below the lowest for this product (None

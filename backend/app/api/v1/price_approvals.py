@@ -15,6 +15,7 @@ from app.schemas.price_approval import (
     ApproveRevisionRequest,
     CountOut,
     RejectRevisionRequest,
+    RespondRevisionRequest,
     RevisionDetailOut,
     RevisionSummaryOut,
     SendForApprovalRequest,
@@ -96,6 +97,31 @@ def my_pending_count(current_user: User = Depends(require_roles("SUPPLIER")), db
 @router.get("/mine/{revision_id}", response_model=RevisionDetailOut)
 def my_get(revision_id: int, current_user: User = Depends(require_roles("SUPPLIER")), db: Session = Depends(get_db)):
     rev = svc.get_own_revision(db, current_user, revision_id)
+    return svc.to_out(db, [rev], detail=True)[0]
+
+
+@router.post("/mine/{revision_id}/respond", response_model=RevisionDetailOut)
+@limiter.limit("10/minute")
+def my_respond(
+    revision_id: int,
+    payload: RespondRevisionRequest,
+    request: Request,
+    current_user: User = Depends(require_roles("SUPPLIER")),
+    db: Session = Depends(get_db),
+):
+    """Approve or reject each item; approving any needs the agreement tick and a drawn signature."""
+    rev = svc.respond(
+        db,
+        current_user,
+        revision_id,
+        snapshot_hash=payload.snapshot_hash,
+        decisions=[i.model_dump() for i in payload.items],
+        note=payload.note,
+        signature_image=payload.signature_image,
+        agreed=payload.agreed,
+        ip_address=_client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+    )
     return svc.to_out(db, [rev], detail=True)[0]
 
 

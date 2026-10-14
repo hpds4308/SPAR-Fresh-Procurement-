@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiError } from "../../api/client";
 import {
+  ItemDecision,
   PriceSheet,
+  PriceSheetItem,
   PriceSheetSummary,
-  approveSheet,
   fetchMySheet,
   fetchMySheets,
-  rejectSheet,
+  respondToSheet,
 } from "../../api/priceApprovals";
 import EmptyState from "../shared/EmptyState";
 import { IconShield } from "../shared/Icons";
@@ -16,7 +17,9 @@ import {
   formatDateTime,
   formatLongDate,
   formatSignDeadline,
+  rs,
 } from "../shared/PriceSheetParts";
+import { ProductPromotion } from "../shared/ui/PromotionBadge";
 import SignaturePad, { SignaturePadHandle } from "../shared/SignaturePad";
 import Button from "../shared/ui/Button";
 import { SkeletonTable } from "../shared/ui/Skeleton";
@@ -78,7 +81,7 @@ export default function PriceApprovals({ onChanged }: { onChanged?: () => void }
       <EmptyState
         icon={<IconShield width={20} height={20} />}
         title="No price sheets yet"
-        description="When SPAR adjusts any of your prices, they'll send them here for you to approve and sign."
+        description="When SPAR adjusts any of your prices, they'll send them here for you to approve or reject, item by item."
       />
     );
   }
@@ -90,7 +93,7 @@ export default function PriceApprovals({ onChanged }: { onChanged?: () => void }
     <div className="space-y-5">
       {pending.length > 0 && (
         <div className="space-y-3">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-crate-800/60">Waiting for your signature</h3>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-crate-800/60">Waiting for your response</h3>
           {pending.map((s) => (
             <button
               key={s.id}
@@ -105,7 +108,7 @@ export default function PriceApprovals({ onChanged }: { onChanged?: () => void }
                   Sent {formatDateTime(s.sent_at)} · respond by {formatSignDeadline(s.delivery_date)}, or your own prices apply
                 </p>
               </div>
-              <span className="text-sm font-semibold text-crate-700">Review &amp; sign →</span>
+              <span className="text-sm font-semibold text-crate-700">Review &amp; respond →</span>
             </button>
           ))}
         </div>
@@ -142,7 +145,6 @@ export default function PriceApprovals({ onChanged }: { onChanged?: () => void }
 function SheetDetail({ id, onBack, onChanged }: { id: number; onBack: () => void; onChanged?: () => void }) {
   const [sheet, setSheet] = useState<PriceSheet | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [mode, setMode] = useState<"view" | "sign" | "reject">("view");
 
   useEffect(() => {
     fetchMySheet(id)
@@ -152,7 +154,6 @@ function SheetDetail({ id, onBack, onChanged }: { id: number; onBack: () => void
 
   function done(updated: PriceSheet) {
     setSheet(updated);
-    setMode("view");
     onChanged?.();
   }
 
@@ -169,36 +170,21 @@ function SheetDetail({ id, onBack, onChanged }: { id: number; onBack: () => void
         </div>
       )}
 
-      {sheet && (
-        <>
-          <div className={`${card} p-5 sm:p-6 space-y-4`}>
-            <div className="no-print flex flex-wrap items-center gap-3 justify-between">
-              <SheetStatusBadge status={sheet.status} />
-              {sheet.status === "APPROVED" && (
-                <Button variant="secondary" size="sm" onClick={() => window.print()}>
-                  Print / Save as PDF
-                </Button>
-              )}
-            </div>
-            <PriceSheetDocument sheet={sheet} priceLabel="Your price" />
-            <StatusNote sheet={sheet} />
-          </div>
+      {sheet && sheet.status === "PENDING" && <ResponseForm sheet={sheet} onDone={done} />}
 
-          {sheet.status === "PENDING" && mode === "view" && (
-            <div className="no-print flex flex-wrap gap-3">
-              <Button onClick={() => setMode("sign")}>Approve &amp; sign</Button>
-              <Button variant="danger" onClick={() => setMode("reject")}>
-                Reject
+      {sheet && sheet.status !== "PENDING" && (
+        <div className={`${card} p-5 sm:p-6 space-y-4`}>
+          <div className="no-print flex flex-wrap items-center gap-3 justify-between">
+            <SheetStatusBadge status={sheet.status} />
+            {(sheet.status === "APPROVED" || sheet.status === "PARTIAL") && (
+              <Button variant="secondary" size="sm" onClick={() => window.print()}>
+                Print / Save as PDF
               </Button>
-            </div>
-          )}
-          {sheet.status === "PENDING" && mode === "sign" && (
-            <SignForm sheet={sheet} onCancel={() => setMode("view")} onDone={done} />
-          )}
-          {sheet.status === "PENDING" && mode === "reject" && (
-            <RejectForm sheet={sheet} onCancel={() => setMode("view")} onDone={done} />
-          )}
-        </>
+            )}
+          </div>
+          <PriceSheetDocument sheet={sheet} priceLabel="Your price" />
+          <StatusNote sheet={sheet} />
+        </div>
       )}
     </div>
   );
@@ -206,10 +192,12 @@ function SheetDetail({ id, onBack, onChanged }: { id: number; onBack: () => void
 
 function StatusNote({ sheet }: { sheet: PriceSheet }) {
   const note =
-    sheet.status === "PENDING"
-      ? `Please approve or reject by ${formatSignDeadline(sheet.delivery_date)}. If you don't respond by then, your own submitted prices apply.`
+    sheet.status === "PARTIAL"
+      ? `You approved ${sheet.approved_count} item${sheet.approved_count === 1 ? "" : "s"} and rejected ${sheet.rejected_count}${
+          sheet.responded_at ? ` on ${formatDateTime(sheet.responded_at)}` : ""
+        }. For a rejected item, the new price you gave applies (or your own submitted price if you didn't give one). SPAR may send a new sheet for those items.`
       : sheet.status === "REJECTED"
-      ? `You rejected these prices${sheet.responded_at ? ` on ${formatDateTime(sheet.responded_at)}` : ""}: "${sheet.rejection_reason}". SPAR will review and may send a new sheet.`
+      ? `You rejected these prices${sheet.responded_at ? ` on ${formatDateTime(sheet.responded_at)}` : ""}. The new prices you gave apply (or your own submitted prices). SPAR will review and may send a new sheet.`
       : sheet.status === "EXPIRED"
       ? "This sheet expired without a response, so your own submitted prices applied."
       : sheet.status === "VOIDED" || sheet.status === "WITHDRAWN"
@@ -219,95 +207,83 @@ function StatusNote({ sheet }: { sheet: PriceSheet }) {
   return <p className="no-print text-sm text-crate-800/70 bg-sage-50 rounded-xl px-4 py-3">{note}</p>;
 }
 
-function SignForm({ sheet, onCancel, onDone }: { sheet: PriceSheet; onCancel: () => void; onDone: (s: PriceSheet) => void }) {
+type Answer = { decision: ItemDecision | null; counter: string };
+
+function parsePrice(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (trimmed === "") return null;
+  const n = Number(trimmed);
+  return Number.isFinite(n) && n > 0 && n < 10_000_000 ? Math.round(n * 100) / 100 : NaN;
+}
+
+/**
+ * The supplier answers each item: approve SPAR's price, or reject it and
+ * (optionally) give their own final price. Approving anything needs the
+ * agreement tick and a drawn signature.
+ */
+function ResponseForm({ sheet, onDone }: { sheet: PriceSheet; onDone: (s: PriceSheet) => void }) {
   const padRef = useRef<SignaturePadHandle>(null);
+  const [answers, setAnswers] = useState<Record<number, Answer>>({});
+  const [note, setNote] = useState("");
   const [agreed, setAgreed] = useState(false);
   const [hasInk, setHasInk] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const ready = agreed && hasInk;
+  const answerOf = (spid: number): Answer => answers[spid] ?? { decision: null, counter: "" };
+  const approved = sheet.items.filter((i) => answerOf(i.supplier_price_id).decision === "APPROVED");
+  const rejected = sheet.items.filter((i) => answerOf(i.supplier_price_id).decision === "REJECTED");
+  const unanswered = sheet.items.length - approved.length - rejected.length;
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    const image = padRef.current?.toDataURL();
-    if (!ready || !image) return;
-    setSubmitting(true);
-    setError(null);
-    try {
-      const updated = await approveSheet(sheet.id, {
-        snapshot_hash: sheet.snapshot_hash,
-        signature_image: image,
-        agreed: true,
-      });
-      onDone(updated);
-    } catch (err) {
-      setError(errorText(err, "Could not record your signature. Please try again."));
-    } finally {
-      setSubmitting(false);
-    }
+  function counterProblem(item: PriceSheetItem): string | null {
+    const a = answerOf(item.supplier_price_id);
+    if (a.decision !== "REJECTED") return null;
+    const value = parsePrice(a.counter);
+    if (value === null) return null;
+    if (Number.isNaN(value)) return "Enter a valid price";
+    if (value === Math.round(item.adjusted_price * 100) / 100) return "Same as SPAR's price — approve instead";
+    return null;
+  }
+  const hasCounterProblem = sheet.items.some((i) => counterProblem(i) !== null);
+  const ready = unanswered === 0 && !hasCounterProblem && (approved.length === 0 || (agreed && hasInk));
+
+  function setDecision(spid: number, decision: ItemDecision) {
+    setAnswers((prev) => ({ ...prev, [spid]: { counter: prev[spid]?.counter ?? "", decision } }));
   }
 
-  return (
-    <form onSubmit={submit} className={`no-print ${card} p-5 sm:p-6 space-y-5`}>
-      <div>
-        <h3 className="font-display font-semibold text-crate-950">Approve and sign</h3>
-        <p className="text-sm text-crate-800/60 mt-1">
-          Your signature and the exact prices above are saved together as a record of this agreement.
-        </p>
-      </div>
-
-      <label className="flex gap-3 items-start text-sm text-crate-950 cursor-pointer">
-        <input
-          type="checkbox"
-          checked={agreed}
-          onChange={(e) => setAgreed(e.target.checked)}
-          className="mt-0.5 h-4 w-4 accent-crate-700"
-        />
-        <span>
-          I agree, on behalf of <strong>{sheet.supplier_name}</strong>, to supply the {sheet.items.length} item
-          {sheet.items.length === 1 ? "" : "s"} above at the SPAR prices shown for delivery on{" "}
-          <strong>{formatLongDate(sheet.delivery_date)}</strong>.
-        </span>
-      </label>
-
-      <div>
-        <div className="flex items-center justify-between mb-1.5">
-          <span className="block text-xs font-semibold text-crate-800/50 uppercase tracking-wide">Signature</span>
-          <button type="button" onClick={() => padRef.current?.clear()} className="text-xs text-crate-700 hover:underline">
-            Clear
-          </button>
-        </div>
-        <SignaturePad ref={padRef} onChange={setHasInk} />
-      </div>
-
-      {error && <p className="text-sm text-tomato-600">{error}</p>}
-
-      <div className="flex flex-wrap gap-3">
-        <Button type="submit" disabled={!ready} loading={submitting}>
-          Sign and approve
-        </Button>
-        <Button type="button" variant="secondary" onClick={onCancel} disabled={submitting}>
-          Cancel
-        </Button>
-      </div>
-    </form>
-  );
-}
-
-function RejectForm({ sheet, onCancel, onDone }: { sheet: PriceSheet; onCancel: () => void; onDone: (s: PriceSheet) => void }) {
-  const [reason, setReason] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const ready = reason.trim().length >= 3;
+  function setAll(decision: ItemDecision) {
+    setAnswers((prev) => {
+      const next: Record<number, Answer> = {};
+      for (const item of sheet.items) {
+        next[item.supplier_price_id] = { counter: prev[item.supplier_price_id]?.counter ?? "", decision };
+      }
+      return next;
+    });
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!ready) return;
+    const image = approved.length > 0 ? padRef.current?.toDataURL() : null;
+    if (approved.length > 0 && !image) return;
     setSubmitting(true);
     setError(null);
     try {
-      onDone(await rejectSheet(sheet.id, { snapshot_hash: sheet.snapshot_hash, reason: reason.trim() }));
+      const updated = await respondToSheet(sheet.id, {
+        snapshot_hash: sheet.snapshot_hash,
+        items: sheet.items.map((item) => {
+          const a = answerOf(item.supplier_price_id);
+          return {
+            supplier_price_id: item.supplier_price_id,
+            decision: a.decision!,
+            counter_price: a.decision === "REJECTED" ? parsePrice(a.counter) : null,
+          };
+        }),
+        note: rejected.length > 0 ? note.trim() || null : null,
+        agreed: approved.length > 0 && agreed,
+        signature_image: image,
+      });
+      onDone(updated);
     } catch (err) {
       setError(errorText(err, "Could not send your response. Please try again."));
     } finally {
@@ -315,27 +291,193 @@ function RejectForm({ sheet, onCancel, onDone }: { sheet: PriceSheet; onCancel: 
     }
   }
 
+  const toggle = (active: boolean, tone: "approve" | "reject") =>
+    `rounded-full px-3 py-1.5 text-xs font-semibold border transition-colors duration-150 ${
+      active
+        ? tone === "approve"
+          ? "bg-crate-700 border-crate-700 text-white"
+          : "bg-tomato-600 border-tomato-600 text-white"
+        : tone === "approve"
+        ? "bg-white border-sage-300 text-crate-700 hover:border-crate-700"
+        : "bg-white border-sage-300 text-tomato-600 hover:border-tomato-500"
+    }`;
+
   return (
-    <form onSubmit={submit} className={`no-print ${card} p-5 sm:p-6 space-y-4`}>
-      <div>
-        <h3 className="font-display font-semibold text-crate-950">Reject these prices</h3>
-        <p className="text-sm text-crate-800/60 mt-1">Tell SPAR why, e.g. which items you can't supply at their price.</p>
+    <form onSubmit={submit} className="space-y-4">
+      <div className={`${card} p-5 sm:p-6 space-y-4`}>
+        <div className="flex flex-wrap items-start gap-3 justify-between">
+          <div>
+            <p className="text-xs uppercase tracking-wide text-crate-800/40 font-semibold">SPAR price sheet #{sheet.id}</p>
+            <h3 className="font-display text-lg font-semibold text-crate-950 mt-0.5">{sheet.supplier_name}</h3>
+            <p className="text-sm text-crate-800/60 mt-1">
+              Delivery on {formatLongDate(sheet.delivery_date)} · sent {formatDateTime(sheet.sent_at)}
+              {sheet.sent_by_name ? ` by ${sheet.sent_by_name}` : ""}
+            </p>
+          </div>
+          <SheetStatusBadge status={sheet.status} />
+        </div>
+
+        <p className="text-sm text-crate-800/70 bg-sage-50 rounded-xl px-4 py-3">
+          Approve or reject each price. If you reject one, you can enter your own final price for it. Please respond
+          by {formatSignDeadline(sheet.delivery_date)}, or your own submitted prices apply.
+        </p>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-crate-800/50 mr-1">All items:</span>
+          <button type="button" onClick={() => setAll("APPROVED")} className={toggle(false, "approve")}>
+            ✓ Approve all
+          </button>
+          <button type="button" onClick={() => setAll("REJECTED")} className={toggle(false, "reject")}>
+            ✗ Reject all
+          </button>
+        </div>
+
+        <ul className="divide-y divide-sage-100 border-y border-sage-100">
+          {sheet.items.map((item) => {
+            const a = answerOf(item.supplier_price_id);
+            const problem = counterProblem(item);
+            return (
+              <li
+                key={item.supplier_price_id}
+                className={`py-3 flex flex-wrap items-center gap-x-4 gap-y-2 ${
+                  a.decision === "REJECTED" ? "bg-tomato-500/[0.03]" : a.decision === "APPROVED" ? "bg-crate-700/[0.03]" : ""
+                }`}
+              >
+                <div className="flex-1 min-w-[13rem]">
+                  <p className="text-sm text-crate-950">
+                    {item.product_description}
+                    <span className="text-crate-800/35 text-xs ml-1.5">{item.product_code}</span>
+                    <ProductPromotion productId={item.product_id} className="ml-1.5" />
+                  </p>
+                  <p className="text-sm mt-0.5 flex flex-wrap gap-x-3">
+                    <span className="text-crate-800/60">
+                      Your price: <span className="tabular-nums">{rs(item.supplier_price)}</span>
+                    </span>
+                    <span className="text-crate-800/60">
+                      SPAR: <span className="font-semibold text-crate-950 tabular-nums">{rs(item.adjusted_price)}</span>
+                      <span className="text-crate-800/40"> /{item.unit_code}</span>
+                    </span>
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    aria-pressed={a.decision === "APPROVED"}
+                    onClick={() => setDecision(item.supplier_price_id, "APPROVED")}
+                    className={toggle(a.decision === "APPROVED", "approve")}
+                  >
+                    ✓ Approve
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={a.decision === "REJECTED"}
+                    onClick={() => setDecision(item.supplier_price_id, "REJECTED")}
+                    className={toggle(a.decision === "REJECTED", "reject")}
+                  >
+                    ✗ Reject
+                  </button>
+                </div>
+                {a.decision === "REJECTED" && (
+                  <div className="basis-full">
+                    <label className="flex flex-wrap items-center gap-2 text-sm text-crate-800/80">
+                      <span>Your new final price (Rs.)</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        inputMode="decimal"
+                        value={a.counter}
+                        onChange={(e) =>
+                          setAnswers((prev) => ({
+                            ...prev,
+                            [item.supplier_price_id]: { decision: "REJECTED", counter: e.target.value },
+                          }))
+                        }
+                        placeholder={item.supplier_price.toFixed(2)}
+                        className={`w-28 border rounded-lg px-2 py-1 text-right text-sm bg-white focus:outline-none focus:ring-2 focus:ring-crate-700/30 ${
+                          problem ? "border-tomato-500" : "border-sage-300"
+                        }`}
+                      />
+                      <span className="text-xs text-crate-800/45">
+                        {problem ?? `/${item.unit_code} · leave blank to keep your price ${rs(item.supplier_price)}`}
+                      </span>
+                    </label>
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+
+        <p className="text-xs text-crate-800/50">
+          {approved.length} approved · {rejected.length} rejected
+          {unanswered > 0 ? ` · ${unanswered} still to answer` : ""}
+        </p>
       </div>
-      <textarea
-        className={`${input} min-h-[6rem]`}
-        value={reason}
-        onChange={(e) => setReason(e.target.value)}
-        maxLength={1000}
-        placeholder="Reason"
-      />
+
+      {rejected.length > 0 && (
+        <div className={`${card} p-5 sm:p-6 space-y-2`}>
+          <label className="block text-xs font-semibold text-crate-800/50 uppercase tracking-wide">
+            Note to SPAR (optional)
+          </label>
+          <textarea
+            className={`${input} min-h-[4.5rem]`}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            maxLength={1000}
+            placeholder="e.g. why you can't supply at SPAR's price"
+          />
+        </div>
+      )}
+
+      {approved.length > 0 && (
+        <div className={`${card} p-5 sm:p-6 space-y-5`}>
+          <div>
+            <h3 className="font-display font-semibold text-crate-950">Sign for the approved prices</h3>
+            <p className="text-sm text-crate-800/60 mt-1">
+              Your signature and the exact prices are saved together as a record of this agreement.
+            </p>
+          </div>
+          <label className="flex gap-3 items-start text-sm text-crate-950 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={agreed}
+              onChange={(e) => setAgreed(e.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-crate-700"
+            />
+            <span>
+              I agree, on behalf of <strong>{sheet.supplier_name}</strong>, to supply the {approved.length} approved item
+              {approved.length === 1 ? "" : "s"} at the SPAR prices shown for delivery on{" "}
+              <strong>{formatLongDate(sheet.delivery_date)}</strong>.
+            </span>
+          </label>
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="block text-xs font-semibold text-crate-800/50 uppercase tracking-wide">Signature</span>
+              <button type="button" onClick={() => padRef.current?.clear()} className="text-xs text-crate-700 hover:underline">
+                Clear
+              </button>
+            </div>
+            <SignaturePad ref={padRef} onChange={setHasInk} />
+          </div>
+        </div>
+      )}
+
       {error && <p className="text-sm text-tomato-600">{error}</p>}
-      <div className="flex flex-wrap gap-3">
-        <Button type="submit" variant="danger" disabled={!ready} loading={submitting}>
-          Reject prices
+
+      <div className="no-print flex flex-wrap items-center gap-3">
+        <Button type="submit" variant={approved.length === 0 && rejected.length > 0 ? "danger" : "primary"} disabled={!ready} loading={submitting}>
+          {approved.length > 0 ? "Sign and send response" : rejected.length > 0 ? "Send rejection" : "Send response"}
         </Button>
-        <Button type="button" variant="secondary" onClick={onCancel} disabled={submitting}>
-          Cancel
-        </Button>
+        {!ready && (
+          <span className="text-xs text-crate-800/50">
+            {unanswered > 0
+              ? "Approve or reject every item first."
+              : hasCounterProblem
+              ? "Fix the new prices marked in red."
+              : "Tick the box and sign to approve."}
+          </span>
+        )}
       </div>
     </form>
   );
