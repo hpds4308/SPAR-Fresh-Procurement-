@@ -16,6 +16,7 @@ import { IconTag } from "../shared/Icons";
 import { PriceAnswerLabel, RowApprovalBadge } from "../shared/PriceSheetParts";
 import { ConfirmDialog } from "../shared/ui/Modal";
 import { ProductPromotion } from "../shared/ui/PromotionBadge";
+import SupplierColumnFilter, { ColumnFilter, FILTER_LABELS, SortDir, cellMatches } from "./SupplierColumnFilter";
 
 function formatDate(iso: string): string {
   const d = new Date(iso + "T00:00:00");
@@ -207,6 +208,47 @@ export default function SupplierPricesView() {
     return list.sort(compareProductDisplayOrder);
   }, [rows, q]);
 
+  // Excel-style column filters/sort (funnel button in each supplier's
+  // header): they narrow and order the ROWS by that supplier's cells, while
+  // every supplier's columns stay visible. Several columns can be filtered
+  // at once (all must match). productRows stays unfiltered — the header
+  // counts and "Send for approval" work on every item.
+  const [colFilters, setColFilters] = useState<Record<number, ColumnFilter>>({});
+  const [colSort, setColSort] = useState<{ supplierId: number; dir: SortDir } | null>(null);
+  useEffect(() => {
+    setColFilters({});
+    setColSort(null);
+  }, [deliveryDate]);
+
+  const visibleRows = useMemo(() => {
+    const active = Object.entries(colFilters).map(([id, f]) => [Number(id), f] as const);
+    let list = active.length
+      ? productRows.filter((p) => active.every(([id, f]) => cellMatches(f, p.cells.get(id))))
+      : productRows;
+    if (colSort) {
+      const { supplierId, dir } = colSort;
+      // Items this supplier didn't price go to the bottom, in their usual order.
+      list = [...list].sort((a, b) => {
+        const pa = a.cells.get(supplierId)?.price;
+        const pb = b.cells.get(supplierId)?.price;
+        if (pa === undefined || pb === undefined) return (pa === undefined ? 1 : 0) - (pb === undefined ? 1 : 0);
+        return dir === "asc" ? pa - pb : pb - pa;
+      });
+    }
+    return list;
+  }, [productRows, colFilters, colSort]);
+
+  const filtersActive = Object.keys(colFilters).length > 0 || colSort !== null;
+
+  function setColumnFilter(supplierId: number, f: ColumnFilter | undefined) {
+    setColFilters((prev) => {
+      const next = { ...prev };
+      if (f) next[supplierId] = f;
+      else delete next[supplierId];
+      return next;
+    });
+  }
+
   const supplierCount = supplierColumns.length;
 
   useLayoutEffect(() => {
@@ -375,6 +417,7 @@ export default function SupplierPricesView() {
           </div>
 
           <div className="text-xs text-crate-800/40 ml-auto text-right">
+            {filtersActive && visibleRows.length !== productRows.length ? `${visibleRows.length} of ` : ""}
             {productRows.length} item{productRows.length === 1 ? "" : "s"} · {supplierCount} supplier
             {supplierCount === 1 ? "" : "s"}
           </div>
@@ -390,6 +433,41 @@ export default function SupplierPricesView() {
           </p>
         )}
       </div>
+
+      {filtersActive && (
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-crate-800/50 font-semibold uppercase tracking-wide">Filters</span>
+          {Object.entries(colFilters).map(([id, f]) => (
+            <button
+              key={`f-${id}`}
+              onClick={() => setColumnFilter(Number(id), undefined)}
+              className="rounded-full bg-crate-700 text-white pl-3 pr-2 py-1 font-semibold hover:bg-crate-800"
+              title="Remove this filter"
+            >
+              {supplierColumns.find((c) => c.id === Number(id))?.name ?? "Supplier"}: {FILTER_LABELS[f]} ×
+            </button>
+          ))}
+          {colSort && (
+            <button
+              onClick={() => setColSort(null)}
+              className="rounded-full bg-crate-700 text-white pl-3 pr-2 py-1 font-semibold hover:bg-crate-800"
+              title="Remove this sort"
+            >
+              Sorted by {supplierColumns.find((c) => c.id === colSort.supplierId)?.name ?? "supplier"}:{" "}
+              {colSort.dir === "asc" ? "low → high" : "high → low"} ×
+            </button>
+          )}
+          <button
+            onClick={() => {
+              setColFilters({});
+              setColSort(null);
+            }}
+            className="text-crate-700 font-semibold hover:underline"
+          >
+            Clear all
+          </button>
+        </div>
+      )}
 
       <div className="bg-white rounded-2xl shadow-[0_10px_30px_-12px_rgba(21,56,38,0.15)] border border-sage-100 overflow-auto max-h-[75vh]">
         {loading ? (
@@ -437,10 +515,21 @@ export default function SupplierPricesView() {
                     <th
                       key={s.id}
                       colSpan={2}
-                      className="px-4 py-2.5 text-center border-l border-sage-100 normal-case tracking-normal"
+                      className={`px-4 py-2.5 text-center border-l border-sage-100 normal-case tracking-normal ${
+                        colFilters[s.id] || colSort?.supplierId === s.id ? "bg-crate-700/10" : ""
+                      }`}
                     >
                       <div className="flex flex-col items-center gap-1.5">
-                        <span className="font-semibold text-crate-800 text-sm">{s.name}</span>
+                        <span className="flex items-center gap-1.5">
+                          <span className="font-semibold text-crate-800 text-sm">{s.name}</span>
+                          <SupplierColumnFilter
+                            supplierName={s.name}
+                            filter={colFilters[s.id]}
+                            sortDir={colSort?.supplierId === s.id ? colSort.dir : undefined}
+                            onFilter={(f) => setColumnFilter(s.id, f)}
+                            onSort={(dir) => setColSort(dir ? { supplierId: s.id, dir } : null)}
+                          />
+                        </span>
                         <button
                           onClick={() => handleSendForApproval(s.id)}
                           disabled={unsentCount === 0 || busy}
@@ -503,7 +592,23 @@ export default function SupplierPricesView() {
               </tr>
             </thead>
             <tbody className="divide-y divide-sage-100">
-              {productRows.map((p) => (
+              {visibleRows.length === 0 && (
+                <tr>
+                  <td colSpan={2 + supplierCount * 2} className="sticky left-0 px-4 py-10 text-left text-sm text-crate-800/50">
+                    No items match these filters.{" "}
+                    <button
+                      onClick={() => {
+                        setColFilters({});
+                        setColSort(null);
+                      }}
+                      className="text-crate-700 font-semibold hover:underline"
+                    >
+                      Clear filters
+                    </button>
+                  </td>
+                </tr>
+              )}
+              {visibleRows.map((p) => (
                 <tr key={p.product_id}>
                   <td
                     title={`${p.description} ${p.code}`}
