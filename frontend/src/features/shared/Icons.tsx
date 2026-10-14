@@ -271,3 +271,22 @@ export function IconList(props: IconProps) {
     props
   );
 }
+
+export function IconPaperclip(props: IconProps) {
+  return base(
+    <>
+      <path d="m15.5 9.3-5.6 5.6a3.6 3.6 0 0 1-5.1-5.1l6-6a2.4 2.4 0 0 1 3.4 3.4l-6 6a1.2 1.2 0 0 1-1.7-1.7l5.5-5.5" />
+    </>,
+    props
+  );
+}
+
+export function IconFile(props: IconProps) {
+  return base(
+    <>
+      <path d="M11.5 2.8H6a1.5 1.5 0 0 0-1.5 1.5v11.4A1.5 1.5 0 0 0 6 17.2h8a1.5 1.5 0 0 0 1.5-1.5V6.8l-4-4Z" />
+      <path d="M11.5 2.8v4h4" />
+    </>,
+    props
+  );
+}

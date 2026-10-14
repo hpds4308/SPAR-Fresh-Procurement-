@@ -99,12 +99,17 @@ export default function PartyMessages({ role }: { role: "SUPPLIER" | "BRANCH" })
     };
   }, [selected, loadMessages]);
 
-  async function handleSend(body: string) {
-    const sent = selected === "admin" ? await sendMyMessage(body) : await sendChatMessage(selected, body);
+  async function handleSend(body: string, attachmentIds: number[]) {
+    const sent =
+      selected === "admin"
+        ? await sendMyMessage(body, attachmentIds)
+        : await sendChatMessage(selected, body, attachmentIds);
     setMessages((prev) => [...prev, sent]);
     if (selected !== "admin") {
       setContacts((prev) =>
-        prev.map((c) => (c.id === selected ? { ...c, last_message_body: body, last_message_at: sent.created_at } : c))
+        prev.map((c) =>
+          c.id === selected ? { ...c, last_message_body: body || "📎 Attachment", last_message_at: sent.created_at } : c
+        )
       );
     }
   }

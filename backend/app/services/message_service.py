@@ -12,17 +12,20 @@ only their own branch_id's; Admin can touch any Admin thread and read
 supplier<->branch messages too (unread badge), and opening one of those
 chats marks it read for Admin only.
 """
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
 
-from sqlalchemy import and_
+from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
-from app.core.errors import PermissionDeniedError, NotFoundError
+from app.core.errors import NotFoundError, PermissionDeniedError, ValidationFailedError
+from app.core.security import get_user_roles
 from app.models.branch import Branch
-from app.models.message import Message
+from app.models.message import Message, MessageAttachment
 from app.models.supplier import Supplier
 from app.models.user import User
 from app.schemas.message import (
+    AttachmentOut,
     BranchThreadOut,
     ContactThreadOut,
     MessageOut,
@@ -37,7 +40,7 @@ _ADMIN_BRANCH = Message.supplier_id.is_(None)
 _SUPPLIER_BRANCH = and_(Message.supplier_id.isnot(None), Message.branch_id.isnot(None))
 
 
-def _to_out(msg: Message, username: str) -> MessageOut:
+def _to_out(msg: Message, username: str, attachments: list[MessageAttachment] | None = None) -> MessageOut:
     return MessageOut(
         id=msg.id,
         supplier_id=msg.supplier_id,
@@ -46,7 +49,38 @@ def _to_out(msg: Message, username: str) -> MessageOut:
         sender_username=username,
         body=msg.body,
         created_at=msg.created_at,
+        attachments=[_attachment_out(a) for a in attachments or []],
     )
+
+
+def _preview(msg: Message) -> str:
+    """What a conversation list shows for its last message."""
+    return msg.body or "📎 Attachment"
+
+
+def _many_out(db: Session, messages: list[Message]) -> list[MessageOut]:
+    names = _usernames(db, messages)
+    by_message: dict[int, list[MessageAttachment]] = {}
+    if messages:
+        for a in (
+            db.query(MessageAttachment)
+            .filter(MessageAttachment.message_id.in_([m.id for m in messages]))
+            .order_by(MessageAttachment.id)
+        ):
+            by_message.setdefault(a.message_id, []).append(a)
+    return [_to_out(m, names.get(m.sender_user_id, "—"), by_message.get(m.id)) for m in messages]
+
+
+def _save(db: Session, msg: Message, sender: User, attachment_ids: list[int] | None) -> MessageOut:
+    """Saves a new message with the sender's uploaded attachments linked to it."""
+    if not msg.body.strip() and not attachment_ids:
+        raise ValidationFailedError("Write a message or attach a file.")
+    db.add(msg)
+    db.flush()
+    attachments = _claim_attachments(db, sender, msg, attachment_ids or [])
+    db.commit()
+    db.refresh(msg)
+    return _to_out(msg, sender.username, attachments)
 
 
 def _usernames(db: Session, messages: list[Message]) -> dict[int, str]:
@@ -70,7 +104,7 @@ def _require_branch_exists(db: Session, branch_id: int) -> Branch:
     return branch
 
 
-def send_as_admin(db: Session, admin: User, supplier_id: int, body: str) -> MessageOut:
+def send_as_admin(db: Session, admin: User, supplier_id: int, body: str, attachment_ids: list[int] | None = None) -> MessageOut:
     _require_supplier_exists(db, supplier_id)
     msg = Message(
         supplier_id=supplier_id,
@@ -80,13 +114,10 @@ def send_as_admin(db: Session, admin: User, supplier_id: int, body: str) -> Mess
         # Admin sent it, so it's implicitly "read" on the admin side already.
         read_by_admin_at=datetime.now(timezone.utc),
     )
-    db.add(msg)
-    db.commit()
-    db.refresh(msg)
-    return _to_out(msg, admin.username)
+    return _save(db, msg, admin, attachment_ids)
 
 
-def send_as_admin_to_branch(db: Session, admin: User, branch_id: int, body: str) -> MessageOut:
+def send_as_admin_to_branch(db: Session, admin: User, branch_id: int, body: str, attachment_ids: list[int] | None = None) -> MessageOut:
     _require_branch_exists(db, branch_id)
     msg = Message(
         branch_id=branch_id,
@@ -95,13 +126,10 @@ def send_as_admin_to_branch(db: Session, admin: User, branch_id: int, body: str)
         body=body,
         read_by_admin_at=datetime.now(timezone.utc),
     )
-    db.add(msg)
-    db.commit()
-    db.refresh(msg)
-    return _to_out(msg, admin.username)
+    return _save(db, msg, admin, attachment_ids)
 
 
-def send_as_supplier(db: Session, supplier_user: User, body: str) -> MessageOut:
+def send_as_supplier(db: Session, supplier_user: User, body: str, attachment_ids: list[int] | None = None) -> MessageOut:
     if not supplier_user.supplier_id:
         raise PermissionDeniedError("Only supplier accounts can send messages here.")
     msg = Message(
@@ -111,13 +139,10 @@ def send_as_supplier(db: Session, supplier_user: User, body: str) -> MessageOut:
         body=body,
         read_by_supplier_at=datetime.now(timezone.utc),
     )
-    db.add(msg)
-    db.commit()
-    db.refresh(msg)
-    return _to_out(msg, supplier_user.username)
+    return _save(db, msg, supplier_user, attachment_ids)
 
 
-def send_as_branch(db: Session, branch_user: User, body: str) -> MessageOut:
+def send_as_branch(db: Session, branch_user: User, body: str, attachment_ids: list[int] | None = None) -> MessageOut:
     if not branch_user.branch_id:
         raise PermissionDeniedError("Only branch accounts can send messages here.")
     msg = Message(
@@ -127,10 +152,7 @@ def send_as_branch(db: Session, branch_user: User, body: str) -> MessageOut:
         body=body,
         read_by_branch_at=datetime.now(timezone.utc),
     )
-    db.add(msg)
-    db.commit()
-    db.refresh(msg)
-    return _to_out(msg, branch_user.username)
+    return _save(db, msg, branch_user, attachment_ids)
 
 
 def list_for_admin(db: Session, supplier_id: int, mark_read: bool = True) -> list[MessageOut]:
@@ -148,8 +170,7 @@ def list_for_admin(db: Session, supplier_id: int, mark_read: bool = True) -> lis
             for m in unread:
                 m.read_by_admin_at = now
             db.commit()
-    names = _usernames(db, messages)
-    return [_to_out(m, names.get(m.sender_user_id, "—")) for m in messages]
+    return _many_out(db, messages)
 
 
 def list_for_admin_branch(db: Session, branch_id: int, mark_read: bool = True) -> list[MessageOut]:
@@ -167,8 +188,7 @@ def list_for_admin_branch(db: Session, branch_id: int, mark_read: bool = True) -
             for m in unread:
                 m.read_by_admin_at = now
             db.commit()
-    names = _usernames(db, messages)
-    return [_to_out(m, names.get(m.sender_user_id, "—")) for m in messages]
+    return _many_out(db, messages)
 
 
 def list_for_supplier(db: Session, supplier_user: User, mark_read: bool = True) -> list[MessageOut]:
@@ -187,8 +207,7 @@ def list_for_supplier(db: Session, supplier_user: User, mark_read: bool = True) 
             for m in unread:
                 m.read_by_supplier_at = now
             db.commit()
-    names = _usernames(db, messages)
-    return [_to_out(m, names.get(m.sender_user_id, "—")) for m in messages]
+    return _many_out(db, messages)
 
 
 def list_for_branch(db: Session, branch_user: User, mark_read: bool = True) -> list[MessageOut]:
@@ -207,8 +226,7 @@ def list_for_branch(db: Session, branch_user: User, mark_read: bool = True) -> l
             for m in unread:
                 m.read_by_branch_at = now
             db.commit()
-    names = _usernames(db, messages)
-    return [_to_out(m, names.get(m.sender_user_id, "—")) for m in messages]
+    return _many_out(db, messages)
 
 
 def list_admin_threads(db: Session) -> list[SupplierThreadOut]:
@@ -238,7 +256,7 @@ def list_admin_threads(db: Session) -> list[SupplierThreadOut]:
                 supplier_id=s.id,
                 supplier_code=s.supplier_code,
                 supplier_name=s.supplier_name,
-                last_message_body=last.body if last else None,
+                last_message_body=_preview(last) if last else None,
                 last_message_at=last.created_at if last else None,
                 unread_count=unread,
             )
@@ -278,7 +296,7 @@ def list_admin_branch_threads(db: Session) -> list[BranchThreadOut]:
                 branch_id=b.id,
                 branch_code=b.branch_code,
                 branch_name=b.branch_name,
-                last_message_body=last.body if last else None,
+                last_message_body=_preview(last) if last else None,
                 last_message_at=last.created_at if last else None,
                 unread_count=unread,
             )
@@ -386,7 +404,7 @@ def _pair_messages(db: Session, supplier_id: int, branch_id: int) -> list[Messag
     )
 
 
-def send_to_peer(db: Session, user: User, other_id: int, body: str) -> MessageOut:
+def send_to_peer(db: Session, user: User, other_id: int, body: str, attachment_ids: list[int] | None = None) -> MessageOut:
     supplier_id, branch_id = _peer_ids(user, other_id)
     _require_active_peer(db, user, other_id)
     now = datetime.now(timezone.utc)
@@ -401,10 +419,7 @@ def send_to_peer(db: Session, user: User, other_id: int, body: str) -> MessageOu
         read_by_supplier_at=now if user.supplier_id else None,
         read_by_branch_at=now if user.branch_id else None,
     )
-    db.add(msg)
-    db.commit()
-    db.refresh(msg)
-    return _to_out(msg, user.username)
+    return _save(db, msg, user, attachment_ids)
 
 
 def list_with_peer(db: Session, user: User, other_id: int, mark_read: bool = True) -> list[MessageOut]:
@@ -424,8 +439,7 @@ def list_with_peer(db: Session, user: User, other_id: int, mark_read: bool = Tru
                 changed = True
         if changed:
             db.commit()
-    names = _usernames(db, messages)
-    return [_to_out(m, names.get(m.sender_user_id, "—")) for m in messages]
+    return _many_out(db, messages)
 
 
 def list_contacts(db: Session, user: User) -> list[ContactThreadOut]:
@@ -476,7 +490,7 @@ def list_contacts(db: Session, user: User) -> list[ContactThreadOut]:
                 id=other_id,
                 code=code,
                 name=name,
-                last_message_body=last.body if last else None,
+                last_message_body=_preview(last) if last else None,
                 last_message_at=last.created_at if last else None,
                 unread_count=sum(1 for m in msgs if is_unread(m)),
             )
@@ -513,7 +527,7 @@ def list_pair_conversations(db: Session) -> list[PairConversationOut]:
                 branch_id=branch_id,
                 branch_name=branches.get(branch_id, "—"),
                 message_count=len(msgs),
-                last_message_body=last.body,
+                last_message_body=_preview(last),
                 last_message_at=last.created_at,
                 last_sender_role=last.sender_role,
             )
@@ -537,5 +551,146 @@ def list_pair_for_admin(db: Session, supplier_id: int, branch_id: int, mark_read
             for m in unread:
                 m.read_by_admin_at = now
             db.commit()
-    names = _usernames(db, messages)
-    return [_to_out(m, names.get(m.sender_user_id, "—")) for m in messages]
+    return _many_out(db, messages)
+
+
+# ---- Attachments ----
+
+# Extension -> (served content type, magic-byte prefixes it must start with;
+# None = any content). The browser's own content type is never trusted.
+_OLE = (b"\xd0\xcf\x11\xe0",)
+_ZIP = (b"PK\x03\x04",)
+ALLOWED_TYPES: dict[str, tuple[str, tuple[bytes, ...] | None]] = {
+    ".jpg": ("image/jpeg", (b"\xff\xd8\xff",)),
+    ".jpeg": ("image/jpeg", (b"\xff\xd8\xff",)),
+    ".png": ("image/png", (b"\x89PNG\r\n\x1a\n",)),
+    ".gif": ("image/gif", (b"GIF87a", b"GIF89a")),
+    ".webp": ("image/webp", (b"RIFF",)),
+    ".pdf": ("application/pdf", (b"%PDF",)),
+    ".doc": ("application/msword", _OLE),
+    ".xls": ("application/vnd.ms-excel", _OLE),
+    ".ppt": ("application/vnd.ms-powerpoint", _OLE),
+    ".docx": ("application/vnd.openxmlformats-officedocument.wordprocessingml.document", _ZIP),
+    ".xlsx": ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", _ZIP),
+    ".pptx": ("application/vnd.openxmlformats-officedocument.presentationml.presentation", _ZIP),
+    ".csv": ("text/csv", None),
+    ".txt": ("text/plain", None),
+}
+MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024
+MAX_ATTACHMENTS_PER_MESSAGE = 5
+# The database volume is small (Railway trial: ~430 MB in all), so chat
+# files stop being accepted well before they could fill it and take the
+# whole app down with them.
+MAX_TOTAL_ATTACHMENT_BYTES = 200 * 1024 * 1024
+# An upload that's never sent with a message is cleaned up after this.
+PENDING_TTL = timedelta(hours=24)
+
+
+def _attachment_out(a: MessageAttachment) -> AttachmentOut:
+    return AttachmentOut(id=a.id, filename=a.filename, content_type=a.content_type, size_bytes=a.size_bytes)
+
+
+def _clean_filename(name: str) -> str:
+    name = (name or "").replace("\\", "/").split("/")[-1]
+    name = "".join(ch for ch in name if ch.isprintable() and ch not in '<>:"|?*').strip()
+    return (name or "file")[-200:]
+
+
+def upload_attachment(db: Session, user: User, filename: str, data: bytes) -> AttachmentOut:
+    """Stores one file for a message the user is about to send."""
+    filename = _clean_filename(filename)
+    ext = ("." + filename.rsplit(".", 1)[-1].lower()) if "." in filename else ""
+    if ext not in ALLOWED_TYPES:
+        raise ValidationFailedError(
+            "That type of file can't be attached. Use a photo (JPG, PNG, GIF, WEBP), PDF, Word, Excel, "
+            "PowerPoint, CSV or text file."
+        )
+    if not data:
+        raise ValidationFailedError(f"{filename} is empty.")
+    if len(data) > MAX_ATTACHMENT_BYTES:
+        raise ValidationFailedError(f"{filename} is too large — files can be up to 5 MB.")
+    content_type, magic = ALLOWED_TYPES[ext]
+    if magic and not any(data.startswith(m) for m in magic):
+        raise ValidationFailedError(f"{filename} doesn't look like a real {ext[1:].upper()} file.")
+    if ext == ".webp" and data[8:12] != b"WEBP":
+        raise ValidationFailedError(f"{filename} doesn't look like a real WEBP file.")
+
+    # Uploads that were never sent with a message.
+    db.query(MessageAttachment).filter(
+        MessageAttachment.message_id.is_(None),
+        MessageAttachment.created_at < datetime.now(timezone.utc) - PENDING_TTL,
+    ).delete(synchronize_session=False)
+
+    used = db.query(func.coalesce(func.sum(MessageAttachment.size_bytes), 0)).scalar() or 0
+    if used + len(data) > MAX_TOTAL_ATTACHMENT_BYTES:
+        raise ValidationFailedError(
+            "Chat file storage is full, so new files can't be attached right now. Please tell SPAR Admin."
+        )
+
+    attachment = MessageAttachment(
+        uploaded_by=user.id,
+        filename=filename,
+        content_type=content_type,
+        size_bytes=len(data),
+        data=data,
+    )
+    db.add(attachment)
+    db.commit()
+    db.refresh(attachment)
+    return _attachment_out(attachment)
+
+
+def _claim_attachments(db: Session, sender: User, msg: Message, attachment_ids: list[int]) -> list[MessageAttachment]:
+    """Links the sender's own not-yet-sent uploads to `msg`. Caller commits."""
+    ids = list(dict.fromkeys(attachment_ids))
+    if not ids:
+        return []
+    if len(ids) > MAX_ATTACHMENTS_PER_MESSAGE:
+        raise ValidationFailedError(f"A message can have up to {MAX_ATTACHMENTS_PER_MESSAGE} attachments.")
+    found = (
+        db.query(MessageAttachment)
+        .filter(
+            MessageAttachment.id.in_(ids),
+            MessageAttachment.uploaded_by == sender.id,
+            MessageAttachment.message_id.is_(None),
+        )
+        .all()
+    )
+    if len(found) != len(ids):
+        raise ValidationFailedError("One of the attachments wasn't found — attach it again.")
+    for a in found:
+        a.message_id = msg.id
+    return sorted(found, key=lambda a: a.id)
+
+
+def _can_see(db: Session, user: User, msg: Message) -> bool:
+    if "ADMIN" in get_user_roles(db, user.id):
+        return True
+    if user.supplier_id:
+        return msg.supplier_id == user.supplier_id
+    if user.branch_id:
+        return msg.branch_id == user.branch_id
+    return False
+
+
+def get_attachment(db: Session, user: User, attachment_id: int) -> MessageAttachment:
+    """The file, if `user` can see the message it's on (or uploaded it and hasn't sent it yet)."""
+    a = db.get(MessageAttachment, attachment_id)
+    if a is not None:
+        if a.message_id is None:
+            allowed = a.uploaded_by == user.id
+        else:
+            msg = db.get(Message, a.message_id)
+            allowed = msg is not None and _can_see(db, user, msg)
+        if allowed:
+            return a
+    # Someone else's file looks exactly like a missing one.
+    raise NotFoundError("That attachment was not found.")
+
+
+def content_disposition(a: MessageAttachment) -> str:
+    """Photos and PDFs open in the browser; anything else downloads."""
+    kind = "inline" if a.content_type.startswith("image/") or a.content_type == "application/pdf" else "attachment"
+    ascii_name = a.filename.encode("ascii", "ignore").decode() or "file"
+    ascii_name = ascii_name.replace('"', "")
+    return f"{kind}; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(a.filename)}"

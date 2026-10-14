@@ -1,4 +1,11 @@
-import { apiFetch } from "./client";
+import { apiFetch, apiFetchBlob } from "./client";
+
+export type Attachment = {
+  id: number;
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+};
 
 export type Message = {
   id: number;
@@ -8,6 +15,7 @@ export type Message = {
   sender_username: string;
   body: string;
   created_at: string;
+  attachments: Attachment[];
 };
 
 export type SupplierThread = {
@@ -53,10 +61,10 @@ export function fetchAdminThread(supplierId: number): Promise<Message[]> {
   return apiFetch(`/messages/admin/${supplierId}`);
 }
 
-export function sendAdminMessage(supplierId: number, body: string): Promise<Message> {
+export function sendAdminMessage(supplierId: number, body: string, attachmentIds: number[] = []): Promise<Message> {
   return apiFetch(`/messages/admin/${supplierId}`, {
     method: "POST",
-    body: JSON.stringify({ body }),
+    body: JSON.stringify({ body, attachment_ids: attachmentIds }),
   });
 }
 
@@ -68,10 +76,10 @@ export function fetchAdminBranchThread(branchId: number): Promise<Message[]> {
   return apiFetch(`/messages/admin/branch/${branchId}`);
 }
 
-export function sendAdminBranchMessage(branchId: number, body: string): Promise<Message> {
+export function sendAdminBranchMessage(branchId: number, body: string, attachmentIds: number[] = []): Promise<Message> {
   return apiFetch(`/messages/admin/branch/${branchId}`, {
     method: "POST",
-    body: JSON.stringify({ body }),
+    body: JSON.stringify({ body, attachment_ids: attachmentIds }),
   });
 }
 
@@ -81,10 +89,10 @@ export function fetchMyThread(): Promise<Message[]> {
   return apiFetch("/messages/mine");
 }
 
-export function sendMyMessage(body: string): Promise<Message> {
+export function sendMyMessage(body: string, attachmentIds: number[] = []): Promise<Message> {
   return apiFetch("/messages/mine", {
     method: "POST",
-    body: JSON.stringify({ body }),
+    body: JSON.stringify({ body, attachment_ids: attachmentIds }),
   });
 }
 
@@ -113,10 +121,10 @@ export function fetchChatWith(otherId: number): Promise<Message[]> {
   return apiFetch(`/messages/mine/with/${otherId}`);
 }
 
-export function sendChatMessage(otherId: number, body: string): Promise<Message> {
+export function sendChatMessage(otherId: number, body: string, attachmentIds: number[] = []): Promise<Message> {
   return apiFetch(`/messages/mine/with/${otherId}`, {
     method: "POST",
-    body: JSON.stringify({ body }),
+    body: JSON.stringify({ body, attachment_ids: attachmentIds }),
   });
 }
 
@@ -139,4 +147,33 @@ export function fetchPairConversations(): Promise<PairConversation[]> {
 
 export function fetchPairConversation(supplierId: number, branchId: number): Promise<Message[]> {
   return apiFetch(`/messages/admin/supplier-branch/${supplierId}/${branchId}`);
+}
+
+// ---- Attachments ----
+
+// What the paperclip accepts — must match the backend's ALLOWED_TYPES.
+export const ATTACHMENT_ACCEPT = ".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.txt";
+export const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+export const MAX_ATTACHMENTS = 5;
+
+/** Upload one file for a message about to be sent; send its id in attachmentIds. */
+export function uploadAttachment(file: File): Promise<Attachment> {
+  const body = new FormData();
+  body.append("file", file);
+  return apiFetch("/messages/attachments", { method: "POST", body });
+}
+
+// Each file is fetched once per page load, then reused (chats re-render
+// every few seconds while polling).
+const blobUrls = new Map<number, Promise<string>>();
+
+/** An object URL for an attachment (the download needs the user's token, so no plain link). */
+export function attachmentUrl(id: number): Promise<string> {
+  let url = blobUrls.get(id);
+  if (!url) {
+    url = apiFetchBlob(`/messages/attachments/${id}`).then((blob) => URL.createObjectURL(blob));
+    url.catch(() => blobUrls.delete(id));
+    blobUrls.set(id, url);
+  }
+  return url;
 }

@@ -136,3 +136,94 @@ def test_pair_chat_endpoints(client, ctx, auth_headers):
     # Only Admin can use the oversight view; Admin can't post into a pair chat.
     assert client.get("/api/v1/messages/admin/supplier-branch", headers=supplier_h).status_code == 403
     assert client.post(f"/api/v1/messages/mine/with/{ctx['branch'].id}", headers=admin_h, json={"body": "x"}).status_code == 403
+
+
+# ---- Attachments ----
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+PDF = b"%PDF-1.4\n" + b"x" * 64
+
+
+def _upload(db_session, user, name="photo.png", data=PNG):
+    return svc.upload_attachment(db_session, user, name, data)
+
+
+def test_message_with_attachment_only(db_session, ctx):
+    a = _upload(db_session, ctx["supplier_user"])
+    msg = svc.send_to_peer(db_session, ctx["supplier_user"], ctx["branch"].id, "", attachment_ids=[a.id])
+    assert msg.body == ""
+    assert [(x.filename, x.content_type) for x in msg.attachments] == [("photo.png", "image/png")]
+
+    [listed] = svc.list_with_peer(db_session, ctx["branch_user"], ctx["supplier"].id)
+    assert [x.id for x in listed.attachments] == [a.id]
+    contacts = {c.id: c for c in svc.list_contacts(db_session, ctx["branch_user"])}
+    assert contacts[ctx["supplier"].id].last_message_body == "📎 Attachment"
+
+
+def test_empty_message_without_attachment_is_refused(db_session, ctx):
+    from app.core.errors import ValidationFailedError
+
+    with pytest.raises(ValidationFailedError):
+        svc.send_as_supplier(db_session, ctx["supplier_user"], "   ")
+
+
+def test_attachment_type_and_content_are_checked(db_session, ctx):
+    from app.core.errors import ValidationFailedError
+
+    with pytest.raises(ValidationFailedError):
+        _upload(db_session, ctx["supplier_user"], "page.html", b"<script>alert(1)</script>")
+    with pytest.raises(ValidationFailedError):
+        _upload(db_session, ctx["supplier_user"], "fake.png", b"not really a png")
+    with pytest.raises(ValidationFailedError):
+        _upload(db_session, ctx["supplier_user"], "big.pdf", b"%PDF" + b"x" * svc.MAX_ATTACHMENT_BYTES)
+    assert _upload(db_session, ctx["supplier_user"], "invoice.pdf", PDF).content_type == "application/pdf"
+
+
+def test_cannot_send_someone_elses_upload(db_session, ctx):
+    from app.core.errors import ValidationFailedError
+
+    a = _upload(db_session, ctx["branch_user"])
+    with pytest.raises(ValidationFailedError):
+        svc.send_as_supplier(db_session, ctx["supplier_user"], "hi", attachment_ids=[a.id])
+
+
+def test_who_can_download(db_session, ctx):
+    a = _upload(db_session, ctx["supplier_user"], "invoice.pdf", PDF)
+    # Before it's sent, only the uploader can fetch it.
+    with pytest.raises(NotFoundError):
+        svc.get_attachment(db_session, ctx["branch_user"], a.id)
+    svc.send_to_peer(db_session, ctx["supplier_user"], ctx["branch"].id, "Invoice", attachment_ids=[a.id])
+
+    for user in (ctx["supplier_user"], ctx["branch_user"], ctx["admin"]):
+        assert svc.get_attachment(db_session, user, a.id).data == PDF
+    with pytest.raises(NotFoundError):
+        svc.get_attachment(db_session, ctx["other_branch_user"], a.id)
+
+
+def test_attachment_endpoints(client, ctx, auth_headers):
+    supplier_h = auth_headers(ctx["supplier_user"])
+    resp = client.post(
+        "/api/v1/messages/attachments",
+        headers=supplier_h,
+        files={"file": ("Delivery note.pdf", PDF, "application/pdf")},
+    )
+    assert resp.status_code == 200, resp.text
+    att = resp.json()
+
+    resp = client.post(
+        f"/api/v1/messages/mine/with/{ctx['branch'].id}",
+        headers=supplier_h,
+        json={"body": "", "attachment_ids": [att["id"]]},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["attachments"][0]["filename"] == "Delivery note.pdf"
+
+    resp = client.get(f"/api/v1/messages/attachments/{att['id']}", headers=auth_headers(ctx["branch_user"]))
+    assert resp.status_code == 200
+    assert resp.content == PDF
+    assert resp.headers["content-type"] == "application/pdf"
+    assert resp.headers["x-content-type-options"] == "nosniff"
+    assert "Delivery%20note.pdf" in resp.headers["content-disposition"]
+
+    resp = client.get(f"/api/v1/messages/attachments/{att['id']}", headers=auth_headers(ctx["other_branch_user"]))
+    assert resp.status_code == 404

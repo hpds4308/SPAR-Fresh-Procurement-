@@ -1,10 +1,12 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, Request, Response, UploadFile
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.rate_limit import limiter
 from app.core.security import get_current_user, require_roles
 from app.models.user import User
 from app.schemas.message import (
+    AttachmentOut,
     BranchThreadOut,
     ContactThreadOut,
     MessageCreate,
@@ -71,7 +73,7 @@ def admin_send_branch_message(
     admin: User = Depends(require_roles("ADMIN")),
     db: Session = Depends(get_db),
 ):
-    return message_service.send_as_admin_to_branch(db, admin, branch_id, payload.body)
+    return message_service.send_as_admin_to_branch(db, admin, branch_id, payload.body, payload.attachment_ids)
 
 
 # ---- Admin side: read-only view of supplier <-> branch chats ----
@@ -115,7 +117,7 @@ def admin_send_message(
     admin: User = Depends(require_roles("ADMIN")),
     db: Session = Depends(get_db),
 ):
-    return message_service.send_as_admin(db, admin, supplier_id, payload.body)
+    return message_service.send_as_admin(db, admin, supplier_id, payload.body, payload.attachment_ids)
 
 
 # ---- Supplier/Branch side: each only ever has one thread, with Admin ----
@@ -139,8 +141,8 @@ def send_my_message(
     db: Session = Depends(get_db),
 ):
     if current_user.branch_id:
-        return message_service.send_as_branch(db, current_user, payload.body)
-    return message_service.send_as_supplier(db, current_user, payload.body)
+        return message_service.send_as_branch(db, current_user, payload.body, payload.attachment_ids)
+    return message_service.send_as_supplier(db, current_user, payload.body, payload.attachment_ids)
 
 
 @router.get("/mine/unread-count", response_model=UnreadCountOut, response_model_exclude_none=True)
@@ -183,4 +185,42 @@ def send_my_chat_message(
     current_user: User = Depends(require_roles("SUPPLIER", "BRANCH")),
     db: Session = Depends(get_db),
 ):
-    return message_service.send_to_peer(db, current_user, other_id, payload.body)
+    return message_service.send_to_peer(db, current_user, other_id, payload.body, payload.attachment_ids)
+
+
+# ---- Attachments (any signed-in role) ----
+
+
+@router.post("/attachments", response_model=AttachmentOut)
+@limiter.limit("30/minute")
+def upload_attachment(
+    request: Request,
+    file: UploadFile = File(...),
+    current_user: User = Depends(require_roles("ADMIN", "SUPPLIER", "BRANCH")),
+    db: Session = Depends(get_db),
+):
+    """
+    Upload one photo or file for a message you're about to send; send the
+    returned id in the message's attachment_ids. Up to 5 MB.
+    """
+    data = file.file.read(message_service.MAX_ATTACHMENT_BYTES + 1)
+    return message_service.upload_attachment(db, current_user, file.filename or "file", data)
+
+
+@router.get("/attachments/{attachment_id}")
+def download_attachment(
+    attachment_id: int,
+    current_user: User = Depends(require_roles("ADMIN", "SUPPLIER", "BRANCH")),
+    db: Session = Depends(get_db),
+):
+    """The file itself — only for someone who can see the message it's on."""
+    a = message_service.get_attachment(db, current_user, attachment_id)
+    return Response(
+        content=a.data,
+        media_type=a.content_type,
+        headers={
+            "Content-Disposition": message_service.content_disposition(a),
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "private, max-age=3600",
+        },
+    )

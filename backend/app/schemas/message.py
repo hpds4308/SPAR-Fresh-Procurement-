@@ -3,6 +3,13 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 
+class AttachmentOut(BaseModel):
+    id: int
+    filename: str
+    content_type: str
+    size_bytes: int
+
+
 class MessageOut(BaseModel):
     id: int
     supplier_id: int | None = None
@@ -11,10 +18,14 @@ class MessageOut(BaseModel):
     sender_username: str
     body: str
     created_at: datetime
+    attachments: list[AttachmentOut] = []
 
 
 class MessageCreate(BaseModel):
-    body: str = Field(min_length=1, max_length=2000)
+    # May be empty when the message is just attachments.
+    body: str = Field(default="", max_length=2000)
+    # Files uploaded first via POST /messages/attachments.
+    attachment_ids: list[int] = Field(default_factory=list, max_length=5)
 
 
 class SupplierThreadOut(BaseModel):

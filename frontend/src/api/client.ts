@@ -87,3 +87,23 @@ export async function apiFetch(path: string, options: RequestInit = {}, retry = 
     throw new ApiError(res.status, "The server's response could not be read. Please try again.");
   }
 }
+
+/** GET a file (not JSON) with the user's token — for things an <img src> or plain link can't authenticate. */
+export async function apiFetchBlob(path: string, retry = true): Promise<Blob> {
+  const { access } = getStoredTokens();
+  let res: Response;
+  try {
+    res = await fetch(`${API_V1}${path}`, { headers: access ? { Authorization: `Bearer ${access}` } : {} });
+  } catch (err) {
+    throw new ApiError(0, "Network error reaching the server. Check your connection.");
+  }
+  if (res.status === 401 && retry) {
+    const newAccess = await tryRefresh();
+    if (newAccess) return apiFetchBlob(path, false);
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ detail: `Request failed with status ${res.status}.` }));
+    throw new ApiError(res.status, body.detail ?? `Request failed with status ${res.status}.`);
+  }
+  return res.blob();
+}

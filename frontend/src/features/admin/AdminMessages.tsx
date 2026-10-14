@@ -190,15 +190,17 @@ export default function AdminMessages() {
     };
   }, [selectedId, loadMessages, partyType]);
 
-  async function handleSend(body: string) {
+  async function handleSend(body: string, attachmentIds: number[]) {
     if (selectedId === null) return;
     const sent =
       partyType === "SUPPLIER"
-        ? await sendAdminMessage(selectedId, body)
-        : await sendAdminBranchMessage(selectedId, body);
+        ? await sendAdminMessage(selectedId, body, attachmentIds)
+        : await sendAdminBranchMessage(selectedId, body, attachmentIds);
     setMessages((prev) => [...prev, sent]);
     setThreads((prev) =>
-      prev.map((t) => (t.id === selectedId ? { ...t, last_message_body: body, last_message_at: sent.created_at } : t))
+      prev.map((t) =>
+        t.id === selectedId ? { ...t, last_message_body: body || "📎 Attachment", last_message_at: sent.created_at } : t
+      )
     );
   }
 

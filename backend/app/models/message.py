@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import String, Text, DateTime, ForeignKey, func
+from sqlalchemy import DateTime, ForeignKey, Integer, LargeBinary, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -37,3 +37,23 @@ class Message(Base):
     read_by_admin_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     read_by_supplier_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     read_by_branch_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class MessageAttachment(Base):
+    """
+    A photo or file attached to a chat message. Uploaded on its own first
+    (message_id still null, visible only to the uploader), then linked to
+    the message when it's sent. Stored in the database itself — `data` is
+    deferred so listing messages never loads the file bytes.
+    """
+
+    __tablename__ = "message_attachments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    message_id: Mapped[int | None] = mapped_column(ForeignKey("messages.id", ondelete="CASCADE"))
+    uploaded_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False, deferred=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
