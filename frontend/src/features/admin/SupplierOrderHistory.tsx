@@ -10,6 +10,7 @@ import {
 import EmptyState from "../shared/EmptyState";
 import { SkeletonTable } from "../shared/ui/Skeleton";
 import { IconChevronLeft, IconChevronRight, IconClock } from "../shared/Icons";
+import { ProductPromotion } from "../shared/ui/PromotionBadge";
 
 function formatDate(iso: string): string {
   const d = new Date(iso + "T00:00:00");
@@ -201,7 +202,10 @@ export default function SupplierOrderHistory() {
                           {expandedDetail.items.map((it) => (
                             <tr key={it.id}>
                               <td className="py-1.5 text-crate-800/70">{it.branch_name}</td>
-                              <td className="py-1.5 text-crate-950">{it.product_description}</td>
+                              <td className="py-1.5 text-crate-950">
+                                {it.product_description}
+                                <ProductPromotion productId={it.product_id} className="ml-1.5" />
+                              </td>
                               <td className="py-1.5 text-right text-crate-800/80">{it.quantity}</td>
                               <td className="py-1.5 text-right text-crate-800/40">{it.unit_code}</td>
                               <td className="py-1.5 text-right text-crate-800/70">

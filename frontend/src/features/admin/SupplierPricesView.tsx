@@ -15,6 +15,7 @@ import { SkeletonTable } from "../shared/ui/Skeleton";
 import { IconTag } from "../shared/Icons";
 import { RowApprovalBadge } from "../shared/PriceSheetParts";
 import { ConfirmDialog } from "../shared/ui/Modal";
+import { ProductPromotion } from "../shared/ui/PromotionBadge";
 
 function formatDate(iso: string): string {
   const d = new Date(iso + "T00:00:00");
@@ -542,6 +543,7 @@ export default function SupplierPricesView() {
                   >
                     {p.description}
                     <span className="text-crate-800/35 text-xs ml-1.5">{p.code}</span>
+                    <ProductPromotion productId={p.product_id} className="ml-1.5" />
                   </td>
                   <td
                     style={{ left: stickyOffsets.lowest }}

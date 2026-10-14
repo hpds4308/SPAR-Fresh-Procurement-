@@ -4,6 +4,7 @@ import { Order, OrderSummary, fetchMyOrders, fetchOrder, confirmDelivery } from 
 import EmptyState from "../shared/EmptyState";
 import { IconBasket } from "../shared/Icons";
 import { useToast } from "../shared/ui/Toast";
+import { ProductPromotion } from "../shared/ui/PromotionBadge";
 
 function statusColor(status: string): string {
   switch (status) {
@@ -58,7 +59,10 @@ function DeliveryConfirmForm({
       <div className="space-y-2">
         {order.lines.map((ln) => (
           <div key={ln.id} className="flex items-center gap-2 text-sm">
-            <span className="flex-1 text-crate-950 truncate">{ln.product_description}</span>
+            <span className="flex-1 min-w-0 flex items-center gap-2">
+              <span className="text-crate-950 truncate">{ln.product_description}</span>
+              <ProductPromotion productId={ln.product_id} className="shrink-0" />
+            </span>
             <span className="text-xs text-crate-800/40 w-24 text-right shrink-0">
               ordered {ln.quantity} {ln.unit_code}
             </span>
@@ -234,6 +238,7 @@ export default function OrderHistory({ refreshKey }: { refreshKey: number }) {
                           <tr key={ln.id} className={`text-crate-800/80 ${ln.added_by_admin ? "bg-mango-500/15" : ""}`}>
                             <td className="py-0.5">
                               {ln.product_description}
+                              <ProductPromotion productId={ln.product_id} className="ml-1.5" />
                               {ln.added_by_admin && (
                                 <span className="block text-[10px] text-[#8A5A0D] font-medium">
                                   Ordered by SPAR Fresh Procurement

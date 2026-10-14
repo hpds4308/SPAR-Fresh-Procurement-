@@ -14,6 +14,7 @@ import EmptyState from "../shared/EmptyState";
 import { SkeletonTable } from "../shared/ui/Skeleton";
 import { CategoryBadge } from "../shared/ui/CategoryBadge";
 import { IconBranches } from "../shared/Icons";
+import { ProductPromotion } from "../shared/ui/PromotionBadge";
 
 function formatDate(iso: string): string {
   const d = new Date(iso + "T00:00:00");
@@ -355,7 +356,10 @@ export default function AdminMarketPrices() {
                       className="px-3 py-2.5 sticky z-10 bg-white shadow-[2px_0_2px_-1px_rgba(21,56,38,0.08)]"
                       style={{ left: DC_CODE_WIDTH, minWidth: 210 }}
                     >
-                      <p className="text-crate-950 whitespace-nowrap">{r.system_name}</p>
+                      <p className="text-crate-950 whitespace-nowrap">
+                        {r.system_name}
+                        <ProductPromotion productId={r.product_id} className="ml-1.5" />
+                      </p>
                       <div className="flex items-center gap-1.5 mt-0.5">
                         <span className="text-[11px] text-crate-800/40 whitespace-nowrap">HARTI: {r.pdf_name}</span>
                         {r.category_name && <CategoryBadge name={r.category_name} />}

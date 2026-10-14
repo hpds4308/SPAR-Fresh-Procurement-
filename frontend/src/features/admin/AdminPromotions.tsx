@@ -17,6 +17,7 @@ import { PROMOTION_COLORS, promotionColor } from "../shared/ui/PromotionBadge";
 import { Modal } from "../shared/ui/Modal";
 import Button from "../shared/ui/Button";
 import { IconPlus } from "../shared/Icons";
+import { refreshActivePromotions } from "../shared/useActivePromotions";
 
 function todayIso(): string {
   const d = new Date();
@@ -148,6 +149,7 @@ export default function AdminPromotions() {
       await deletePromotionType(toDelete.id);
       const gone = toDelete.id;
       setTypes((prev) => prev.filter((t) => t.id !== gone));
+      refreshActivePromotions();
       // The server already removed it from every product; drop it from the
       // drafts too, leaving any other unsaved edits alone.
       setDrafts((prev) => {
@@ -194,6 +196,7 @@ export default function AdminPromotions() {
     try {
       applySaved(await savePromotions(lines));
       setSaved(true);
+      refreshActivePromotions();
       // Refresh the per-promotion product counts.
       fetchPromotionTypes().then(setTypes).catch(() => {});
     } catch (err) {

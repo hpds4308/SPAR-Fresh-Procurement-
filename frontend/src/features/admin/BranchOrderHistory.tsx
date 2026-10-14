@@ -13,6 +13,7 @@ import EmptyState from "../shared/EmptyState";
 import { StatusBadge } from "../shared/ui/Badge";
 import { SkeletonTable } from "../shared/ui/Skeleton";
 import { IconChevronLeft, IconChevronRight, IconClock } from "../shared/Icons";
+import { ProductPromotion } from "../shared/ui/PromotionBadge";
 
 function formatDate(iso: string): string {
   const d = new Date(iso + "T00:00:00");
@@ -220,7 +221,10 @@ export default function BranchOrderHistory() {
                           <tbody className="divide-y divide-sage-200/60">
                             {expandedDetail.lines.map((l) => (
                               <tr key={l.id}>
-                                <td className="py-1.5 text-crate-950">{l.product_description}</td>
+                                <td className="py-1.5 text-crate-950">
+                                  {l.product_description}
+                                  <ProductPromotion productId={l.product_id} className="ml-1.5" />
+                                </td>
                                 <td className="py-1.5 text-right text-crate-800/80">{l.quantity}</td>
                                 <td className="py-1.5 text-right text-crate-800/40">{l.unit_code}</td>
                               </tr>

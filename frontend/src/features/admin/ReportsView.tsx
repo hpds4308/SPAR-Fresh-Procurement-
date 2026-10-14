@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ApiError } from "../../api/client";
 import { AdminReport, fetchAdminReport, downloadReport } from "../../api/reports";
 import { CategoryBadge } from "../shared/ui/CategoryBadge";
+import { ProductPromotion } from "../shared/ui/PromotionBadge";
 
 function todayISO(): string {
   return new Date().toISOString().slice(0, 10);
@@ -228,7 +229,10 @@ export default function ReportsView() {
                 <tbody className="divide-y divide-sage-100">
                   {report.top_products.map((p) => (
                     <tr key={p.product_id}>
-                      <td className="py-2 text-crate-950">{p.description}</td>
+                      <td className="py-2 text-crate-950">
+                        {p.description}
+                        <ProductPromotion productId={p.product_id} className="ml-1.5" />
+                      </td>
                       <td className="py-2">
                         <CategoryBadge name={p.category_name} />
                       </td>

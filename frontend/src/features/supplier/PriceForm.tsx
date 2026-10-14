@@ -14,6 +14,7 @@ import {
 } from "../../api/pricing";
 import { CategoryBadge } from "../shared/ui/CategoryBadge";
 import PriceExcelPreviewModal from "./PriceExcelPreviewModal";
+import { ProductPromotion } from "../shared/ui/PromotionBadge";
 
 function formatDate(iso: string): string {
   const d = new Date(iso + "T00:00:00");
@@ -416,13 +417,16 @@ export default function PriceForm({ onSubmitted }: { onSubmitted: () => void }) 
           return (
             <div key={p.id} className="flex items-center justify-between px-6 py-3 hover:bg-sage-50/50 transition-colors duration-100">
               <div className="min-w-0">
-                <p
-                  className={`text-sm text-crate-950 truncate w-fit ${hasImage.has(p.id) ? "cursor-pointer" : ""}`}
-                  onMouseEnter={(e) => hasImage.has(p.id) && showPreview(p.id, e.currentTarget)}
-                  onMouseLeave={hidePreview}
-                >
-                  {p.description}
-                </p>
+                <div className="flex items-center gap-2 min-w-0">
+                  <p
+                    className={`text-sm text-crate-950 truncate w-fit ${hasImage.has(p.id) ? "cursor-pointer" : ""}`}
+                    onMouseEnter={(e) => hasImage.has(p.id) && showPreview(p.id, e.currentTarget)}
+                    onMouseLeave={hidePreview}
+                  >
+                    {p.description}
+                  </p>
+                  <ProductPromotion productId={p.id} className="shrink-0" />
+                </div>
                 <div className="flex items-center flex-wrap gap-1.5 mt-0.5">
                   <span className="text-xs text-crate-800/40">
                     {p.product_code}

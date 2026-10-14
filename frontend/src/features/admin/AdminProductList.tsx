@@ -14,6 +14,7 @@ import { CategoryBadge } from "../shared/ui/CategoryBadge";
 import { Modal } from "../shared/ui/Modal";
 import Button from "../shared/ui/Button";
 import { IconPlus } from "../shared/Icons";
+import { ProductPromotion } from "../shared/ui/PromotionBadge";
 
 type Show = "ACTIVE" | "INACTIVE" | "ALL";
 
@@ -257,9 +258,12 @@ export default function AdminProductList() {
                 }`}
               >
                 <div className="min-w-0 col-span-2 lg:col-span-1">
-                  <p className={`text-sm truncate ${removed ? "text-crate-800/45 line-through" : "text-crate-950"}`}>
-                    {p.description}
-                  </p>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <p className={`text-sm truncate ${removed ? "text-crate-800/45 line-through" : "text-crate-950"}`}>
+                      {p.description}
+                    </p>
+                    {!removed && <ProductPromotion productId={p.id} className="shrink-0" />}
+                  </div>
                   {(p.subcategory || removed) && (
                     <p className="text-xs text-crate-800/40 truncate">
                       {p.subcategory}

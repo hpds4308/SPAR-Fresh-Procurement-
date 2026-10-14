@@ -1,4 +1,5 @@
 import { ExcelPricePreview } from "../../api/pricing";
+import { ProductPromotion } from "../shared/ui/PromotionBadge";
 
 // Shows what an uploaded price Excel will submit before anything is saved.
 // Rows with an error are listed but never sent.
@@ -77,7 +78,10 @@ export default function PriceExcelPreviewModal({
                   <tr key={l.row_number} className={l.error ? "bg-tomato-600/5" : ""}>
                     <td className="px-4 py-2 text-crate-800/40 align-top">{l.row_number}</td>
                     <td className="px-4 py-2 align-top">
-                      <p className="text-crate-950">{l.description ?? "—"}</p>
+                      <p className="text-crate-950">
+                        {l.description ?? "—"}
+                        <ProductPromotion productId={l.product_id} className="ml-1.5" />
+                      </p>
                       <p className="text-xs text-crate-800/40">{l.product_code}</p>
                       {l.error && <p className="text-xs text-tomato-600 mt-0.5">{l.error}</p>}
                     </td>

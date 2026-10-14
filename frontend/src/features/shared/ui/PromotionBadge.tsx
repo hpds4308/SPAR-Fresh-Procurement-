@@ -1,4 +1,5 @@
 import { PromotionColor } from "../../../api/promotions";
+import { useActivePromotions } from "../useActivePromotions";
 
 /**
  * The label colors Admin can give a promotion, in picker order. Class
@@ -44,5 +45,19 @@ export function PromotionBadge({
     >
       {name}
     </span>
+  );
+}
+
+/**
+ * The promotion label for one product, if a promotion is running on it
+ * today; renders nothing otherwise. Drop it next to a product name on any
+ * page — all labels on a page share one fetch.
+ */
+export function ProductPromotion({ productId, className = "" }: { productId: number | null; className?: string }) {
+  const promotions = useActivePromotions();
+  const promo = productId !== null ? promotions[productId] : undefined;
+  if (!promo) return null;
+  return (
+    <PromotionBadge name={promo.promotion_name} color={promo.color} endDate={promo.end_date} className={className} />
   );
 }

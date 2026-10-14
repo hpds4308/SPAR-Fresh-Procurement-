@@ -16,6 +16,7 @@ import ProductAssignmentPanel from "./ProductAssignmentPanel";
 import AdminAddOrderItemModal from "./AdminAddOrderItemModal";
 import { CategoryBadge } from "../shared/ui/CategoryBadge";
 import { StatusBadge } from "../shared/ui/Badge";
+import { ProductPromotion } from "../shared/ui/PromotionBadge";
 
 type AddItemTarget = {
   branchId: number;
@@ -379,6 +380,7 @@ export default function OrderMatrixView({
                   style={{ left: 190, width: 220, minWidth: 220 }}
                 >
                   {row.description}
+                  <ProductPromotion productId={row.product_id} className="ml-1.5" />
                 </td>
                 {matrix?.branches.map((b) => {
                   const qty = row.quantities[String(b.branch_id)];

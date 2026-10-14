@@ -15,6 +15,7 @@ import {
 } from "../../api/supplierOrders";
 import { PurchaseOrder, issuePurchaseOrder } from "../../api/purchaseOrders";
 import { SkeletonTable } from "../shared/ui/Skeleton";
+import { ProductPromotion } from "../shared/ui/PromotionBadge";
 
 // One cell in the grid = one branch+product combination.
 function cellKey(productId: number, branchId: number): string {
@@ -557,6 +558,7 @@ export default function SupplierOrderBuilder({
                   >
                     {p.description}
                     <span className="text-crate-800/35 text-xs ml-1.5">{p.product_code}</span>
+                    <ProductPromotion productId={p.id} className="ml-1.5" />
                   </button>
                 ))}
               </div>
@@ -628,6 +630,7 @@ export default function SupplierOrderBuilder({
                       <td className="pr-4 py-2 text-crate-950 whitespace-nowrap sticky left-0 bg-white">
                         {p.description}
                         <span className="text-crate-800/35 text-xs ml-1.5">{p.product_code}</span>
+                        <ProductPromotion productId={productId} className="ml-1.5" />
                       </td>
                       <td className="px-2 py-2 text-center border-l border-sage-100">
                         <button

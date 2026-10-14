@@ -15,6 +15,7 @@ import { IconGrid } from "../shared/Icons";
 import { ConfirmDialog } from "../shared/ui/Modal";
 import { SkeletonTable } from "../shared/ui/Skeleton";
 import { CategoryBadge } from "../shared/ui/CategoryBadge";
+import { ProductPromotion } from "../shared/ui/PromotionBadge";
 
 type CellState = "idle" | "saving" | "saved" | "error";
 type CellKey = `${number}:${MasterDataFieldName}`;
@@ -360,6 +361,7 @@ export default function AdminMasterData() {
                     style={{ left: 270, width: 190 }}
                   >
                     {row.description}
+                    <ProductPromotion productId={row.product_id} className="ml-1.5" />
                   </td>
                   <td className="px-2 py-1.5 text-right">
                     <div className="flex items-center justify-end gap-1">

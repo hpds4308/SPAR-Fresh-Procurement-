@@ -5,6 +5,7 @@ import EmptyState from "../shared/EmptyState";
 import { SkeletonTable } from "../shared/ui/Skeleton";
 import { IconTag } from "../shared/Icons";
 import { RowApprovalBadge } from "../shared/PriceSheetParts";
+import { ProductPromotion } from "../shared/ui/PromotionBadge";
 
 export default function PriceHistory({ refreshKey }: { refreshKey: number }) {
   const [prices, setPrices] = useState<SupplierPrice[]>([]);
@@ -79,7 +80,10 @@ export default function PriceHistory({ refreshKey }: { refreshKey: number }) {
               className="motion-safe:animate-fade-up"
               style={{ animationDuration: "0.3s", animationDelay: `${Math.min(i, 12) * 25}ms`, animationFillMode: "backwards" }}
             >
-              <td className="py-2 text-crate-950">{p.product_description}</td>
+              <td className="py-2 text-crate-950">
+                {p.product_description}
+                <ProductPromotion productId={p.product_id} className="ml-1.5" />
+              </td>
               <td className="py-2 text-right text-crate-800/80">Rs. {p.price.toFixed(2)}</td>
               <td className="py-2 text-right">
                 {p.adjusted_price !== null ? (

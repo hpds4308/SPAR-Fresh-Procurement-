@@ -6,6 +6,7 @@ import EmptyState from "../shared/EmptyState";
 import { SkeletonTable } from "../shared/ui/Skeleton";
 import { CategoryBadge } from "../shared/ui/CategoryBadge";
 import { IconChart } from "../shared/Icons";
+import { ProductPromotion } from "../shared/ui/PromotionBadge";
 
 type Source = "KEELLS" | "LOCAL_MARKET";
 
@@ -221,6 +222,7 @@ export default function AdminMarketPriceHistory() {
                       style={{ left: 180, width: 200 }}
                     >
                       {p.description}
+                      <ProductPromotion productId={p.id} className="ml-1.5" />
                     </td>
                     {dates.map((d) => {
                       const price = priceByProductAndDate.get(p.id)?.get(d);

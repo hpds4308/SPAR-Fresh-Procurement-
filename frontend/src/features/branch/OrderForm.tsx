@@ -12,7 +12,7 @@ import {
   saveDraftOrder,
 } from "../../api/orders";
 import { CategoryBadge } from "../shared/ui/CategoryBadge";
-import { PromotionBadge } from "../shared/ui/PromotionBadge";
+import { PromotionBadge, ProductPromotion } from "../shared/ui/PromotionBadge";
 import { useActivePromotions } from "../shared/useActivePromotions";
 
 function formatDate(iso: string): string {
@@ -268,7 +268,8 @@ export default function OrderForm({ onSubmitted }: { onSubmitted: () => void }) 
               >
                 {ln.product_description}
               </span>
-              <span className="text-crate-800/70 shrink-0 ml-3">
+              <ProductPromotion productId={ln.product_id} className="ml-2 shrink-0" />
+              <span className="text-crate-800/70 shrink-0 ml-auto pl-3">
                 {ln.quantity} {ln.unit_code}
               </span>
             </div>

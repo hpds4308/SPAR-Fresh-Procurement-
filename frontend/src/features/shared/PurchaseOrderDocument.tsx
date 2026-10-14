@@ -4,6 +4,7 @@ import { BranchPurchaseOrder, PurchaseOrder, PurchaseOrderLine } from "../../api
 import { StatusBadge } from "./ui/Badge";
 import Button from "./ui/Button";
 import { formatDateTime, formatLongDate } from "./PriceSheetParts";
+import { ProductPromotion } from "./ui/PromotionBadge";
 
 /** "supplier" = all branches combined; "matrix" = items x branches with
  *  the quantity for each branch; "branches" = every branch PO; "all" =
@@ -45,6 +46,7 @@ function LinesTable({ lines, total }: { lines: PurchaseOrderLine[]; total: numbe
                 <td className="py-1.5 px-2 text-crate-950">
                   {l.product_description}
                   <span className="text-crate-800/40 text-xs ml-1.5">{l.product_code}</span>
+                  <ProductPromotion productId={l.product_id} className="ml-1.5" />
                   {l.notes && <div className="text-xs text-crate-800/50">{l.notes}</div>}
                 </td>
                 <td className="py-1.5 px-2 text-right tabular-nums">{l.quantity}</td>
@@ -116,6 +118,7 @@ function BranchMatrixTable({ po }: { po: PurchaseOrder }) {
               <td className="py-1.5 pr-2 text-crate-950 sticky left-0 bg-white">
                 {line.product_description}
                 <span className="text-crate-800/40 text-xs ml-1.5">{line.product_code}</span>
+                <ProductPromotion productId={line.product_id} className="ml-1.5" />
               </td>
               <td className="py-1.5 px-2 text-crate-800/60">{line.unit_code}</td>
               {po.branches.map((b) => (

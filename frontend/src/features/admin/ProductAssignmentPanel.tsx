@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ApiError } from "../../api/client";
 import { ProductComparison, fetchProductComparison, setProductAssignments } from "../../api/assignments";
 import { useToast } from "../shared/ui/Toast";
+import { ProductPromotion } from "../shared/ui/PromotionBadge";
 
 type Row = { supplier_id: number; quantity: string; agreed_price: string };
 
@@ -129,7 +130,10 @@ export default function ProductAssignmentPanel({
             <div className="p-5 border-b border-sage-100 flex items-start justify-between">
               <div>
                 <p className="text-xs text-crate-800/40">{data.product_code}</p>
-                <h3 className="text-base font-display font-bold text-crate-950">{data.description}</h3>
+                <h3 className="text-base font-display font-bold text-crate-950">
+                  {data.description}
+                  <ProductPromotion productId={data.product_id} className="ml-2 align-middle" />
+                </h3>
                 <p className="text-sm text-crate-800/60 mt-1">
                   Total ordered: <span className="font-medium text-crate-800">{data.total_demand}</span>{" "}
                   {data.unit_code} for delivery {data.delivery_date}

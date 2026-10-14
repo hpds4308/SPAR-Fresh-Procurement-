@@ -6,6 +6,7 @@ import EmptyState from "../shared/EmptyState";
 import { SkeletonTable } from "../shared/ui/Skeleton";
 import { CategoryBadge } from "../shared/ui/CategoryBadge";
 import { IconBranches } from "../shared/Icons";
+import { ProductPromotion } from "../shared/ui/PromotionBadge";
 
 function formatDate(iso: string): string {
   const d = new Date(iso + "T00:00:00");
@@ -242,6 +243,7 @@ export default function OrdersByBranch() {
                     style={{ left: 180, width: 200 }}
                   >
                     {row.description}
+                    <ProductPromotion productId={row.product_id} className="ml-1.5" />
                   </td>
                   <td className="px-3 py-2 text-right whitespace-nowrap">
                     {row.costPrice !== null ? (

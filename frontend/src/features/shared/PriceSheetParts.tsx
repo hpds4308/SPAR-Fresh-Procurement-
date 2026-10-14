@@ -1,5 +1,6 @@
 import { StatusBadge } from "./ui/Badge";
 import { PriceSheet, PriceSheetItem, RowApprovalStatus, SheetStatus } from "../../api/priceApprovals";
+import { ProductPromotion } from "./ui/PromotionBadge";
 
 type Tone = "neutral" | "success" | "warning" | "danger" | "info";
 
@@ -81,6 +82,7 @@ export function PriceSheetItemsTable({ items, priceLabel }: { items: PriceSheetI
             <p className="text-crate-950 text-sm">
               {item.product_description}
               <span className="text-crate-800/35 text-xs ml-1.5">{item.product_code}</span>
+              <ProductPromotion productId={item.product_id} className="ml-1.5" />
             </p>
             <p className="text-sm mt-0.5 flex flex-wrap gap-x-3">
               <span className="text-crate-800/60">
@@ -120,6 +122,7 @@ function ItemsTable({ items, priceLabel }: { items: PriceSheetItem[]; priceLabel
                 <td className="py-2 pr-3 text-crate-950">
                   {item.product_description}
                   <span className="text-crate-800/35 text-xs ml-1.5">{item.product_code}</span>
+                  <ProductPromotion productId={item.product_id} className="ml-1.5" />
                 </td>
                 <td className="py-2 px-3 text-right text-crate-800/50">{item.unit_code}</td>
                 <td className="py-2 px-3 text-right text-crate-800/70 tabular-nums">{rs(item.supplier_price)}</td>
