@@ -12,6 +12,8 @@ from app.models.user import User, Role, UserRole
 from app.models.branch import Branch
 from app.models.supplier import Supplier
 from app.schemas.user import (
+    AdminAccountOut,
+    AdminAccountUpdate,
     UserListItem,
     AvailablePartyOut,
     UserCreateRequest,
@@ -29,6 +31,42 @@ def _generate_temp_password() -> str:
     # unlike seed_users.py's single fixed default, each new account gets
     # its own one-time password that's only ever shown once, here.
     return secrets.token_urlsafe(9)
+
+
+@router.get("/me/account", response_model=AdminAccountOut)
+def get_my_admin_account(admin: User = Depends(require_roles("ADMIN"))):
+    """The signed-in Admin's own details; notification emails go to `email`."""
+    return AdminAccountOut(username=admin.username, full_name=admin.full_name, email=admin.email, phone=admin.phone)
+
+
+@router.put("/me/account", response_model=AdminAccountOut)
+def update_my_admin_account(
+    payload: AdminAccountUpdate,
+    admin: User = Depends(require_roles("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    clash = (
+        db.query(User.id)
+        .filter(User.email.ilike(payload.email), User.id != admin.id)
+        .first()
+    )
+    if clash:
+        raise ValidationFailedError("Another account already uses that email address.")
+    admin.full_name = payload.full_name
+    admin.email = payload.email
+    admin.phone = payload.phone
+    db.commit()
+    db.refresh(admin)
+    write_audit_log(
+        db,
+        user_id=admin.id,
+        role="ADMIN",
+        action="ADMIN_ACCOUNT_UPDATED",
+        entity_type="user",
+        entity_id=admin.id,
+        description=f"Admin '{admin.username}' updated their account details.",
+    )
+    return AdminAccountOut(username=admin.username, full_name=admin.full_name, email=admin.email, phone=admin.phone)
 
 
 @router.get("", response_model=list[UserListItem])

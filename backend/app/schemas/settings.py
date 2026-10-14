@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 
@@ -13,6 +15,31 @@ class SettingsOut(BaseModel):
 
 class SettingUpdateRequest(BaseModel):
     value: str = Field(min_length=1, max_length=200)
+
+
+class EmailLogOut(BaseModel):
+    id: int
+    kind: str
+    recipient: str
+    subject: str
+    status: str
+    error: str | None = None
+    created_at: datetime
+
+
+class EmailStatusOut(BaseModel):
+    configured: bool
+    provider: str | None = None  # "Brevo" / "SMTP"
+    from_address: str | None = None
+    # Admin accounts with an email — who admin notifications go to.
+    admin_recipients: list[str]
+    # Active suppliers without an email on their Account page get no emails.
+    suppliers_without_email: list[str]
+    recent: list[EmailLogOut]
+
+
+class TestEmailOut(BaseModel):
+    status: str  # SENT / FAILED / SKIPPED
 
 
 class MasterDataEmailOut(BaseModel):

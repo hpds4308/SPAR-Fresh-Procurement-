@@ -37,7 +37,7 @@ from app.schemas.purchase_order import (
     PurchaseOrderSummaryOut,
     PurchaseOrderSupplierOut,
 )
-from app.services import supplier_order_service
+from app.services import notification_service, supplier_order_service
 
 
 def _code_part(code: str) -> str:
@@ -165,6 +165,7 @@ def issue_purchase_order(db: Session, admin: User, supplier_id: int, delivery_da
             f"{delivery_date.isoformat()}: {len(lines)} line(s), Rs. {total:,.2f}."
         ),
     )
+    notification_service.on_purchase_order_issued(db, po)
     return po
 
 

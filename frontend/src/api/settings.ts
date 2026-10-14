@@ -35,3 +35,32 @@ export function updateMasterDataEmail(value: string): Promise<MasterDataEmail> {
     body: JSON.stringify({ value }),
   });
 }
+
+// ---- Notification emails (Admin only) ----
+
+export type EmailLogEntry = {
+  id: number;
+  kind: string;
+  recipient: string;
+  subject: string;
+  status: "SENT" | "FAILED" | "SKIPPED";
+  error: string | null;
+  created_at: string;
+};
+
+export type EmailStatus = {
+  configured: boolean;
+  provider: "Brevo" | "SMTP" | null;
+  from_address: string | null;
+  admin_recipients: string[];
+  suppliers_without_email: string[];
+  recent: EmailLogEntry[];
+};
+
+export function fetchEmailStatus(): Promise<EmailStatus> {
+  return apiFetch("/settings/email-status");
+}
+
+export function sendTestEmail(): Promise<{ status: "SENT" | "FAILED" | "SKIPPED" }> {
+  return apiFetch("/settings/email-test", { method: "POST" });
+}

@@ -22,3 +22,4 @@ from app.models.local_market_price import LocalMarketPrice  # noqa: F401
 from app.models.safety_stock import BranchSafetyStock  # noqa: F401
 from app.models.promotion import PromotionType, ProductPromotion  # noqa: F401
 from app.models.system import SystemSetting, AuditLog  # noqa: F401
+from app.models.email_log import EmailLog  # noqa: F401

@@ -30,6 +30,7 @@ _TEST_DB_NAME = f"{_base_db_name}_test"
 _TEST_DB_URL = urlunsplit((_parts.scheme, _parts.netloc, f"/{_TEST_DB_NAME}", _parts.query, _parts.fragment))
 os.environ["DATABASE_URL"] = _TEST_DB_URL
 os.environ["AUTO_SUBMIT_MISSED_ORDERS"] = "false"
+os.environ["EMAIL_REMINDERS"] = "false"
 
 from pathlib import Path  # noqa: E402
 
@@ -290,3 +291,17 @@ def auth_headers():
         return {"Authorization": f"Bearer {token}"}
 
     return _headers
+
+
+@pytest.fixture(autouse=True)
+def sent_emails(monkeypatch):
+    """
+    Notification emails built during a test, instead of being sent: the
+    real dispatch hands them to a background thread with its own database
+    session, outside the test's transaction.
+    """
+    from app.services import notification_service
+
+    captured = []
+    monkeypatch.setattr(notification_service, "dispatch", lambda email: email.to and captured.append(email))
+    return captured

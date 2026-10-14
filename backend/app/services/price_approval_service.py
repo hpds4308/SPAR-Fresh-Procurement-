@@ -44,7 +44,7 @@ from app.models.pricing import SupplierPrice
 from app.models.product import Product
 from app.models.supplier import Supplier
 from app.models.user import User
-from app.services import settings_service
+from app.services import notification_service, settings_service
 
 # Same business timezone as pricing_service — not imported from there
 # because pricing_service imports this module.
@@ -384,6 +384,7 @@ def send_for_approval(db: Session, admin: User, supplier_id: int, delivery_date:
         r.sent_to_supplier_at = now
     db.commit()
     db.refresh(rev)
+    notification_service.on_price_sheet_sent(db, rev)
 
     write_audit_log(
         db,
@@ -589,6 +590,7 @@ def respond(
         rev.signature_image = signature_image
     db.commit()
     db.refresh(rev)
+    notification_service.on_price_sheet_answered(db, rev)
 
     names = {i["supplier_price_id"]: i["product_description"] for i in rev.items}
 

@@ -11,7 +11,7 @@ from app.core.logging import configure_logging
 from app.core.errors import register_error_handlers
 from app.core.rate_limit import limiter
 from app.api.v1.router import api_router
-from app.services import auto_order_service
+from app.services import auto_order_service, notification_service
 
 configure_logging()
 
@@ -32,7 +32,11 @@ async def lifespan(_app: FastAPI):
     # Submits last week's order for any branch that misses the daily cutoff
     # (see auto_order_service). Disabled via AUTO_SUBMIT_MISSED_ORDERS=false.
     auto_order_service.start_scheduler()
+    # 8 AM "submit your prices" and 1 PM "answer SPAR's prices" emails
+    # (see notification_service). Disabled via EMAIL_REMINDERS=false.
+    notification_service.start_scheduler()
     yield
+    notification_service.stop_scheduler()
     auto_order_service.stop_scheduler()
 
 

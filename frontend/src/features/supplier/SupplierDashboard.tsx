@@ -15,6 +15,7 @@ import { fetchMyPurchaseOrder, fetchMyPurchaseOrders } from "../../api/purchaseO
 import SupplierMessages from "./SupplierMessages";
 import SupplierGuidelines from "./SupplierGuidelines";
 import SupplierAccount from "./SupplierAccount";
+import { fetchMyAccount } from "../../api/suppliers";
 import WelcomeScreen from "./WelcomeScreen";
 import { FadeSwitch } from "../shared/ui/FadeSwitch";
 
@@ -31,6 +32,14 @@ export default function SupplierDashboard() {
   const [unread, setUnread] = useState(0);
   // Price sheets from SPAR waiting for this supplier's signature.
   const [pendingSheets, setPendingSheets] = useState(0);
+  // No email on their Account page means no email alerts — nudge them to add one.
+  const [missingEmail, setMissingEmail] = useState(false);
+  useEffect(() => {
+    if (tab === "account") return; // re-checked after they leave the Account page
+    fetchMyAccount()
+      .then((a) => setMissingEmail(!(a.email ?? "").trim()))
+      .catch(() => {});
+  }, [tab]);
   // Set by AuthContext.login() only for a fresh SUPPLIER login, not on a
   // page refresh — read once, then cleared, so it never reappears until
   // the next login.
@@ -112,6 +121,15 @@ export default function SupplierDashboard() {
         >
           SPAR has adjusted your prices — {pendingSheets} price sheet{pendingSheets === 1 ? "" : "s"} waiting for your
           signature. <span className="font-semibold underline">Review &amp; sign</span>
+        </button>
+      )}
+      {missingEmail && tab !== "account" && (
+        <button
+          onClick={() => setTab("account")}
+          className="no-print w-full text-left mb-4 rounded-2xl bg-sage-50 border border-sage-200 px-4 py-3 text-sm text-crate-800 hover:bg-sage-100 transition-colors"
+        >
+          Add your email address to get email alerts when SPAR adjusts your prices or messages you.{" "}
+          <span className="font-semibold underline">Go to Account</span>
         </button>
       )}
       <FadeSwitch tabKey={tab}>

@@ -26,6 +26,10 @@ class User(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     username: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     email: Mapped[str | None] = mapped_column(String(120), unique=True)
+    # Filled in by Admin users on their own Account page; notification
+    # emails go to `email`.
+    full_name: Mapped[str | None] = mapped_column(String(150))
+    phone: Mapped[str | None] = mapped_column(String(30))
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id"))
     supplier_id: Mapped[int | None] = mapped_column(ForeignKey("suppliers.id"))

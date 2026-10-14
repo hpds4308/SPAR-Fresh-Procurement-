@@ -24,7 +24,8 @@ import AdminMessages from "./AdminMessages";
 import AdminAuditLog from "./AdminAuditLog";
 import AdminSettings from "./AdminSettings";
 import AdminUsers from "./AdminUsers";
-const TABS = ["orders", "orderHistory", "supplierOrders", "purchaseOrders", "supplierPrices", "priceApprovals", "keellsPrices", "marketPrices", "marketPriceHistory", "masterData", "productList", "promotions", "messages", "reports", "auditLog", "settings", "users"] as const;
+import AdminAccount from "./AdminAccount";
+const TABS = ["orders", "orderHistory", "supplierOrders", "purchaseOrders", "supplierPrices", "priceApprovals", "keellsPrices", "marketPrices", "marketPriceHistory", "masterData", "productList", "promotions", "messages", "reports", "auditLog", "settings", "users", "account"] as const;
 type Tab = (typeof TABS)[number];
 
 const iconProps = { width: 17, height: 17 };
@@ -129,6 +130,7 @@ export default function AdminDashboard() {
     { id: "auditLog", label: "Audit Log", icon: <IconLog {...iconProps} /> },
     { id: "users", label: "Accounts", icon: <IconUser {...iconProps} /> },
     { id: "settings", label: "Settings", icon: <IconSettings {...iconProps} /> },
+    { id: "account", label: "My Account", icon: <IconUser {...iconProps} /> },
   ];
 
   return (
@@ -281,6 +283,7 @@ export default function AdminDashboard() {
       )}
       {keepAlive("users", <AdminUsers />)}
       {keepAlive("settings", <AdminSettings />)}
+      {keepAlive("account", <AdminAccount />)}
     </DashboardShell>
   );
 }

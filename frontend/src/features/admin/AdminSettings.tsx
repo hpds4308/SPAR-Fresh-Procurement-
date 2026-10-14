@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
 import { ApiError } from "../../api/client";
 import {
+  EmailStatus,
   Settings,
+  fetchEmailStatus,
   fetchMasterDataEmail,
   fetchSettings,
+  sendTestEmail,
   updateMasterDataEmail,
   updateSetting,
 } from "../../api/settings";
@@ -156,7 +159,131 @@ export default function AdminSettings() {
       </div>
       {error && <p className="text-tomato-600 text-sm px-1">{error}</p>}
 
+      <EmailNotificationsPanel />
+
       <LateSubmissionPanel />
+    </div>
+  );
+}
+
+const STATUS_STYLE: Record<string, string> = {
+  SENT: "bg-crate-700/10 text-crate-700",
+  FAILED: "bg-tomato-500/15 text-tomato-600",
+  SKIPPED: "bg-sage-100 text-crate-800/50",
+};
+
+/** Whether notification emails can go out, who gets them, a test button and the latest emails. */
+function EmailNotificationsPanel() {
+  const [status, setStatus] = useState<EmailStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<string | null>(null);
+
+  function load() {
+    fetchEmailStatus()
+      .then((s) => {
+        setStatus(s);
+        setError(null);
+      })
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Could not load email status."));
+  }
+  useEffect(load, []);
+
+  async function test() {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const r = await sendTestEmail();
+      setTestResult(
+        r.status === "SENT"
+          ? "Test email sent — check your inbox (and spam folder)."
+          : r.status === "SKIPPED"
+          ? "Email isn't configured yet, so nothing was sent."
+          : "The email service refused it — see the error in the list below."
+      );
+      load();
+    } catch (err) {
+      setTestResult(err instanceof ApiError ? err.message : "Could not send the test email.");
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-2xl shadow-card border border-sage-100 p-6">
+      <h2 className="font-display font-semibold text-lg text-crate-950 mb-1">Email notifications</h2>
+      <p className="text-sm text-crate-800/50 mb-4">
+        Suppliers are emailed at the address on their Account page; admins at the email on My Account.
+      </p>
+      {error && <p className="text-tomato-600 text-sm">{error}</p>}
+      {!status && !error && <Skeleton className="h-16 w-full" />}
+      {status && (
+        <div className="space-y-4 text-sm">
+          {status.configured ? (
+            <p className="rounded-xl bg-crate-700/10 text-crate-800 px-4 py-3">
+              Sending through <strong>{status.provider}</strong>
+              {status.from_address ? ` from ${status.from_address}` : ""}.
+            </p>
+          ) : (
+            <p className="rounded-xl bg-mango-500/15 text-[#8A5A0D] px-4 py-3">
+              Email isn't set up yet, so no emails go out — each one is listed below as "Skipped". Add BREVO_API_KEY
+              and EMAIL_FROM_ADDRESS to the backend service's variables on Railway to turn it on.
+            </p>
+          )}
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-crate-800/60 mb-1">Admin emails go to</p>
+            <p className="text-crate-950">
+              {status.admin_recipients.length > 0
+                ? status.admin_recipients.join(", ")
+                : "No admin has an email yet — add one on My Account."}
+            </p>
+          </div>
+          {status.suppliers_without_email.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-crate-800/60 mb-1">
+                Suppliers with no email ({status.suppliers_without_email.length}) — they get no emails
+              </p>
+              <p className="text-crate-800/70">{status.suppliers_without_email.join(", ")}</p>
+            </div>
+          )}
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              onClick={test}
+              disabled={testing}
+              className="text-sm bg-crate-700 text-white rounded-full px-4 py-2 font-semibold hover:bg-crate-800 disabled:opacity-50"
+            >
+              {testing ? "Sending…" : "Send me a test email"}
+            </button>
+            {testResult && <span className="text-crate-800/70">{testResult}</span>}
+          </div>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-crate-800/60 mb-1.5">Latest emails</p>
+            {status.recent.length === 0 ? (
+              <p className="text-crate-800/40">None yet.</p>
+            ) : (
+              <ul className="divide-y divide-sage-100 border-y border-sage-100">
+                {status.recent.map((e) => (
+                  <li key={e.id} className="py-2 flex items-start gap-3" title={e.error ?? undefined}>
+                    <span
+                      className={`shrink-0 mt-0.5 text-[10px] uppercase tracking-wide rounded-full px-2 py-0.5 font-semibold ${
+                        STATUS_STYLE[e.status] ?? ""
+                      }`}
+                    >
+                      {e.status}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-crate-950 truncate">{e.subject}</span>
+                      <span className="block text-xs text-crate-800/45 truncate">
+                        {e.recipient} · {new Date(e.created_at).toLocaleString()}
+                      </span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

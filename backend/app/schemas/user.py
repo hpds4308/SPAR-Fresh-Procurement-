@@ -1,4 +1,6 @@
-from pydantic import BaseModel, Field
+import re
+
+from pydantic import BaseModel, Field, field_validator
 
 
 class UserListItem(BaseModel):
@@ -56,3 +58,48 @@ class UserUpdateRequest(BaseModel):
     # not here, so the error message can name which fields are missing).
     username: str | None = Field(default=None, min_length=3, max_length=50)
     password: str | None = Field(default=None, min_length=8, max_length=200)
+
+
+_ACCOUNT_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_ACCOUNT_PHONE_RE = re.compile(r"^\+?[0-9][0-9 \-]{6,19}$")
+
+
+class AdminAccountOut(BaseModel):
+    username: str
+    full_name: str | None = None
+    email: str | None = None
+    phone: str | None = None
+
+
+class AdminAccountUpdate(BaseModel):
+    """What an Admin fills in on their own Account page. Notification emails go to `email`."""
+
+    full_name: str = Field(min_length=1, max_length=150)
+    email: str = Field(min_length=3, max_length=120)
+    phone: str | None = Field(default=None, max_length=30)
+
+    @field_validator("full_name")
+    @classmethod
+    def _name(cls, v: str) -> str:
+        v = " ".join(v.split())
+        if not v:
+            raise ValueError("Enter your name.")
+        return v
+
+    @field_validator("email")
+    @classmethod
+    def _email(cls, v: str) -> str:
+        v = v.strip()
+        if not _ACCOUNT_EMAIL_RE.match(v):
+            raise ValueError("Enter a valid email address.")
+        return v
+
+    @field_validator("phone")
+    @classmethod
+    def _phone(cls, v: str | None) -> str | None:
+        v = (v or "").strip()
+        if not v:
+            return None
+        if not _ACCOUNT_PHONE_RE.match(v):
+            raise ValueError("Enter a valid phone number, e.g. 0771234567 or +94771234567.")
+        return v

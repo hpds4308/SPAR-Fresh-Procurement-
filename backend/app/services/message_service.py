@@ -24,6 +24,7 @@ from app.models.branch import Branch
 from app.models.message import Message, MessageAttachment
 from app.models.supplier import Supplier
 from app.models.user import User
+from app.services import notification_service
 from app.schemas.message import (
     AttachmentOut,
     BranchThreadOut,
@@ -80,6 +81,7 @@ def _save(db: Session, msg: Message, sender: User, attachment_ids: list[int] | N
     attachments = _claim_attachments(db, sender, msg, attachment_ids or [])
     db.commit()
     db.refresh(msg)
+    notification_service.on_message(db, msg, len(attachments))
     return _to_out(msg, sender.username, attachments)
 
 

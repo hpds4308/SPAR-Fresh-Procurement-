@@ -54,6 +54,23 @@ class Settings(BaseSettings):
     SMTP_FROM_EMAIL: str = ""
     SMTP_USE_TLS: bool = True
 
+    # Notification emails go out through Brevo's HTTP API (Railway blocks
+    # outbound SMTP on its non-Pro plans). With no BREVO_API_KEY the app
+    # falls back to SMTP_* if set, otherwise logs each email as SKIPPED.
+    BREVO_API_KEY: str = ""
+    # Must be a sender address verified in Brevo.
+    EMAIL_FROM_ADDRESS: str = ""
+    EMAIL_FROM_NAME: str = "SPAR Fresh Procurement"
+    # The frontend's address, for links in emails (e.g.
+    # https://frontend-production-f7633.up.railway.app). Blank = no links.
+    APP_URL: str = ""
+    # Scheduled reminder emails (8 AM "submit your prices", 1 PM "answer
+    # SPAR's adjusted prices"). Turned off in tests.
+    EMAIL_REMINDERS: bool = True
+    PRICE_REMINDER_TIME: str = "08:00"
+    # How long before the approval cutoff the "please answer" reminder goes out.
+    APPROVAL_REMINDER_MINUTES_BEFORE: int = 60
+
     # 24X7Retail / Dynamic Web POS integration (see the Web API Document
     # supplied by SPAR's POS vendor) — used for the branch order form's
     # stock-in-hand lookup. Left blank by default; if POS_API_BASE_URL
