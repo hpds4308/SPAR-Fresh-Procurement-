@@ -80,13 +80,11 @@ export default function SupplierPricesView() {
   // (no real row exists for this date until Admin interacts with the field).
   const [carriedForwardIds, setCarriedForwardIds] = useState<Set<number>>(new Set());
 
-  // Frozen-column left offsets, measured from the real rendered widths of
-  // the Item/Lowest Price header cells — table auto-layout doesn't honor a
-  // hardcoded `width`, columns still grow to fit long item names, so a
-  // static px offset drifts out of alignment with the actual columns.
+  // Frozen-column left offset for Keells Price, measured from the real
+  // rendered width of the Item header cell rather than hardcoded, so it
+  // stays aligned however the table lays the Item column out.
   const itemHeadRef = useRef<HTMLTableCellElement>(null);
-  const lowestHeadRef = useRef<HTMLTableCellElement>(null);
-  const [stickyOffsets, setStickyOffsets] = useState({ lowest: 0, keells: 0 });
+  const [stickyOffsets, setStickyOffsets] = useState({ keells: 0 });
 
   useEffect(() => {
     fetchSuppliers().then(setSuppliers).catch(() => {});
@@ -209,36 +207,12 @@ export default function SupplierPricesView() {
     return list.sort(compareProductDisplayOrder);
   }, [rows, q]);
 
-  // The winning (lowest-price) supplier cell(s) per product, for the summary
-  // column — reuses the is_lowest_for_product flag the backend already
-  // computes rather than re-deriving it here. The backend flags every
-  // supplier tied at the lowest price, so this can return more than one
-  // cell — all of them share the same price.
-  function bestCellsFor(p: { cells: Map<number, AdminSupplierPrice> }): AdminSupplierPrice[] {
-    return Array.from(p.cells.values()).filter((cell) => cell.is_lowest_for_product);
-  }
-
-  // Same idea, for the next distinct price tier below the lowest — see
-  // pricing_service.list_all_prices for why a tie at the lowest price
-  // doesn't count as a second tier.
-  function secondLowestCellFor(p: { cells: Map<number, AdminSupplierPrice> }): AdminSupplierPrice | undefined {
-    for (const cell of p.cells.values()) {
-      if (cell.is_second_lowest_for_product) return cell;
-    }
-    return undefined;
-  }
-
   const supplierCount = supplierColumns.length;
 
   useLayoutEffect(() => {
     function measure() {
       const itemWidth = itemHeadRef.current?.offsetWidth ?? 0;
-      const lowestWidth = lowestHeadRef.current?.offsetWidth ?? 0;
-      setStickyOffsets((prev) => {
-        const next = { lowest: itemWidth, keells: itemWidth + lowestWidth };
-        if (prev.lowest === next.lowest && prev.keells === next.keells) return prev;
-        return next;
-      });
+      setStickyOffsets((prev) => (prev.keells === itemWidth ? prev : { keells: itemWidth }));
     }
     measure();
     window.addEventListener("resize", measure);
@@ -431,30 +405,19 @@ export default function SupplierPricesView() {
             <p className="text-xs text-crate-800/40 mt-1">Prices submitted for this delivery date will appear here.</p>
           </div>
         ) : (
-          <table className="w-full text-sm border-collapse">
+          <table className="text-sm border-collapse">
             <thead className="sticky top-0 z-20 bg-white">
               <tr className="bg-white text-crate-800/40 text-left text-xs uppercase tracking-wide border-b border-sage-100">
                 <th
                   ref={itemHeadRef}
-                  className="sticky left-0 z-30 bg-white px-4 py-2.5 font-medium align-bottom"
+                  className="sticky left-0 z-30 bg-white px-4 py-2.5 font-medium align-bottom w-60 min-w-[15rem] max-w-[15rem]"
                 >
                   Item
                 </th>
                 <th
-                  ref={lowestHeadRef}
-                  rowSpan={2}
-                  style={{ left: stickyOffsets.lowest }}
-                  className="sticky z-30 bg-yellow-100 px-4 py-2.5 text-center border-l border-sage-100 align-middle normal-case tracking-normal"
-                >
-                  <span className="font-semibold text-crate-800 text-sm">Lowest Price</span>
-                  <p className="text-[10px] text-crate-800/35 font-normal normal-case mt-0.5">
-                    Best supplier &amp; price
-                  </p>
-                </th>
-                <th
                   rowSpan={2}
                   style={{ left: stickyOffsets.keells }}
-                  className="sticky z-30 bg-green-100 px-4 py-2.5 text-center border-l border-r border-sage-200 align-middle normal-case tracking-normal shadow-[4px_0_6px_-4px_rgba(21,56,38,0.12)]"
+                  className="sticky z-30 bg-green-100 px-4 py-2.5 text-center border-l border-r border-sage-200 align-middle normal-case tracking-normal shadow-[4px_0_6px_-4px_rgba(21,56,38,0.12)] min-w-[8rem]"
                 >
                   <span className="font-semibold text-crate-800 text-sm">Keells Price</span>
                   <p className="text-[10px] text-crate-800/35 font-normal normal-case mt-0.5">
@@ -544,53 +507,19 @@ export default function SupplierPricesView() {
                 <tr key={p.product_id}>
                   <td
                     title={`${p.description} ${p.code}`}
-                    className="sticky left-0 z-10 bg-white px-4 py-2.5 text-crate-950 whitespace-nowrap"
+                    className="sticky left-0 z-10 bg-white px-4 py-2.5 text-crate-950 w-60 min-w-[15rem] max-w-[15rem]"
                   >
-                    {p.description}
-                    <span className="text-crate-800/35 text-xs ml-1.5">{p.code}</span>
-                    <ProductPromotion productId={p.product_id} className="ml-1.5" />
-                    {(["EXPIRED", "REJECTED"] as const).map((status) => {
-                      const who = [...p.cells.values()]
-                        .filter((c) => c.approval_status === status)
-                        .map((c) => c.supplier_name);
-                      return who.length > 0 ? (
-                        <PriceAnswerLabel key={status} status={status} suppliers={who} className="ml-1.5" />
-                      ) : null;
-                    })}
-                  </td>
-                  <td
-                    style={{ left: stickyOffsets.lowest }}
-                    className="sticky z-10 bg-yellow-100 px-3 py-1.5 border-l border-sage-100"
-                  >
-                    {(() => {
-                      const bestCells = bestCellsFor(p);
-                      if (bestCells.length === 0) return <span className="text-sm text-crate-800/20">—</span>;
-                      const best = bestCells[0];
-                      const keells = referenceDrafts[p.product_id] ? Number(referenceDrafts[p.product_id]) : null;
-                      const diff = keells !== null ? best.price - keells : null;
-                      const secondBest = secondLowestCellFor(p);
-                      const supplierNames = bestCells.map((c) => c.supplier_name).join(", ");
-                      return (
-                        <div className="flex flex-col items-center gap-0.5">
-                          <span className="text-sm font-semibold text-crate-800">Rs. {best.price.toFixed(2)}</span>
-                          <span className="text-[10px] text-crate-800/50 text-center">{supplierNames}</span>
-                          {diff !== null && (
-                            <span
-                              className={`text-[10px] font-medium ${
-                                diff <= 0 ? "text-crate-700" : "text-tomato-600"
-                              }`}
-                            >
-                              Rs. {Math.abs(diff).toFixed(2)} {diff <= 0 ? "below" : "above"} Keells
-                            </span>
-                          )}
-                          {secondBest && (
-                            <span className="text-[10px] text-crate-800/35 border-t border-sage-200 mt-0.5 pt-0.5 w-full text-center">
-                              2nd: Rs. {secondBest.price.toFixed(2)} ({secondBest.supplier_name})
-                            </span>
-                          )}
-                        </div>
-                      );
-                    })()}
+                    <span className="block break-words">{p.description}</span>
+                    <span className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                      <span className="text-crate-800/35 text-xs">{p.code}</span>
+                      <ProductPromotion productId={p.product_id} />
+                      {(["EXPIRED", "REJECTED"] as const).map((status) => {
+                        const who = [...p.cells.values()]
+                          .filter((c) => c.approval_status === status)
+                          .map((c) => c.supplier_name);
+                        return who.length > 0 ? <PriceAnswerLabel key={status} status={status} suppliers={who} /> : null;
+                      })}
+                    </span>
                   </td>
                   <td
                     style={{ left: stickyOffsets.keells }}
