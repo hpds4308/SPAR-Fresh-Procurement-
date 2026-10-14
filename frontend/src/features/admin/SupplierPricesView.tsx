@@ -410,8 +410,9 @@ export default function SupplierPricesView() {
             Showing quotes for {formatDate(deliveryDate)}. Set an Adjusted Price for one or more items, then click{" "}
             <span className="font-medium text-crate-700">Send for approval</span> at the top of that supplier's
             column — they get one price sheet and approve (e-sign) or reject each item. A rejected item can come
-            back with the supplier's own final price, which then applies. Until they respond, their own quote is
-            the price that applies, and it stays that way if they don't respond before the delivery date.
+            back with the supplier's own final price, which then applies. If you adjust a rejected item and send it
+            again, it goes as your final price: the supplier can only approve or reject it. Until they respond, their
+            own quote is the price that applies, and it stays that way if they don't respond before the delivery date.
           </p>
         )}
       </div>

@@ -533,3 +533,65 @@ def test_respond_endpoint_end_to_end(client, db_session, ctx, auth_headers):
     by_id = {r["id"]: r for r in resp.json()}
     assert by_id[ctx["rows"][1].id]["approval_status"] == "REJECTED"
     assert by_id[ctx["rows"][1].id]["counter_price"] == 105.0
+
+
+# ---- SPAR's final offer after a rejection ----
+
+
+def _reject_then_resend(db_session, ctx, counter, new_adjusted=100):
+    """Supplier rejects row 1 (optionally with a new price); Admin re-adjusts it and sends again."""
+    _adjust_all(db_session, ctx)  # 100 -> 90, 110 -> 95
+    _respond(db_session, ctx, _send(db_session, ctx), _decide(ctx, ("APPROVED", None), ("REJECTED", counter)))
+    pricing_service.set_adjusted_price(db_session, ctx["admin"], ctx["rows"][1].id, new_adjusted)
+    return _send(db_session, ctx)
+
+
+def test_resent_rejected_item_is_a_final_offer(db_session, ctx):
+    rev = _reject_then_resend(db_session, ctx, 105)
+    [item] = rev.items
+    assert item["supplier_price_id"] == ctx["rows"][1].id
+    assert item["final_offer"] is True
+    assert item["previous_price"] == 105.0
+
+
+def test_first_time_items_are_not_final_offers(db_session, ctx):
+    _adjust_all(db_session, ctx)
+    rev = _send(db_session, ctx)
+    assert all(i["final_offer"] is False and i["previous_price"] is None for i in rev.items)
+
+
+def test_final_offer_refuses_a_new_price(db_session, ctx):
+    rev = _reject_then_resend(db_session, ctx, 105)
+    decisions = [{"supplier_price_id": ctx["rows"][1].id, "decision": "REJECTED", "counter_price": 103}]
+    with pytest.raises(ValidationFailedError):
+        _respond(db_session, ctx, rev, decisions, signature_image=None, agreed=False)
+
+
+def test_approving_final_offer_makes_it_the_agreed_price(db_session, ctx):
+    rev = _reject_then_resend(db_session, ctx, 105)
+    _respond(db_session, ctx, rev, [{"supplier_price_id": ctx["rows"][1].id, "decision": "APPROVED"}])
+    latest, _ = master_data_service._latest_prices(db_session)
+    assert latest[(ctx["supplier"].id, ctx["rows"][1].product_id)] == 100.0
+    assert latest[(ctx["supplier"].id, ctx["rows"][0].product_id)] == 90.0
+
+
+def test_rejecting_final_offer_keeps_previous_new_price(db_session, ctx):
+    rev = _reject_then_resend(db_session, ctx, 105)
+    out = _respond(
+        db_session, ctx, rev, [{"supplier_price_id": ctx["rows"][1].id, "decision": "REJECTED"}],
+        signature_image=None, agreed=False,
+    )
+    assert out.item_responses[0]["counter_price"] == 105.0
+    latest, _ = master_data_service._latest_prices(db_session)
+    assert latest[(ctx["supplier"].id, ctx["rows"][1].product_id)] == 105.0
+
+
+def test_rejecting_final_offer_without_earlier_price_uses_quote(db_session, ctx):
+    rev = _reject_then_resend(db_session, ctx, None)
+    assert rev.items[0]["final_offer"] is True and rev.items[0]["previous_price"] is None
+    _respond(
+        db_session, ctx, rev, [{"supplier_price_id": ctx["rows"][1].id, "decision": "REJECTED"}],
+        signature_image=None, agreed=False,
+    )
+    latest, _ = master_data_service._latest_prices(db_session)
+    assert latest[(ctx["supplier"].id, ctx["rows"][1].product_id)] == 110.0

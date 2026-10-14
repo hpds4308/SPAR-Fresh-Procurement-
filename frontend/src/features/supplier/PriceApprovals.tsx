@@ -17,6 +17,7 @@ import {
   formatDateTime,
   formatLongDate,
   formatSignDeadline,
+  FinalOfferTag,
   rs,
 } from "../shared/PriceSheetParts";
 import { ProductPromotion } from "../shared/ui/PromotionBadge";
@@ -237,7 +238,7 @@ function ResponseForm({ sheet, onDone }: { sheet: PriceSheet; onDone: (s: PriceS
 
   function counterProblem(item: PriceSheetItem): string | null {
     const a = answerOf(item.supplier_price_id);
-    if (a.decision !== "REJECTED") return null;
+    if (a.decision !== "REJECTED" || item.final_offer) return null;
     const value = parsePrice(a.counter);
     if (value === null) return null;
     if (Number.isNaN(value)) return "Enter a valid price";
@@ -276,7 +277,7 @@ function ResponseForm({ sheet, onDone }: { sheet: PriceSheet; onDone: (s: PriceS
           return {
             supplier_price_id: item.supplier_price_id,
             decision: a.decision!,
-            counter_price: a.decision === "REJECTED" ? parsePrice(a.counter) : null,
+            counter_price: a.decision === "REJECTED" && !item.final_offer ? parsePrice(a.counter) : null,
           };
         }),
         note: rejected.length > 0 ? note.trim() || null : null,
@@ -320,6 +321,13 @@ function ResponseForm({ sheet, onDone }: { sheet: PriceSheet; onDone: (s: PriceS
         <p className="text-sm text-crate-800/70 bg-sage-50 rounded-xl px-4 py-3">
           Approve or reject each price. If you reject one, you can enter your own final price for it. Please respond
           by {formatSignDeadline(sheet.delivery_date)}, or your own submitted prices apply.
+          {sheet.items.some((i) => i.final_offer) && (
+            <>
+              {" "}
+              Items marked <strong>Final price</strong> are SPAR's last offer after your earlier rejection: approve or
+              reject only.
+            </>
+          )}
         </p>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -348,11 +356,17 @@ function ResponseForm({ sheet, onDone }: { sheet: PriceSheet; onDone: (s: PriceS
                     {item.product_description}
                     <span className="text-crate-800/35 text-xs ml-1.5">{item.product_code}</span>
                     <ProductPromotion productId={item.product_id} className="ml-1.5" />
+                    {item.final_offer && <FinalOfferTag className="ml-1.5" />}
                   </p>
                   <p className="text-sm mt-0.5 flex flex-wrap gap-x-3">
                     <span className="text-crate-800/60">
                       Your price: <span className="tabular-nums">{rs(item.supplier_price)}</span>
                     </span>
+                    {item.final_offer && item.previous_price !== null && (
+                      <span className="text-crate-800/60">
+                        Your last offer: <span className="tabular-nums">{rs(item.previous_price)}</span>
+                      </span>
+                    )}
                     <span className="text-crate-800/60">
                       SPAR: <span className="font-semibold text-crate-950 tabular-nums">{rs(item.adjusted_price)}</span>
                       <span className="text-crate-800/40"> /{item.unit_code}</span>
@@ -377,7 +391,15 @@ function ResponseForm({ sheet, onDone }: { sheet: PriceSheet; onDone: (s: PriceS
                     ✗ Reject
                   </button>
                 </div>
-                {a.decision === "REJECTED" && (
+                {a.decision === "REJECTED" && item.final_offer && (
+                  <p className="basis-full text-xs text-crate-800/60">
+                    This is SPAR's final price, so there's no new price this time. If you reject it,{" "}
+                    {item.previous_price !== null
+                      ? `your last offer of ${rs(item.previous_price)} applies.`
+                      : `your own price of ${rs(item.supplier_price)} applies.`}
+                  </p>
+                )}
+                {a.decision === "REJECTED" && !item.final_offer && (
                   <div className="basis-full">
                     <label className="flex flex-wrap items-center gap-2 text-sm text-crate-800/80">
                       <span>Your new final price (Rs.)</span>

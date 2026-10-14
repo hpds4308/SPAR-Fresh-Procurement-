@@ -18,6 +18,11 @@ class RevisionItemOut(BaseModel):
     # gave instead (or None — their submitted price applies).
     decision: str | None = None
     counter_price: float | None = None
+    # SPAR's final offer on an item the supplier already rejected once:
+    # approve or reject only, no new price. Rejecting keeps previous_price
+    # (the final price they gave last time; None = their submitted price).
+    final_offer: bool = False
+    previous_price: float | None = None
 
 
 class RevisionSummaryOut(BaseModel):

@@ -73,6 +73,18 @@ export function rs(n: number): string {
   return `Rs. ${n.toFixed(2)}`;
 }
 
+/** Marks SPAR's final offer on an item the supplier already rejected once. */
+export function FinalOfferTag({ className = "" }: { className?: string }) {
+  return (
+    <span
+      className={`text-[10px] uppercase tracking-wide rounded-full px-2 py-0.5 font-semibold whitespace-nowrap bg-mango-500/20 text-[#8A5A0D] ${className}`}
+      title="SPAR's last price for this item: approve or reject only"
+    >
+      Final price
+    </span>
+  );
+}
+
 /** The supplier's answer to one item: Approved, or Rejected plus the final price they gave. */
 function ItemResponse({ item }: { item: PriceSheetItem }) {
   if (!item.decision) return null;
@@ -86,7 +98,9 @@ function ItemResponse({ item }: { item: PriceSheetItem }) {
         {" · "}
         {item.counter_price !== null ? (
           <>
-            new price <span className="font-semibold text-crate-950 tabular-nums">{rs(item.counter_price)}</span>
+            {item.final_offer ? "earlier price" : "new price"}{" "}
+            <span className="font-semibold text-crate-950 tabular-nums">{rs(item.counter_price)}</span>
+            {item.final_offer ? " applies" : ""}
           </>
         ) : (
           "own price applies"
@@ -108,6 +122,7 @@ export function PriceSheetItemsTable({ items, priceLabel }: { items: PriceSheetI
               {item.product_description}
               <span className="text-crate-800/35 text-xs ml-1.5">{item.product_code}</span>
               <ProductPromotion productId={item.product_id} className="ml-1.5" />
+              {item.final_offer && <FinalOfferTag className="ml-1.5" />}
             </p>
             <p className="text-sm mt-0.5 flex flex-wrap gap-x-3">
               <span className="text-crate-800/60">
@@ -154,6 +169,7 @@ function ItemsTable({ items, priceLabel, answered }: { items: PriceSheetItem[]; 
                   {item.product_description}
                   <span className="text-crate-800/35 text-xs ml-1.5">{item.product_code}</span>
                   <ProductPromotion productId={item.product_id} className="ml-1.5" />
+                  {item.final_offer && <FinalOfferTag className="ml-1.5" />}
                 </td>
                 <td className="py-2 px-3 text-right text-crate-800/50">{item.unit_code}</td>
                 <td className="py-2 px-3 text-right text-crate-800/70 tabular-nums">{rs(item.supplier_price)}</td>

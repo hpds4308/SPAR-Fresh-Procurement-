@@ -17,6 +17,9 @@ Flow (as agreed with the client):
    else their own submitted price — as does every item when the supplier
    doesn't respond before the delivery date arrives. Admin can adjust a
    rejected item again and send it on a new sheet.
+5. That re-sent price is SPAR's final offer: the supplier can only approve
+   or reject it, with no new price of their own. Rejecting it keeps the
+   final price they gave last time (else their submitted price).
 
 Approved items are locked: if Admin changes an approved price afterwards,
 the whole sheet is voided and its items go back to draft, to be sent and
@@ -90,11 +93,44 @@ def compute_snapshot_hash(supplier_id: int, delivery_date: date, items: list[dic
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _previous_rejections(db: Session, rows: list[SupplierPrice]) -> dict[int, float | None]:
+    """
+    {supplier_prices row id: the final price the supplier gave (or None)}
+    for rows whose adjusted price the supplier has already rejected on an
+    earlier sheet — the latest rejection wins. A rejection only counts while
+    the supplier's quote is still the one they rejected against.
+    """
+    if not rows:
+        return {}
+    keys = {(r.supplier_id, r.delivery_date) for r in rows}
+    by_id = {r.id: r for r in rows}
+    revs = (
+        db.query(SupplierPriceRevision)
+        .filter(
+            SupplierPriceRevision.supplier_id.in_({k[0] for k in keys}),
+            SupplierPriceRevision.delivery_date.in_({k[1] for k in keys}),
+            SupplierPriceRevision.status.in_((REJECTED, PARTIAL)),
+        )
+        .order_by(SupplierPriceRevision.id)
+        .all()
+    )
+    out: dict[int, float | None] = {}
+    for rev in revs:
+        quoted = {i["supplier_price_id"]: i["supplier_price"] for i in rev.items}
+        for spid, response in item_responses(rev).items():
+            row = by_id.get(spid)
+            if response["decision"] == REJECTED and row and quoted.get(spid) == float(row.price):
+                out[spid] = response.get("counter_price")
+    return out
+
+
 def _build_items(db: Session, rows: list[SupplierPrice]) -> list[dict]:
     products = {p.id: p for p in db.query(Product).filter(Product.id.in_([r.product_id for r in rows])).all()}
+    rejected_before = _previous_rejections(db, rows)
     items = []
     for r in rows:
         product = products.get(r.product_id)
+        final_offer = r.id in rejected_before
         items.append(
             {
                 "supplier_price_id": r.id,
@@ -104,6 +140,11 @@ def _build_items(db: Session, rows: list[SupplierPrice]) -> list[dict]:
                 "unit_code": r.unit_code,
                 "supplier_price": float(r.price),
                 "adjusted_price": float(r.adjusted_price),
+                # Already rejected once: this is SPAR's final price — the
+                # supplier can only approve or reject it. Rejecting keeps
+                # `previous_price`, the final price they gave last time.
+                "final_offer": final_offer,
+                "previous_price": rejected_before.get(r.id) if final_offer else None,
             }
         )
     items.sort(key=lambda i: (i["product_description"], i["supplier_price_id"]))
@@ -459,7 +500,14 @@ def _check_decisions(rev: SupplierPriceRevision, decisions: list[dict]) -> list[
         if decision not in (APPROVED, REJECTED):
             raise ValidationFailedError("Each item must be approved or rejected.")
         counter = d.get("counter_price")
-        if decision == APPROVED or counter is None:
+        if item.get("final_offer"):
+            if counter is not None:
+                raise ValidationFailedError(
+                    f"{item['product_description']} is SPAR's final price — approve or reject it, without a new price."
+                )
+            # Rejecting a final offer keeps the price they gave last time.
+            counter = item.get("previous_price") if decision == REJECTED else None
+        elif decision == APPROVED or counter is None:
             counter = None
         else:
             counter = round(float(counter), 2)

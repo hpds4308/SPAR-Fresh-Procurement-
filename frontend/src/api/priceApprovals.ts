@@ -24,6 +24,11 @@ export type PriceSheetItem = {
   // final price they gave for a rejected item (null: their own price applies).
   decision: ItemDecision | null;
   counter_price: number | null;
+  // SPAR's final offer on an item the supplier already rejected once:
+  // approve or reject only, no new price. Rejecting keeps previous_price
+  // (the final price they gave last time; null = their submitted price).
+  final_offer: boolean;
+  previous_price: number | null;
 };
 
 export type PriceSheetSummary = {
