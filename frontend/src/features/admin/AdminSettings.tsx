@@ -37,6 +37,13 @@ const FIELDS: { key: keyof Settings; label: string; hint: string; type: "time" |
     type: "time",
   },
   {
+    key: "supplier_approval_deadline",
+    label: "Supplier approval cutoff",
+    hint:
+      "On the price submission day, suppliers can approve or reject SPAR's adjusted prices up until this time. After it, unanswered prices show as Not approved and the supplier's own price applies.",
+    type: "time",
+  },
+  {
     key: "support_phone",
     label: "Support contact number",
     hint: "Shown to branches and suppliers on the Guidelines pages.",
@@ -58,6 +65,7 @@ export default function AdminSettings() {
         setDrafts({
           branch_order_deadline: s.branch_order_deadline,
           supplier_price_deadline: s.supplier_price_deadline,
+          supplier_approval_deadline: s.supplier_approval_deadline,
           supplier_price_days: s.supplier_price_days,
           support_phone: s.support_phone,
         });

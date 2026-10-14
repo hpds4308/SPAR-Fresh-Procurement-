@@ -9,7 +9,7 @@ const SHEET_STATUS: Record<SheetStatus, { label: string; tone: Tone }> = {
   APPROVED: { label: "Approved", tone: "success" },
   PARTIAL: { label: "Partly approved", tone: "info" },
   REJECTED: { label: "Rejected", tone: "danger" },
-  EXPIRED: { label: "Expired", tone: "neutral" },
+  EXPIRED: { label: "Not approved", tone: "neutral" },
   VOIDED: { label: "Cancelled", tone: "neutral" },
   WITHDRAWN: { label: "Withdrawn", tone: "neutral" },
 };
@@ -31,7 +31,7 @@ export function RowApprovalBadge({ status }: { status: RowApprovalStatus }) {
       ? { label: "Approved", cls: "bg-crate-700 text-white" }
       : status === "REJECTED"
       ? { label: "Rejected", cls: "bg-tomato-500/15 text-tomato-600" }
-      : { label: "Expired", cls: "bg-sage-100 text-crate-800/50" };
+      : { label: "Not approved", cls: "bg-mango-500/20 text-[#8A5A0D]" };
   return (
     <span className={`text-[10px] uppercase tracking-wide rounded-full px-2 py-0.5 font-semibold whitespace-nowrap ${meta.cls}`}>
       {meta.label}
@@ -59,14 +59,54 @@ export function formatDateTime(iso: string): string {
 }
 
 /**
- * A sheet can be signed until its delivery date starts (midnight, Colombo
- * time) — phrased as "the end of <day before>", since "12:00 AM on the
- * delivery date" is easy to misread as a day later.
+ * When a sheet stops being answerable — the approval cutoff (2:00 PM by
+ * default, Admin > Settings) on the price submission day, from the
+ * sheet's expires_at. E.g. "2:00 PM on Wednesday, 14 October".
  */
-export function formatSignDeadline(deliveryDateIso: string): string {
-  const d = new Date(deliveryDateIso + "T00:00:00");
-  d.setDate(d.getDate() - 1);
-  return `the end of ${d.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}`;
+export function formatSignDeadline(expiresAtIso: string): string {
+  const d = new Date(expiresAtIso);
+  const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", timeZone: "Asia/Colombo" });
+  const day = d.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", timeZone: "Asia/Colombo" });
+  return `${time} on ${day}`;
+}
+
+/**
+ * Label beside a product name on Admin's Supplier Prices and Supplier
+ * Orders: the supplier rejected SPAR's adjusted price, or didn't answer by
+ * the approval cutoff — either way SPAR's price doesn't apply.
+ */
+export function PriceAnswerLabel({
+  status,
+  suppliers,
+  className = "",
+}: {
+  status: "REJECTED" | "EXPIRED";
+  // Whose price it is, for the tooltip.
+  suppliers?: string[];
+  className?: string;
+}) {
+  const who = suppliers && suppliers.length > 0 ? suppliers.join(", ") : "The supplier";
+  const meta =
+    status === "REJECTED"
+      ? {
+          label: "Rejected",
+          cls: "bg-tomato-500/15 text-tomato-600",
+          title: `${who} rejected SPAR's adjusted price — their new price (or their own quote) applies.`,
+        }
+      : {
+          label: "Not approved",
+          cls: "bg-mango-500/20 text-[#8A5A0D]",
+          title: `${who} didn't approve or reject SPAR's adjusted price by the cutoff — their own quote applies.`,
+        };
+  return (
+    <span
+      title={meta.title}
+      className={`inline-block align-middle text-[10px] uppercase tracking-wide rounded-full px-2 py-0.5 font-semibold whitespace-nowrap ${meta.cls} ${className}`}
+    >
+      {meta.label}
+      {suppliers && suppliers.length > 1 ? ` · ${suppliers.length}` : ""}
+    </span>
+  );
 }
 
 export function rs(n: number): string {

@@ -106,7 +106,7 @@ export default function PriceApprovals({ onChanged }: { onChanged?: () => void }
                   {s.item_count} adjusted price{s.item_count === 1 ? "" : "s"} for delivery on {formatLongDate(s.delivery_date)}
                 </p>
                 <p className="text-xs text-crate-800/50 mt-1">
-                  Sent {formatDateTime(s.sent_at)} · respond by {formatSignDeadline(s.delivery_date)}, or your own prices apply
+                  Sent {formatDateTime(s.sent_at)} · respond by {formatSignDeadline(s.expires_at)}, or your own prices apply
                 </p>
               </div>
               <span className="text-sm font-semibold text-crate-700">Review &amp; respond →</span>
@@ -200,7 +200,7 @@ function StatusNote({ sheet }: { sheet: PriceSheet }) {
       : sheet.status === "REJECTED"
       ? `You rejected these prices${sheet.responded_at ? ` on ${formatDateTime(sheet.responded_at)}` : ""}. The new prices you gave apply (or your own submitted prices). SPAR will review and may send a new sheet.`
       : sheet.status === "EXPIRED"
-      ? "This sheet expired without a response, so your own submitted prices applied."
+      ? `You didn't approve or reject this sheet by ${formatSignDeadline(sheet.expires_at)}, so your own submitted prices apply.`
       : sheet.status === "VOIDED" || sheet.status === "WITHDRAWN"
       ? `This sheet was cancelled by SPAR${sheet.closed_reason ? ` — ${sheet.closed_reason}` : "."} Nothing on it applies.`
       : null;
@@ -320,7 +320,8 @@ function ResponseForm({ sheet, onDone }: { sheet: PriceSheet; onDone: (s: PriceS
 
         <p className="text-sm text-crate-800/70 bg-sage-50 rounded-xl px-4 py-3">
           Approve or reject each price. If you reject one, you can enter your own final price for it. Please respond
-          by {formatSignDeadline(sheet.delivery_date)}, or your own submitted prices apply.
+          by {formatSignDeadline(sheet.expires_at)}. After that you can't change your answer, and if you haven't
+          answered, your own submitted prices apply.
           {sheet.items.some((i) => i.final_offer) && (
             <>
               {" "}

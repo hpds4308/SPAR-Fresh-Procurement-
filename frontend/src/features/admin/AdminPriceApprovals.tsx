@@ -32,7 +32,7 @@ const STATUS_FILTERS: { value: SheetStatus | ""; label: string }[] = [
   { value: "APPROVED", label: "Approved" },
   { value: "PARTIAL", label: "Partly approved" },
   { value: "REJECTED", label: "Rejected" },
-  { value: "EXPIRED", label: "Expired" },
+  { value: "EXPIRED", label: "Not approved" },
   { value: "VOIDED", label: "Cancelled" },
   { value: "WITHDRAWN", label: "Withdrawn" },
 ];
@@ -253,13 +253,14 @@ function AdminSheetDetail({ id, onBack, onChanged }: { id: number; onBack: () =>
           )}
           {sheet.status === "PENDING" && (
             <p className="text-sm text-crate-800/70 bg-sage-50 rounded-xl px-4 py-3">
-              Waiting for the supplier. If they don't respond by {formatSignDeadline(sheet.delivery_date)}, their own
+              Waiting for the supplier. If they don't respond by {formatSignDeadline(sheet.expires_at)}, their own
               quoted prices apply.
             </p>
           )}
           {sheet.status === "EXPIRED" && (
             <p className="text-sm text-crate-800/70 bg-sage-50 rounded-xl px-4 py-3">
-              The supplier didn't respond before delivery, so their own quoted prices applied.
+              The supplier didn't approve or reject by {formatSignDeadline(sheet.expires_at)}, so their own quoted
+              prices apply.
             </p>
           )}
           {(sheet.status === "VOIDED" || sheet.status === "WITHDRAWN") && sheet.closed_reason && (

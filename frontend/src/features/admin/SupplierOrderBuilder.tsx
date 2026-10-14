@@ -16,6 +16,7 @@ import {
 import { PurchaseOrder, issuePurchaseOrder } from "../../api/purchaseOrders";
 import { SkeletonTable } from "../shared/ui/Skeleton";
 import { ProductPromotion } from "../shared/ui/PromotionBadge";
+import { PriceAnswerLabel } from "../shared/PriceSheetParts";
 
 // One cell in the grid = one branch+product combination.
 function cellKey(productId: number, branchId: number): string {
@@ -631,6 +632,13 @@ export default function SupplierOrderBuilder({
                         {p.description}
                         <span className="text-crate-800/35 text-xs ml-1.5">{p.product_code}</span>
                         <ProductPromotion productId={productId} className="ml-1.5" />
+                        {(supplierPrices[productId]?.approval_status === "EXPIRED" ||
+                          supplierPrices[productId]?.approval_status === "REJECTED") && (
+                          <PriceAnswerLabel
+                            status={supplierPrices[productId].approval_status as "EXPIRED" | "REJECTED"}
+                            className="ml-1.5"
+                          />
+                        )}
                       </td>
                       <td className="px-2 py-2 text-center border-l border-sage-100">
                         <button

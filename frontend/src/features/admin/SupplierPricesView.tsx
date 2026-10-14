@@ -13,7 +13,7 @@ import { compareProductDisplayOrder } from "../../api/orders";
 import { Supplier, fetchSuppliers } from "../../api/suppliers";
 import { SkeletonTable } from "../shared/ui/Skeleton";
 import { IconTag } from "../shared/Icons";
-import { RowApprovalBadge } from "../shared/PriceSheetParts";
+import { PriceAnswerLabel, RowApprovalBadge } from "../shared/PriceSheetParts";
 import { ConfirmDialog } from "../shared/ui/Modal";
 import { ProductPromotion } from "../shared/ui/PromotionBadge";
 
@@ -549,6 +549,14 @@ export default function SupplierPricesView() {
                     {p.description}
                     <span className="text-crate-800/35 text-xs ml-1.5">{p.code}</span>
                     <ProductPromotion productId={p.product_id} className="ml-1.5" />
+                    {(["EXPIRED", "REJECTED"] as const).map((status) => {
+                      const who = [...p.cells.values()]
+                        .filter((c) => c.approval_status === status)
+                        .map((c) => c.supplier_name);
+                      return who.length > 0 ? (
+                        <PriceAnswerLabel key={status} status={status} suppliers={who} className="ml-1.5" />
+                      ) : null;
+                    })}
                   </td>
                   <td
                     style={{ left: stickyOffsets.lowest }}

@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     # Business defaults (also stored in system_settings table, these are fallback defaults)
     BRANCH_ORDER_DEADLINE: str = "14:00"
     SUPPLIER_PRICE_DEADLINE: str = "12:00"
+    # Suppliers must approve/reject SPAR's adjusted prices by this time on
+    # the price submission day (two days before delivery).
+    SUPPLIER_APPROVAL_DEADLINE: str = "14:00"
     # Background job that, once the branch order cutoff passes, submits
     # last week's same-weekday order for any branch that submitted nothing
     # (see auto_order_service). Off in the test suite so a TestClient

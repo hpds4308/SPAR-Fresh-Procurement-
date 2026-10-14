@@ -5,7 +5,7 @@ prices — price_approval_service.py.
 import base64
 import struct
 import zlib
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 
 import pytest
 
@@ -244,17 +244,66 @@ def test_withdraw_returns_items_to_draft(db_session, ctx):
         svc.withdraw(db_session, ctx["admin"], rev.id)
 
 
-def test_pending_sheet_expires_on_delivery_date(db_session, ctx):
+def test_pending_sheet_expires_at_2pm_on_submission_day(db_session, ctx):
     _adjust_all(db_session, ctx)
     rev = _send(db_session, ctx)
-    assert svc.effective_status(rev, svc.expires_at(rev.delivery_date) - timedelta(minutes=1)) == svc.PENDING
-    assert svc.effective_status(rev, svc.expires_at(rev.delivery_date)) == svc.EXPIRED
+    cutoff = svc.approval_cutoff(db_session)
+    assert cutoff == time(14, 0)  # default
+    closes = svc.expires_at(rev.delivery_date, cutoff)
+    # Two days before delivery (the day prices are submitted), at 2 PM.
+    assert closes == datetime.combine(rev.delivery_date - timedelta(days=2), time(14, 0), tzinfo=BUSINESS_TZ)
+    assert svc.effective_status(rev, cutoff, closes - timedelta(minutes=1)) == svc.PENDING
+    assert svc.effective_status(rev, cutoff, closes) == svc.EXPIRED
 
 
-def test_cannot_send_for_delivery_that_has_started(db_session, ctx):
-    today = datetime.now(BUSINESS_TZ).date()
+def test_cutoff_follows_admin_setting(db_session, ctx):
+    from app.services import settings_service
+
+    settings_service.set_setting(db_session, ctx["admin"], settings_service.SUPPLIER_APPROVAL_DEADLINE, "15:30")
+    assert svc.approval_cutoff(db_session) == time(15, 30)
+    assert svc.format_cutoff(time(15, 30)) == "3:30 PM"
+
+
+def test_last_closed_delivery_date(db_session):
+    day = datetime(2026, 10, 14, tzinfo=BUSINESS_TZ)
+    before = day.replace(hour=13, minute=59)
+    after = day.replace(hour=14, minute=0)
+    # Before 2 PM only tomorrow's delivery is closed; from 2 PM the day after's too.
+    assert svc._last_closed_delivery_date(time(14, 0), before) == date(2026, 10, 15)
+    assert svc._last_closed_delivery_date(time(14, 0), after) == date(2026, 10, 16)
+
+
+def test_cannot_send_after_the_cutoff(db_session, ctx):
+    tomorrow = datetime.now(BUSINESS_TZ).date() + timedelta(days=1)
     with pytest.raises(ValidationFailedError):
-        svc.send_for_approval(db_session, ctx["admin"], ctx["supplier"].id, today)
+        svc.send_for_approval(db_session, ctx["admin"], ctx["supplier"].id, tomorrow)
+
+
+def test_supplier_cannot_answer_after_the_cutoff(db_session, ctx, monkeypatch):
+    _adjust_all(db_session, ctx)
+    rev = _send(db_session, ctx)
+    closes = svc.expires_at(rev.delivery_date, svc.approval_cutoff(db_session))
+    monkeypatch.setattr(svc, "_now", lambda: closes + timedelta(minutes=1))
+    with pytest.raises(ValidationFailedError):
+        svc.reject(db_session, ctx["supplier_user"], rev.id, snapshot_hash=rev.snapshot_hash, reason="Too low")
+    assert _status(db_session, ctx["rows"][0]) == svc.EXPIRED
+    assert svc.supplier_pending_count(db_session, ctx["supplier_user"]) == 0
+
+
+def test_supplier_orders_use_own_price_when_not_answered(db_session, ctx, monkeypatch):
+    from app.services import supplier_order_service
+
+    _adjust_all(db_session, ctx)  # 100 -> 90, 110 -> 95
+    rev = _send(db_session, ctx)
+    product_ids = {r.product_id for r in ctx["rows"]}
+    resolved = supplier_order_service._resolve_prices(db_session, ctx["supplier"].id, ctx["delivery"], product_ids)
+    assert resolved[ctx["rows"][0].product_id].approval_status == svc.PENDING
+
+    closes = svc.expires_at(rev.delivery_date, svc.approval_cutoff(db_session))
+    monkeypatch.setattr(svc, "_now", lambda: closes + timedelta(minutes=1))
+    resolved = supplier_order_service._resolve_prices(db_session, ctx["supplier"].id, ctx["delivery"], product_ids)
+    item = resolved[ctx["rows"][0].product_id]
+    assert (item.price, item.approval_status) == (100.0, svc.EXPIRED)
 
 
 def test_supplier_resubmission_voids_pending_sheet(db_session, ctx):

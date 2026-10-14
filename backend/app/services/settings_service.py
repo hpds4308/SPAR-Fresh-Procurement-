@@ -20,6 +20,9 @@ from app.models.user import User
 
 BRANCH_ORDER_DEADLINE = "branch_order_deadline"
 SUPPLIER_PRICE_DEADLINE = "supplier_price_deadline"
+# Last time on the price submission day a supplier can approve or reject
+# SPAR's adjusted prices (see price_approval_service.expires_at).
+SUPPLIER_APPROVAL_DEADLINE = "supplier_approval_deadline"
 # Weekdays suppliers may submit prices on, stored as comma-separated
 # date.weekday() numbers (Monday=0 .. Sunday=6), e.g. "0,2,4".
 SUPPLIER_PRICE_DAYS = "supplier_price_days"
@@ -81,6 +84,7 @@ def _validate_email(value: str) -> None:
 _KEYS = {
     BRANCH_ORDER_DEADLINE: (_validate_time, lambda: env_settings.BRANCH_ORDER_DEADLINE),
     SUPPLIER_PRICE_DEADLINE: (_validate_time, lambda: env_settings.SUPPLIER_PRICE_DEADLINE),
+    SUPPLIER_APPROVAL_DEADLINE: (_validate_time, lambda: env_settings.SUPPLIER_APPROVAL_DEADLINE),
     # Monday, Wednesday and Friday — the rule as originally agreed with the client.
     SUPPLIER_PRICE_DAYS: (_validate_weekdays, lambda: "0,2,4"),
     SUPPORT_PHONE: (_validate_phone, lambda: "076 562 2317"),

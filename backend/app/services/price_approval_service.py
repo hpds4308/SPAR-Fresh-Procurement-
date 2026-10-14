@@ -15,7 +15,8 @@ Flow (as agreed with the client):
 4. An approved item's adjusted price is the agreed price (Master Data uses
    it). A rejected item uses the supplier's final price if they gave one,
    else their own submitted price — as does every item when the supplier
-   doesn't respond before the delivery date arrives. Admin can adjust a
+   doesn't respond by the approval cutoff: 2:00 PM (Admin > Settings) on
+   the price submission day, two days before delivery. Admin can adjust a
    rejected item again and send it on a new sheet.
 5. That re-sent price is SPAR's final offer: the supplier can only approve
    or reject it, with no new price of their own. Rejecting it keeps the
@@ -43,6 +44,7 @@ from app.models.pricing import SupplierPrice
 from app.models.product import Product
 from app.models.supplier import Supplier
 from app.models.user import User
+from app.services import settings_service
 
 # Same business timezone as pricing_service — not imported from there
 # because pricing_service imports this module.
@@ -73,13 +75,39 @@ def _now() -> datetime:
     return datetime.now(BUSINESS_TZ)
 
 
-def expires_at(delivery_date: date) -> datetime:
-    """A sheet can be signed up to the start of its delivery date (Colombo time)."""
-    return datetime.combine(delivery_date, time(0, 0), tzinfo=BUSINESS_TZ)
+# Prices are submitted two days before delivery (pricing_service.get_price_window).
+SUBMISSION_DAYS_BEFORE_DELIVERY = 2
 
 
-def effective_status(rev: SupplierPriceRevision, now: datetime | None = None) -> str:
-    if rev.status == PENDING and (now or _now()) >= expires_at(rev.delivery_date):
+def approval_cutoff(db: Session) -> time:
+    """Admin > Settings "Supplier approval cutoff", e.g. 14:00."""
+    hh, mm = settings_service.get_setting(db, settings_service.SUPPLIER_APPROVAL_DEADLINE).split(":")
+    return time(int(hh), int(mm))
+
+
+def expires_at(delivery_date: date, cutoff: time) -> datetime:
+    """
+    A sheet can be answered until the approval cutoff on the price
+    submission day (two days before delivery), Colombo time. After that
+    the supplier can't change anything and their own prices apply.
+    """
+    submission_day = delivery_date - timedelta(days=SUBMISSION_DAYS_BEFORE_DELIVERY)
+    return datetime.combine(submission_day, cutoff, tzinfo=BUSINESS_TZ)
+
+
+def _last_closed_delivery_date(cutoff: time, now: datetime | None = None) -> date:
+    """The latest delivery date whose approval cutoff has already passed."""
+    now = now or _now()
+    return now.date() + timedelta(days=SUBMISSION_DAYS_BEFORE_DELIVERY - (0 if now.time() >= cutoff else 1))
+
+
+def format_cutoff(cutoff: time) -> str:
+    """time(14, 0) -> "2:00 PM"."""
+    return f"{(cutoff.hour % 12) or 12}:{cutoff.minute:02d} {'AM' if cutoff.hour < 12 else 'PM'}"
+
+
+def effective_status(rev: SupplierPriceRevision, cutoff: time, now: datetime | None = None) -> str:
+    if rev.status == PENDING and (now or _now()) >= expires_at(rev.delivery_date, cutoff):
         return EXPIRED
     return rev.status
 
@@ -240,6 +268,7 @@ def row_statuses(
         else {}
     )
     now = _now()
+    cutoff = approval_cutoff(db)
     out: dict[int, tuple[str | None, SupplierPriceRevision | None, float | None]] = {}
     for r in rows:
         if r.adjusted_price is None:
@@ -253,7 +282,7 @@ def row_statuses(
         if decision:
             out[r.id] = (decision["decision"], rev, decision.get("counter_price"))
         else:
-            out[r.id] = (effective_status(rev, now), rev, None)
+            out[r.id] = (effective_status(rev, cutoff, now), rev, None)
     return out
 
 
@@ -288,20 +317,6 @@ def agreed_prices(db: Session, rows: list[SupplierPrice]) -> dict[int, float]:
     return out
 
 
-def rejected_item_prices(db: Session, rows: list[SupplierPrice]) -> dict[int, float]:
-    """
-    For rows whose adjusted price the supplier rejected: the price that
-    applies instead — the final price they gave, else their submitted
-    price. Rows they haven't rejected aren't in the result.
-    """
-    out: dict[int, float] = {}
-    for row_id, (status, _, counter_price) in row_statuses(db, rows).items():
-        if status == REJECTED:
-            out[row_id] = counter_price
-    by_id = {r.id: r for r in rows}
-    return {rid: (p if p is not None else float(by_id[rid].price)) for rid, p in out.items()}
-
-
 def _approved_row_ids(db: Session, rows: list[SupplierPrice]) -> set[int]:
     return {row_id for row_id, (status, _, _) in row_statuses(db, rows).items() if status == APPROVED}
 
@@ -313,9 +328,11 @@ def send_for_approval(db: Session, admin: User, supplier_id: int, delivery_date:
     supplier = db.get(Supplier, supplier_id)
     if not supplier:
         raise NotFoundError("That supplier was not found.")
-    if _now() >= expires_at(delivery_date):
+    cutoff = approval_cutoff(db)
+    if _now() >= expires_at(delivery_date, cutoff):
         raise ValidationFailedError(
-            f"Delivery on {delivery_date.isoformat()} has already started — prices for it can't be sent for approval."
+            f"The {format_cutoff(cutoff)} approval cutoff for delivery on {delivery_date.isoformat()} has passed — "
+            "prices for it can't be sent for approval any more."
         )
 
     rows = (
@@ -419,12 +436,14 @@ def _get_own(db: Session, supplier_user: User, revision_id: int) -> SupplierPric
     return rev
 
 
-def _require_open(rev: SupplierPriceRevision, snapshot_hash: str) -> None:
-    status = effective_status(rev)
+def _require_open(db: Session, rev: SupplierPriceRevision, snapshot_hash: str) -> None:
+    cutoff = approval_cutoff(db)
+    status = effective_status(rev, cutoff)
     if status == EXPIRED:
+        closed = expires_at(rev.delivery_date, cutoff)
         raise ValidationFailedError(
-            f"This price sheet expired when delivery on {rev.delivery_date.isoformat()} started — "
-            "your own submitted prices apply."
+            f"This price sheet closed at {format_cutoff(cutoff)} on {closed.strftime('%A %d %B')} — "
+            "it can't be approved or rejected any more, and your own submitted prices apply."
         )
     if status != PENDING:
         raise ValidationFailedError("This price sheet is no longer waiting for your response. Reload to see the latest.")
@@ -543,7 +562,7 @@ def respond(
     needs neither.
     """
     rev = _get_own(db, supplier_user, revision_id)
-    _require_open(rev, snapshot_hash)
+    _require_open(db, rev, snapshot_hash)
     responses = _check_decisions(rev, decisions)
     approved = [r for r in responses if r["decision"] == APPROVED]
     rejected = [r for r in responses if r["decision"] == REJECTED]
@@ -662,12 +681,11 @@ def list_revisions(
         query = query.filter(SupplierPriceRevision.supplier_id == supplier_id)
     if delivery_date:
         query = query.filter(SupplierPriceRevision.delivery_date == delivery_date)
+    last_closed = _last_closed_delivery_date(approval_cutoff(db))
     if status == EXPIRED:
-        query = query.filter(
-            SupplierPriceRevision.status == PENDING, SupplierPriceRevision.delivery_date <= _now().date()
-        )
+        query = query.filter(SupplierPriceRevision.status == PENDING, SupplierPriceRevision.delivery_date <= last_closed)
     elif status == PENDING:
-        query = query.filter(SupplierPriceRevision.status == PENDING, SupplierPriceRevision.delivery_date > _now().date())
+        query = query.filter(SupplierPriceRevision.status == PENDING, SupplierPriceRevision.delivery_date > last_closed)
     elif status:
         query = query.filter(SupplierPriceRevision.status == status)
     return query.order_by(SupplierPriceRevision.sent_at.desc(), SupplierPriceRevision.id.desc()).limit(limit).all()
@@ -692,15 +710,15 @@ def supplier_pending_count(db: Session, supplier_user: User) -> int:
         .filter(
             SupplierPriceRevision.supplier_id == supplier_user.supplier_id,
             SupplierPriceRevision.status == PENDING,
-            SupplierPriceRevision.delivery_date > _now().date(),
+            SupplierPriceRevision.delivery_date > _last_closed_delivery_date(approval_cutoff(db)),
         )
         .count()
     )
 
 
 def admin_attention_count(db: Session) -> int:
-    """Sheets with rejected items, for upcoming deliveries, that Admin hasn't followed up with a newer sheet yet."""
-    today = _now().date()
+    """Sheets with rejected items, still open to a new sheet, that Admin hasn't followed up yet."""
+    today = _last_closed_delivery_date(approval_cutoff(db))
     revs = (
         db.query(SupplierPriceRevision.id, SupplierPriceRevision.supplier_id, SupplierPriceRevision.delivery_date, SupplierPriceRevision.status)
         .filter(SupplierPriceRevision.delivery_date > today)
@@ -720,6 +738,7 @@ def to_out(db: Session, revs: list[SupplierPriceRevision], detail: bool = False)
     suppliers = {s.id: s.supplier_name for s in db.query(Supplier).filter(Supplier.id.in_(supplier_ids)).all()} if supplier_ids else {}
     users = {u.id: u.username for u in db.query(User).filter(User.id.in_(user_ids)).all()} if user_ids else {}
     now = _now()
+    cutoff = approval_cutoff(db)
     out = []
     for r in revs:
         responses = item_responses(r)
@@ -728,7 +747,7 @@ def to_out(db: Session, revs: list[SupplierPriceRevision], detail: bool = False)
             "supplier_id": r.supplier_id,
             "supplier_name": suppliers.get(r.supplier_id, "—"),
             "delivery_date": r.delivery_date,
-            "status": effective_status(r, now),
+            "status": effective_status(r, cutoff, now),
             "item_count": len(r.items),
             "sent_at": r.sent_at,
             "sent_by_name": users.get(r.sent_by),
@@ -737,7 +756,7 @@ def to_out(db: Session, revs: list[SupplierPriceRevision], detail: bool = False)
             "signer_name": r.signer_name,
             "rejection_reason": r.rejection_reason,
             "closed_reason": r.closed_reason,
-            "expires_at": expires_at(r.delivery_date),
+            "expires_at": expires_at(r.delivery_date, cutoff),
             "approved_count": sum(1 for x in responses.values() if x["decision"] == APPROVED),
             "rejected_count": sum(1 for x in responses.values() if x["decision"] == REJECTED),
         }

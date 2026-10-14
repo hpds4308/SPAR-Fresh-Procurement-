@@ -151,33 +151,45 @@ def get_supplier_price_preview(db: Session, supplier_id: int, delivery_date: dat
         .filter(SupplierPrice.supplier_id == supplier_id, SupplierPrice.delivery_date == list_date)
         .all()
     )
-    rejected = price_approval_service.rejected_item_prices(db, rows)
     return {
-        r.product_id: _ResolvedPrice(_price_from_row(r, rejected), is_estimated=list_date != delivery_date, as_of=list_date)
-        for r in rows
+        r.product_id: _ResolvedPrice(price, is_estimated=list_date != delivery_date, as_of=list_date, approval_status=status)
+        for r, (price, status) in _prices_from_rows(db, rows)
     }
 
 
 class _ResolvedPrice:
-    __slots__ = ("price", "is_estimated", "as_of")
+    __slots__ = ("price", "is_estimated", "as_of", "approval_status")
 
-    def __init__(self, price: float, is_estimated: bool, as_of: date):
+    def __init__(self, price: float, is_estimated: bool, as_of: date, approval_status: str | None = None):
         self.price = price
         self.is_estimated = is_estimated
         self.as_of = as_of
+        # Whether the supplier agreed to SPAR's adjusted price for this quote
+        # (price_approval_service.row_statuses) — None when it wasn't adjusted.
+        self.approval_status = approval_status
 
 
-def _price_from_row(r: SupplierPrice, rejected: dict[int, float]) -> float:
+def _prices_from_rows(db: Session, rows: list[SupplierPrice]) -> list[tuple[SupplierPrice, tuple[float, str | None]]]:
     """
-    `rejected` comes from price_approval_service.rejected_item_prices: an
-    adjusted price the supplier rejected gives way to the final price they
-    gave instead (or their own quote).
+    (row, (price, approval status)) for each quote. Admin's adjusted price
+    applies once it's sent — unless the supplier rejected it (then the
+    final price they gave instead, or their own quote) or didn't answer by
+    the approval cutoff (then their own quote).
     """
-    if r.id in rejected:
-        return rejected[r.id]
-    if r.adjusted_price is not None and r.sent_to_supplier_at is not None:
-        return float(r.adjusted_price)
-    return float(r.price)
+    statuses = price_approval_service.row_statuses(db, rows)
+    out = []
+    for r in rows:
+        status, _, counter_price = statuses[r.id]
+        if status == price_approval_service.REJECTED:
+            price = counter_price if counter_price is not None else float(r.price)
+        elif status == price_approval_service.EXPIRED:
+            price = float(r.price)
+        elif r.adjusted_price is not None and r.sent_to_supplier_at is not None:
+            price = float(r.adjusted_price)
+        else:
+            price = float(r.price)
+        out.append((r, (price, status)))
+    return out
 
 
 def _resolve_prices(
@@ -212,9 +224,8 @@ def _resolve_prices(
         .all()
     )
     out: dict[int, _ResolvedPrice] = {}
-    rejected = price_approval_service.rejected_item_prices(db, exact_rows)
-    for r in exact_rows:
-        out[r.product_id] = _ResolvedPrice(_price_from_row(r, rejected), is_estimated=False, as_of=r.delivery_date)
+    for r, (price, status) in _prices_from_rows(db, exact_rows):
+        out[r.product_id] = _ResolvedPrice(price, is_estimated=False, as_of=r.delivery_date, approval_status=status)
 
     missing = product_ids - set(out.keys())
     if missing:
@@ -231,9 +242,8 @@ def _resolve_prices(
                 continue
             seen.add(r.product_id)
             latest.append(r)
-        rejected = price_approval_service.rejected_item_prices(db, latest)
-        for r in latest:
-            out[r.product_id] = _ResolvedPrice(_price_from_row(r, rejected), is_estimated=True, as_of=r.delivery_date)
+        for r, (price, status) in _prices_from_rows(db, latest):
+            out[r.product_id] = _ResolvedPrice(price, is_estimated=True, as_of=r.delivery_date, approval_status=status)
 
     return out
 
@@ -273,6 +283,7 @@ def _to_item_out(
         effective_price=effective_price,
         price_is_estimated=price_is_estimated,
         price_as_of=price_as_of,
+        price_approval_status=resolved.approval_status if resolved is not None else None,
         notes=row.notes,
         line_total=round(float(row.quantity) * effective_price, 2) if effective_price is not None else None,
     )

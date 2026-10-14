@@ -62,6 +62,8 @@ class SupplierOrderItemOut(BaseModel):
     # the UI must show this as an estimate, not a confirmed price.
     price_is_estimated: bool = False
     price_as_of: date | None = None
+    # Same as SupplierPricePreviewOut.approval_status, for this line's quote.
+    price_approval_status: str | None = None
     notes: str | None
     line_total: float | None
 
@@ -109,3 +111,7 @@ class SupplierPricePreviewOut(BaseModel):
     price: float
     is_estimated: bool
     as_of: date
+    # The supplier's answer to SPAR's adjusted price for this quote:
+    # PENDING / APPROVED / REJECTED / EXPIRED (not answered by the approval
+    # cutoff) / DRAFT, or None when the price wasn't adjusted.
+    approval_status: str | None = None

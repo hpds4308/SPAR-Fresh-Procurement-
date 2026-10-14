@@ -212,7 +212,9 @@ def admin_supplier_price_preview(
     column on the Order Builder while Admin is still deciding quantities, before saving any lines."""
     resolved = supplier_order_service.get_supplier_price_preview(db, supplier_id, delivery_date)
     return [
-        SupplierPricePreviewOut(product_id=pid, price=r.price, is_estimated=r.is_estimated, as_of=r.as_of)
+        SupplierPricePreviewOut(
+            product_id=pid, price=r.price, is_estimated=r.is_estimated, as_of=r.as_of, approval_status=r.approval_status
+        )
         for pid, r in resolved.items()
     ]
 

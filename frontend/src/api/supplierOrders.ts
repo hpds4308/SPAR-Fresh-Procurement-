@@ -14,6 +14,8 @@ export type SupplierOrderItem = {
   effective_price: number | null;
   price_is_estimated: boolean;
   price_as_of: string | null;
+  // The supplier's answer to SPAR's adjusted price for this line's quote (see SupplierPricePreview).
+  price_approval_status: SupplierPricePreview["approval_status"];
   notes: string | null;
   line_total: number | null;
 };
@@ -157,6 +159,9 @@ export type SupplierPricePreview = {
   price: number;
   is_estimated: boolean;
   as_of: string;
+  // The supplier's answer to SPAR's adjusted price for this quote; EXPIRED =
+  // not answered by the approval cutoff. Null when the price wasn't adjusted.
+  approval_status: "DRAFT" | "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED" | null;
 };
 
 // This supplier's resolved price per product — same price-resolution
