@@ -15,11 +15,17 @@ export default function ChatThread({
   currentRole,
   onSend,
   emptyHint,
+  readOnly = false,
+  senderLabel,
 }: {
   messages: Message[];
   currentRole: "ADMIN" | "SUPPLIER" | "BRANCH";
-  onSend: (body: string) => Promise<void>;
+  onSend?: (body: string) => Promise<void>;
   emptyHint: string;
+  // No message box — for Admin looking in on a supplier <-> branch chat.
+  readOnly?: boolean;
+  // Name shown under a message; defaults to "You" / the sender's username.
+  senderLabel?: (m: Message, mine: boolean) => string;
 }) {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
@@ -32,7 +38,7 @@ export default function ChatThread({
 
   async function handleSend() {
     const body = draft.trim();
-    if (!body || sending) return;
+    if (!body || sending || !onSend) return;
     setSending(true);
     setError(null);
     try {
@@ -66,7 +72,7 @@ export default function ChatThread({
                     {m.body}
                   </div>
                   <span className="text-[10px] text-crate-800/35 px-1">
-                    {mine ? "You" : m.sender_username} · {formatTime(m.created_at)}
+                    {senderLabel ? senderLabel(m, mine) : mine ? "You" : m.sender_username} · {formatTime(m.created_at)}
                   </span>
                 </div>
               </div>
@@ -75,6 +81,7 @@ export default function ChatThread({
         )}
       </div>
 
+      {!readOnly && (
       <div className="border-t border-sage-100 p-3">
         {error && <p className="text-tomato-600 text-xs mb-1.5 px-1">{error}</p>}
         <div className="flex items-end gap-2">
@@ -100,6 +107,7 @@ export default function ChatThread({
           </button>
         </div>
       </div>
+      )}
     </div>
   );
 }

@@ -80,3 +80,51 @@ export function sendMyMessage(body: string): Promise<Message> {
 export function fetchMyUnreadCount(): Promise<{ count: number }> {
   return apiFetch("/messages/mine/unread-count");
 }
+
+// ---- Supplier <-> branch chats ----
+
+// A supplier's chat with one branch, or a branch's chat with one supplier.
+// `id` is the branch id for a supplier, the supplier id for a branch.
+export type ContactThread = {
+  id: number;
+  code: string;
+  name: string;
+  last_message_body: string | null;
+  last_message_at: string | null;
+  unread_count: number;
+};
+
+export function fetchMyContacts(): Promise<ContactThread[]> {
+  return apiFetch("/messages/mine/contacts");
+}
+
+export function fetchChatWith(otherId: number): Promise<Message[]> {
+  return apiFetch(`/messages/mine/with/${otherId}`);
+}
+
+export function sendChatMessage(otherId: number, body: string): Promise<Message> {
+  return apiFetch(`/messages/mine/with/${otherId}`, {
+    method: "POST",
+    body: JSON.stringify({ body }),
+  });
+}
+
+// Admin's read-only view of supplier <-> branch chats.
+export type PairConversation = {
+  supplier_id: number;
+  supplier_name: string;
+  branch_id: number;
+  branch_name: string;
+  message_count: number;
+  last_message_body: string;
+  last_message_at: string;
+  last_sender_role: "SUPPLIER" | "BRANCH";
+};
+
+export function fetchPairConversations(): Promise<PairConversation[]> {
+  return apiFetch("/messages/admin/supplier-branch");
+}
+
+export function fetchPairConversation(supplierId: number, branchId: number): Promise<Message[]> {
+  return apiFetch(`/messages/admin/supplier-branch/${supplierId}/${branchId}`);
+}

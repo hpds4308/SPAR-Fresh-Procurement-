@@ -8,11 +8,14 @@ from app.core.database import Base
 
 class Message(Base):
     """
-    A single chat message in a thread between Admin and one supplier, OR
-    between Admin and one branch — never both. Exactly one of
-    supplier_id/branch_id is set per message (enforced by a DB check
-    constraint), and every Admin user shares that counterparty's thread,
-    as does every user of that supplier/branch. Not per-order, not
+    A single chat message in one of three kinds of thread:
+      - Admin <-> one supplier: only supplier_id set
+      - Admin <-> one branch:   only branch_id set
+      - one supplier <-> one branch: both set (Admin can read these, but
+        doesn't post in them)
+    At least one of supplier_id/branch_id is always set (DB check
+    constraint). Every Admin user shares a thread, as does every user of
+    that supplier/branch. Not per-order, not
     per-product; just one running conversation per counterparty, which is
     the simplest model that matches "Admin talks to Supplier/Branch"
     rather than needing a separate thread per topic.

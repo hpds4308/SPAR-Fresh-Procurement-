@@ -4,7 +4,15 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.security import get_current_user, require_roles
 from app.models.user import User
-from app.schemas.message import BranchThreadOut, MessageOut, MessageCreate, SupplierThreadOut, UnreadCountOut
+from app.schemas.message import (
+    BranchThreadOut,
+    ContactThreadOut,
+    MessageCreate,
+    MessageOut,
+    PairConversationOut,
+    SupplierThreadOut,
+    UnreadCountOut,
+)
 from app.services import message_service
 
 router = APIRouter(prefix="/messages", dependencies=[Depends(get_current_user)])
@@ -66,6 +74,30 @@ def admin_send_branch_message(
     return message_service.send_as_admin_to_branch(db, admin, branch_id, payload.body)
 
 
+# ---- Admin side: read-only view of supplier <-> branch chats ----
+# (Also declared before the /admin/{supplier_id} catch-all.)
+
+
+@router.get("/admin/supplier-branch", response_model=list[PairConversationOut])
+def admin_list_pair_conversations(
+    admin: User = Depends(require_roles("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """Every supplier<->branch chat with at least one message, most recent first."""
+    return message_service.list_pair_conversations(db)
+
+
+@router.get("/admin/supplier-branch/{supplier_id}/{branch_id}", response_model=list[MessageOut])
+def admin_get_pair_conversation(
+    supplier_id: int,
+    branch_id: int,
+    admin: User = Depends(require_roles("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """Read-only for Admin, and doesn't mark anything read for the supplier or branch."""
+    return message_service.list_pair_for_admin(db, supplier_id, branch_id)
+
+
 @router.get("/admin/{supplier_id}", response_model=list[MessageOut])
 def admin_get_thread(
     supplier_id: int,
@@ -120,3 +152,35 @@ def my_unread_count(
     if current_user.branch_id:
         return UnreadCountOut(count=message_service.branch_unread_count(db, current_user))
     return UnreadCountOut(count=message_service.supplier_unread_count(db, current_user))
+
+
+# ---- Supplier <-> branch chats ----
+
+
+@router.get("/mine/contacts", response_model=list[ContactThreadOut])
+def my_contacts(
+    current_user: User = Depends(require_roles("SUPPLIER", "BRANCH")),
+    db: Session = Depends(get_db),
+):
+    """A supplier's chats with every active branch, or a branch's with every active supplier."""
+    return message_service.list_contacts(db, current_user)
+
+
+@router.get("/mine/with/{other_id}", response_model=list[MessageOut])
+def my_chat_with(
+    other_id: int,
+    current_user: User = Depends(require_roles("SUPPLIER", "BRANCH")),
+    db: Session = Depends(get_db),
+):
+    """other_id is a branch id for a supplier, a supplier id for a branch. Marks their messages read."""
+    return message_service.list_with_peer(db, current_user, other_id)
+
+
+@router.post("/mine/with/{other_id}", response_model=MessageOut)
+def send_my_chat_message(
+    other_id: int,
+    payload: MessageCreate,
+    current_user: User = Depends(require_roles("SUPPLIER", "BRANCH")),
+    db: Session = Depends(get_db),
+):
+    return message_service.send_to_peer(db, current_user, other_id, payload.body)

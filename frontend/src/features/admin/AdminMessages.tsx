@@ -2,7 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError } from "../../api/client";
 import {
   Message,
+  PairConversation,
   fetchAdminThread,
+  fetchPairConversation,
+  fetchPairConversations,
   fetchAdminThreads,
   fetchAdminBranchThread,
   fetchAdminBranchThreads,
@@ -16,7 +19,34 @@ import { IconChat } from "../shared/Icons";
 const THREADS_POLL_MS = 8000;
 const MESSAGES_POLL_MS = 4000;
 
-type PartyType = "SUPPLIER" | "BRANCH";
+// PAIR = Admin's read-only view of suppliers' chats with branches.
+type PartyType = "SUPPLIER" | "BRANCH" | "PAIR";
+
+const PARTY_TABS: { value: PartyType; label: string }[] = [
+  { value: "SUPPLIER", label: "Suppliers" },
+  { value: "BRANCH", label: "Branches" },
+  { value: "PAIR", label: "Supplier ↔ Branch" },
+];
+
+function PartyTabs({ value, onChange }: { value: PartyType; onChange: (v: PartyType) => void }) {
+  return (
+    <div className="px-3 pt-3 pb-2 border-b border-sage-100 shrink-0">
+      <div className="grid grid-cols-3 gap-1 bg-sage-100 rounded-2xl p-0.5">
+        {PARTY_TABS.map((t) => (
+          <button
+            key={t.value}
+            onClick={() => onChange(t.value)}
+            className={`text-[11px] leading-tight font-semibold rounded-2xl px-1 py-1.5 transition-colors duration-150 ${
+              value === t.value ? "bg-white text-crate-950 shadow-sm" : "text-crate-800/50 hover:text-crate-800"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 // Supplier and Branch threads are the same shape apart from the id/code/name
 // field names — normalized here so the list/detail UI below doesn't need to
@@ -53,6 +83,7 @@ export default function AdminMessages() {
   const messagesPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadThreads = useCallback(() => {
+    if (partyType === "PAIR") return Promise.resolve();
     const fetcher = partyType === "SUPPLIER" ? fetchAdminThreads : fetchAdminBranchThreads;
     return fetcher()
       .then((data) => {
@@ -116,7 +147,7 @@ export default function AdminMessages() {
 
   useEffect(() => {
     if (messagesPollRef.current) clearInterval(messagesPollRef.current);
-    if (selectedId === null) {
+    if (selectedId === null || partyType === "PAIR") {
       setMessages([]);
       return;
     }
@@ -126,7 +157,7 @@ export default function AdminMessages() {
     return () => {
       if (messagesPollRef.current) clearInterval(messagesPollRef.current);
     };
-  }, [selectedId, loadMessages]);
+  }, [selectedId, loadMessages, partyType]);
 
   async function handleSend(body: string) {
     if (selectedId === null) return;
@@ -143,24 +174,12 @@ export default function AdminMessages() {
   const selected = threads.find((t) => t.id === selectedId) ?? null;
   const partyLabel = partyType === "SUPPLIER" ? "supplier" : "branch";
 
+  if (partyType === "PAIR") return <PairConversations tabs={<PartyTabs value={partyType} onChange={setPartyType} />} />;
+
   return (
     <div className="bg-white rounded-2xl shadow-[0_10px_30px_-12px_rgba(21,56,38,0.15)] border border-sage-100 overflow-hidden flex" style={{ height: "36rem" }}>
       <div className="w-64 shrink-0 border-r border-sage-100 overflow-y-auto flex flex-col">
-        <div className="px-3 pt-3 pb-2 border-b border-sage-100 shrink-0">
-          <div className="grid grid-cols-2 gap-1 bg-sage-100 rounded-full p-0.5">
-            {(["SUPPLIER", "BRANCH"] as PartyType[]).map((pt) => (
-              <button
-                key={pt}
-                onClick={() => setPartyType(pt)}
-                className={`text-xs font-semibold rounded-full py-1.5 transition-colors duration-150 ${
-                  partyType === pt ? "bg-white text-crate-950 shadow-sm" : "text-crate-800/50 hover:text-crate-800"
-                }`}
-              >
-                {pt === "SUPPLIER" ? "Suppliers" : "Branches"}
-              </button>
-            ))}
-          </div>
-        </div>
+        <PartyTabs value={partyType} onChange={setPartyType} />
         {threadsLoading ? (
           <div className="p-3 space-y-3">
             {Array.from({ length: 6 }).map((_, i) => (
@@ -227,6 +246,143 @@ export default function AdminMessages() {
                   currentRole="ADMIN"
                   onSend={handleSend}
                   emptyHint={`No messages with ${selected.name} yet.`}
+                />
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const pairKey = (c: { supplier_id: number; branch_id: number }) => `${c.supplier_id}-${c.branch_id}`;
+
+/**
+ * Admin looking in on suppliers' direct chats with branches: every chat
+ * with at least one message, newest first. Read-only — Admin doesn't post
+ * here, and reading doesn't mark anything read for the supplier or branch.
+ */
+function PairConversations({ tabs }: { tabs: React.ReactNode }) {
+  const [conversations, setConversations] = useState<PairConversation[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadConversations = useCallback(() => {
+    return fetchPairConversations()
+      .then((data) => {
+        setConversations(data);
+        setSelectedKey((prev) => prev ?? (data.length > 0 ? pairKey(data[0]) : null));
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    setLoading(true);
+    loadConversations().finally(() => setLoading(false));
+    const id = setInterval(loadConversations, THREADS_POLL_MS);
+    return () => clearInterval(id);
+  }, [loadConversations]);
+
+  const selected = conversations.find((c) => pairKey(c) === selectedKey) ?? null;
+  const selectedSupplierId = selected?.supplier_id;
+  const selectedBranchId = selected?.branch_id;
+
+  useEffect(() => {
+    if (selectedSupplierId === undefined || selectedBranchId === undefined) {
+      setMessages([]);
+      return;
+    }
+    const load = () =>
+      fetchPairConversation(selectedSupplierId, selectedBranchId)
+        .then((data) => {
+          setMessages(data);
+          setError(null);
+        })
+        .catch((err) => setError(err instanceof ApiError ? err.message : "Could not load this conversation."));
+    setMessagesLoading(true);
+    load().finally(() => setMessagesLoading(false));
+    const id = setInterval(load, MESSAGES_POLL_MS);
+    return () => clearInterval(id);
+  }, [selectedSupplierId, selectedBranchId]);
+
+  return (
+    <div className="bg-white rounded-2xl shadow-[0_10px_30px_-12px_rgba(21,56,38,0.15)] border border-sage-100 overflow-hidden flex" style={{ height: "36rem" }}>
+      <div className="w-64 shrink-0 border-r border-sage-100 overflow-y-auto flex flex-col">
+        {tabs}
+        {loading ? (
+          <div className="p-3 space-y-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="space-y-1.5 px-1">
+                <Skeleton className="h-3.5 w-2/3" />
+                <Skeleton className="h-3 w-4/5" />
+              </div>
+            ))}
+          </div>
+        ) : conversations.length === 0 ? (
+          <p className="text-sm text-crate-800/40 text-center py-8 px-3">
+            No supplier has messaged a branch yet (or the other way round).
+          </p>
+        ) : (
+          <div className="overflow-y-auto">
+            {conversations.map((c) => {
+              const isActive = pairKey(c) === selectedKey;
+              return (
+                <button
+                  key={pairKey(c)}
+                  onClick={() => setSelectedKey(pairKey(c))}
+                  className={`w-full text-left px-4 py-3 border-b border-sage-50 transition-colors duration-150 ${
+                    isActive ? "bg-sage-100" : "hover:bg-sage-50"
+                  }`}
+                >
+                  <p className={`text-sm truncate ${isActive ? "font-semibold text-crate-950" : "text-crate-800"}`}>
+                    {c.supplier_name} <span className="text-crate-800/40">↔</span> {c.branch_name}
+                  </p>
+                  <p className="text-xs text-crate-800/40 truncate mt-0.5">
+                    {c.last_sender_role === "SUPPLIER" ? c.supplier_name : c.branch_name}: {c.last_message_body}
+                    <span className="ml-1.5 text-crate-800/30">· {relativeTime(c.last_message_at)}</span>
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div className="flex-1 flex flex-col min-h-0">
+        {!selected ? (
+          <div className="flex-1 flex flex-col items-center justify-center gap-3 text-crate-800/35">
+            <IconChat width={28} height={28} />
+            <p className="text-sm">Suppliers' chats with branches show up here.</p>
+          </div>
+        ) : (
+          <>
+            <div className="px-4 py-3 border-b border-sage-100 shrink-0">
+              <p className="font-display font-semibold text-sm text-crate-950">
+                {selected.supplier_name} ↔ {selected.branch_name}
+              </p>
+              <p className="text-[11px] text-crate-800/40">
+                Read only · {selected.message_count} message{selected.message_count === 1 ? "" : "s"}. Supplier on the
+                right, branch on the left.
+              </p>
+            </div>
+            {messagesLoading ? (
+              <SkeletonChat />
+            ) : error ? (
+              <p className="text-tomato-600 text-sm p-4">{error}</p>
+            ) : (
+              <div className="flex-1 min-h-0">
+                <ChatThread
+                  messages={messages}
+                  currentRole="SUPPLIER"
+                  readOnly
+                  emptyHint="No messages yet."
+                  senderLabel={(m) =>
+                    `${m.sender_role === "SUPPLIER" ? selected.supplier_name : selected.branch_name} (${m.sender_username})`
+                  }
                 />
               </div>
             )}
