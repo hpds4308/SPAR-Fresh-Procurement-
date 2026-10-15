@@ -51,12 +51,14 @@ def _latest_prices(
     product_id) pair, that supplier's most recent quote, regardless of
     delivery date:
 
-    - `adjusted_or_submitted`: Adjusted Price if the supplier has
-      approved (e-signed) it; for an item they rejected, the final price
-      they gave instead, if any; otherwise the submitted price. Shown in
-      the per-supplier "Adjusted CP" columns. A draft, unanswered or
-      expired adjustment isn't an agreed price, so the supplier's own
-      price applies until they answer (see price_approval_service.py).
+    - `adjusted_or_submitted`: SPAR's price once Admin has sent it to the
+      supplier (the latest one sent, i.e. SPAR's final price after a
+      second round), whether the supplier approved it, rejected it or
+      never answered; otherwise the submitted price. Shown in the
+      per-supplier "Adjusted CP" columns. A draft adjustment that was
+      never sent doesn't count. Only this sheet works this way — Supplier
+      Orders, POs and the supplier's Final Prices use the agreed price
+      (see price_approval_service.row_statuses).
     - `submitted_only`: (price, delivery_date) — always the supplier's own
       submitted price, never an adjustment, plus the date it was
       submitted for. Used for Cost Price specifically — Cost Price should
@@ -70,14 +72,14 @@ def _latest_prices(
         .order_by(SupplierPrice.supplier_id, SupplierPrice.product_id, SupplierPrice.delivery_date.desc(), SupplierPrice.id.desc())
         .all()
     )
-    agreed = price_approval_service.agreed_prices(db, rows)
+    latest: dict[tuple[int, int], SupplierPrice] = {}
+    for r in rows:
+        latest.setdefault((r.supplier_id, r.product_id), r)
+    spar_prices = price_approval_service.sent_prices(db, list(latest.values()))
     adjusted_or_submitted: dict[tuple[int, int], float] = {}
     submitted_only: dict[tuple[int, int], tuple[float, date]] = {}
-    for r in rows:
-        key = (r.supplier_id, r.product_id)
-        if key in adjusted_or_submitted:
-            continue
-        adjusted_or_submitted[key] = agreed.get(r.id, float(r.price))
+    for key, r in latest.items():
+        adjusted_or_submitted[key] = spar_prices.get(r.id, float(r.price))
         submitted_only[key] = (float(r.price), r.delivery_date)
     return adjusted_or_submitted, submitted_only
 

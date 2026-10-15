@@ -316,7 +316,7 @@ def test_supplier_resubmission_voids_pending_sheet(db_session, ctx):
     assert _status(db_session, ctx["rows"][0]) == svc.DRAFT
 
 
-def test_master_data_uses_adjusted_price_only_once_approved(db_session, ctx):
+def test_master_data_uses_spar_price_once_sent(db_session, ctx):
     _adjust_all(db_session, ctx)
     key = (ctx["supplier"].id, ctx["rows"][0].product_id)
 
@@ -325,7 +325,7 @@ def test_master_data_uses_adjusted_price_only_once_approved(db_session, ctx):
 
     rev = _send(db_session, ctx)
     latest, _ = master_data_service._latest_prices(db_session)
-    assert latest[key] == 100.0  # waiting for signature
+    assert latest[key] == 90.0  # sent — SPAR's price, even before the supplier answers
 
     _approve(db_session, ctx, rev)
     latest, submitted = master_data_service._latest_prices(db_session)
@@ -456,10 +456,10 @@ def test_partial_response_approves_some_and_rejects_others(db_session, ctx):
     statuses = svc.row_statuses(db_session, ctx["rows"])
     assert statuses[ctx["rows"][1].id][2] == 105.0
 
-    # Approved item: SPAR's price. Rejected item: the supplier's new final price.
+    # Master Data shows SPAR's price for both — even the one rejected with a new price.
     latest, _ = master_data_service._latest_prices(db_session)
     assert latest[(ctx["supplier"].id, ctx["rows"][0].product_id)] == 90.0
-    assert latest[(ctx["supplier"].id, ctx["rows"][1].product_id)] == 105.0
+    assert latest[(ctx["supplier"].id, ctx["rows"][1].product_id)] == 95.0
     assert svc.admin_attention_count(db_session) == 1
 
     out = svc.to_out(db_session, [rev], detail=True)[0]
@@ -468,11 +468,11 @@ def test_partial_response_approves_some_and_rejects_others(db_session, ctx):
     assert by_id[ctx["rows"][1].id]["counter_price"] == 105.0
 
 
-def test_rejected_item_without_new_price_falls_back_to_own_price(db_session, ctx):
+def test_rejected_item_without_new_price_shows_spar_price_on_master_data(db_session, ctx):
     _adjust_all(db_session, ctx)
     _respond(db_session, ctx, _send(db_session, ctx), _decide(ctx, ("APPROVED", None), ("REJECTED", None)))
     latest, _ = master_data_service._latest_prices(db_session)
-    assert latest[(ctx["supplier"].id, ctx["rows"][1].product_id)] == 110.0
+    assert latest[(ctx["supplier"].id, ctx["rows"][1].product_id)] == 95.0
 
 
 def test_rejecting_everything_needs_no_signature(db_session, ctx):
@@ -631,8 +631,10 @@ def test_rejecting_final_offer_keeps_previous_new_price(db_session, ctx):
         signature_image=None, agreed=False,
     )
     assert out.item_responses[0]["counter_price"] == 105.0
+    # Master Data: SPAR's final price. Supplier Orders: their last price.
     latest, _ = master_data_service._latest_prices(db_session)
-    assert latest[(ctx["supplier"].id, ctx["rows"][1].product_id)] == 105.0
+    assert latest[(ctx["supplier"].id, ctx["rows"][1].product_id)] == 100.0
+    assert _supplier_order_price(db_session, ctx, ctx["rows"][1]) == 105.0
 
 
 def test_rejecting_final_offer_without_earlier_price_uses_quote(db_session, ctx):
@@ -643,4 +645,46 @@ def test_rejecting_final_offer_without_earlier_price_uses_quote(db_session, ctx)
         signature_image=None, agreed=False,
     )
     latest, _ = master_data_service._latest_prices(db_session)
-    assert latest[(ctx["supplier"].id, ctx["rows"][1].product_id)] == 110.0
+    assert latest[(ctx["supplier"].id, ctx["rows"][1].product_id)] == 100.0
+    assert _supplier_order_price(db_session, ctx, ctx["rows"][1]) == 110.0
+
+
+def _supplier_order_price(db_session, ctx, row):
+    from app.services import supplier_order_service
+
+    resolved = supplier_order_service._resolve_prices(db_session, ctx["supplier"].id, ctx["delivery"], {row.product_id})
+    return resolved[row.product_id].price
+
+
+def test_master_data_shows_spar_final_price_when_not_answered(db_session, ctx, monkeypatch):
+    rev = _reject_then_resend(db_session, ctx, 105)
+    closes = svc.expires_at(rev.delivery_date, svc.approval_cutoff(db_session))
+    monkeypatch.setattr(svc, "_now", lambda: closes + timedelta(minutes=1))
+    latest, _ = master_data_service._latest_prices(db_session)
+    assert latest[(ctx["supplier"].id, ctx["rows"][1].product_id)] == 100.0
+
+
+def test_master_data_keeps_last_sent_price_while_readjusted_draft(db_session, ctx):
+    _adjust_all(db_session, ctx)  # 100 -> 90, 110 -> 95
+    _respond(db_session, ctx, _send(db_session, ctx), _decide(ctx, ("APPROVED", None), ("REJECTED", 105)))
+    pricing_service.set_adjusted_price(db_session, ctx["admin"], ctx["rows"][1].id, 100)  # not sent yet
+    latest, _ = master_data_service._latest_prices(db_session)
+    assert latest[(ctx["supplier"].id, ctx["rows"][1].product_id)] == 95.0
+
+
+def test_master_data_ignores_voided_sheet(db_session, ctx):
+    _adjust_all(db_session, ctx)
+    _send(db_session, ctx)
+    pricing_service.set_adjusted_price(db_session, ctx["admin"], ctx["rows"][0].id, 85)  # voids the waiting sheet
+    latest, _ = master_data_service._latest_prices(db_session)
+    assert latest[(ctx["supplier"].id, ctx["rows"][0].product_id)] == 100.0
+
+
+def test_master_data_ignores_sheet_sent_against_an_older_quote(db_session, ctx):
+    _adjust_all(db_session, ctx)
+    _approve(db_session, ctx, _send(db_session, ctx))
+    row = ctx["rows"][0]
+    row.price = 120  # supplier's quote changed since
+    db_session.commit()
+    latest, _ = master_data_service._latest_prices(db_session)
+    assert latest[(ctx["supplier"].id, row.product_id)] == 120.0

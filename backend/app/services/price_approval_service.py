@@ -12,15 +12,18 @@ Flow (as agreed with the client):
    least one item they tick the agreement and draw a signature. The sheet
    becomes APPROVED (every item approved), REJECTED (every item rejected)
    or PARTIAL (some of each).
-4. An approved item's adjusted price is the agreed price (Master Data uses
-   it). A rejected item uses the supplier's final price if they gave one,
-   else their own submitted price — as does every item when the supplier
+4. An approved item's adjusted price is the agreed price. A rejected item
+   uses the supplier's final price if they gave one, else their own
+   submitted price — as does every item when the supplier
    doesn't respond by the approval cutoff: 2:00 PM (Admin > Settings) on
    the price submission day, two days before delivery. Admin can adjust a
    rejected item again and send it on a new sheet.
 5. That re-sent price is SPAR's final offer: the supplier can only approve
    or reject it, with no new price of their own. Rejecting it keeps the
    final price they gave last time (else their submitted price).
+
+The Master Data Sheet is the exception: it shows SPAR's latest sent price
+whatever the supplier answered (see sent_prices).
 
 Approved items are locked: if Admin changes an approved price afterwards,
 the whole sheet is voided and its items go back to draft, to be sent and
@@ -286,34 +289,35 @@ def row_statuses(
     return out
 
 
-def agreed_prices(db: Session, rows: list[SupplierPrice]) -> dict[int, float]:
+def sent_prices(db: Session, rows: list[SupplierPrice]) -> dict[int, float]:
     """
-    The price agreed through a price sheet, per supplier_prices row id:
-    Admin's adjusted price for an approved item, or the supplier's own
-    final price for a rejected item they gave one for. Rows with neither
-    aren't in the result — their submitted price applies.
+    SPAR's price per supplier_prices row id: the adjusted price on the
+    latest sheet Admin sent with this item — whatever the supplier did with
+    it (approved, rejected, not answered yet, or let it expire). Used only
+    by the Master Data Sheet, which the client wants to show SPAR's price
+    once it has been sent. Voided/withdrawn sheets don't count, and nor
+    does a sheet sent against an older quote than the row's current one.
+    Rows never sent aren't in the result — their submitted price applies.
     """
-    rev_ids = {r.revision_id for r in rows if r.revision_id and r.adjusted_price is not None}
-    if not rev_ids:
+    if not rows:
         return {}
-    revs = {
-        rev.id: rev
-        for rev in db.query(SupplierPriceRevision).filter(
-            SupplierPriceRevision.id.in_(rev_ids), SupplierPriceRevision.status.in_(RESPONDED)
+    by_id = {r.id: r for r in rows}
+    revs = (
+        db.query(SupplierPriceRevision)
+        .filter(
+            SupplierPriceRevision.supplier_id.in_({r.supplier_id for r in rows}),
+            SupplierPriceRevision.delivery_date.in_({r.delivery_date for r in rows}),
+            SupplierPriceRevision.status.in_((PENDING, *RESPONDED)),
         )
-    }
-    responses = {rid: item_responses(rev) for rid, rev in revs.items()}
+        .order_by(SupplierPriceRevision.id)
+        .all()
+    )
     out: dict[int, float] = {}
-    for r in rows:
-        if r.adjusted_price is None or r.revision_id not in responses:
-            continue
-        decision = responses[r.revision_id].get(r.id)
-        if not decision:
-            continue
-        if decision["decision"] == APPROVED:
-            out[r.id] = float(r.adjusted_price)
-        elif decision.get("counter_price") is not None:
-            out[r.id] = float(decision["counter_price"])
+    for rev in revs:  # oldest first, so the latest sheet wins
+        for item in rev.items:
+            row = by_id.get(item["supplier_price_id"])
+            if row and item["supplier_price"] == float(row.price):
+                out[row.id] = float(item["adjusted_price"])
     return out
 
 
