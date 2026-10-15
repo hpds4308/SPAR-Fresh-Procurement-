@@ -38,6 +38,8 @@ export type ReportTotals = {
   assigned_orders: number;
   fulfillment_rate: number;
   total_spend: number;
+  // Supplier Order lines with no price yet — not included in total_spend.
+  unpriced_lines: number;
   days_count: number;
 };
 

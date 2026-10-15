@@ -134,7 +134,16 @@ export default function ReportsView() {
               hint={`${report.totals.assigned_orders} of ${report.totals.total_orders} fulfilled`}
               accent="violet"
             />
-            <KpiCard label="Total spend" value={rs(report.totals.total_spend)} accent="emerald" />
+            <KpiCard
+              label="Total spend"
+              value={rs(report.totals.total_spend)}
+              hint={
+                report.totals.unpriced_lines > 0
+                  ? `${report.totals.unpriced_lines} supplier order line${report.totals.unpriced_lines === 1 ? "" : "s"} with no price yet not included`
+                  : "From Supplier Orders"
+              }
+              accent="emerald"
+            />
             <KpiCard label="Days covered" value={String(report.totals.days_count)} accent="amber" />
           </div>
 
@@ -167,7 +176,7 @@ export default function ReportsView() {
             <div className="bg-white rounded-2xl shadow-sm p-5">
               <h3 className="font-display font-semibold text-sm text-crate-950 mb-4">Spend by supplier</h3>
               {report.by_supplier.length === 0 ? (
-                <p className="text-sm text-crate-800/40">No assignments in this range.</p>
+                <p className="text-sm text-crate-800/40">No supplier orders in this range.</p>
               ) : (
                 <div className="space-y-2">
                   {report.by_supplier.map((s) => (
@@ -189,7 +198,7 @@ export default function ReportsView() {
             <div className="bg-white rounded-2xl shadow-sm p-5">
               <h3 className="font-display font-semibold text-sm text-crate-950 mb-4">Spend by category</h3>
               {report.by_category.length === 0 ? (
-                <p className="text-sm text-crate-800/40">No assignments in this range.</p>
+                <p className="text-sm text-crate-800/40">No supplier orders in this range.</p>
               ) : (
                 <div className="space-y-2">
                   {report.by_category.map((c) => (

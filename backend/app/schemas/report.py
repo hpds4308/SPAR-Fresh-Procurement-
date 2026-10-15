@@ -38,8 +38,11 @@ class TopProductRow(BaseModel):
 class ReportTotals(BaseModel):
     total_orders: int
     assigned_orders: int
+    # assigned_orders = orders whose every product has been placed on Supplier Orders.
     fulfillment_rate: float  # assigned_orders / total_orders, 0..1
     total_spend: float
+    # Supplier Order lines with no price anywhere yet — left out of spend.
+    unpriced_lines: int = 0
     days_count: int
 
 

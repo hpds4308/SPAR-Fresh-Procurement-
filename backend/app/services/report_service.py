@@ -1,24 +1,31 @@
 """
 Admin reporting across a date range.
 
-"Spend" throughout this module means committed spend: quantity x agreed
-price from supplier_assignments, not raw branch demand — demand has no
-price attached until Admin assigns and negotiates it, so it isn't money
-yet. Fulfillment is measured by order count (what fraction of branch
-orders in range are fully covered by supplier assignments, i.e. status
-ASSIGNED or CONFIRMED — CONFIRMED still counts, it's an order that was
-assigned *and* delivered), not by summing quantities across products,
-since quantities use different units (kg, pcs, ...) and can't be added
-together meaningfully.
+"Spend" throughout this module means committed spend: what SPAR has
+ordered from suppliers on Supplier Orders (supplier_order_items), at the
+same price the Supplier Orders screen and purchase orders show — the
+line's own agreed price if Admin set one, else the supplier's effective
+price for that delivery date (supplier_order_service._resolve_prices).
+Branch demand alone isn't money yet: it only becomes spend once Admin
+places it with a supplier.
+
+A branch order counts as fulfilled once every product on it has been
+placed with a supplier for that branch and delivery date. Fulfillment is
+measured by order count, not by summing quantities across products, since
+quantities use different units (kg, pcs, ...) and can't be added together
+meaningfully.
+
+(Before Supplier Orders this read supplier_assignments, the old
+per-product split — Admin no longer uses that screen, so it's ignored.)
 """
 from datetime import date
 
 from sqlalchemy.orm import Session
 
 from app.models.order import Order, OrderLine
-from app.models.assignment import SupplierAssignment
 from app.models.product import Product, ProductCategory, ProductUnit
 from app.models.supplier import Supplier
+from app.models.supplier_order import SupplierOrderItem
 from app.schemas.report import (
     AdminReportOut,
     DailyReportRow,
@@ -27,6 +34,28 @@ from app.schemas.report import (
     TopProductRow,
     ReportTotals,
 )
+from app.services import supplier_order_service
+
+
+def _line_spend(db: Session, items: list[SupplierOrderItem]) -> dict[int, float | None]:
+    """quantity x effective price per supplier_order_items id; None when no price is known at all."""
+    groups: dict[tuple[int, date], list[SupplierOrderItem]] = {}
+    for it in items:
+        groups.setdefault((it.supplier_id, it.delivery_date), []).append(it)
+    out: dict[int, float | None] = {}
+    for (supplier_id, delivery_date), rows in groups.items():
+        unpriced = {r.product_id for r in rows if r.agreed_price is None}
+        resolved = supplier_order_service._resolve_prices(db, supplier_id, delivery_date, unpriced)
+        for r in rows:
+            if r.agreed_price is not None:
+                price = float(r.agreed_price)
+            elif r.product_id in resolved:
+                price = resolved[r.product_id].price
+            else:
+                out[r.id] = None
+                continue
+            out[r.id] = float(r.quantity) * price
+    return out
 
 
 def build_report(db: Session, start_date: date, end_date: date) -> AdminReportOut:
@@ -45,52 +74,69 @@ def build_report(db: Session, start_date: date, end_date: date) -> AdminReportOu
     lines = (
         db.query(OrderLine).filter(OrderLine.order_id.in_(order_ids)).all() if order_ids else []
     )
-    assignments = (
-        db.query(SupplierAssignment)
-        .filter(SupplierAssignment.delivery_date >= start_date, SupplierAssignment.delivery_date <= end_date)
+    items = (
+        db.query(SupplierOrderItem)
+        .filter(
+            SupplierOrderItem.delivery_date >= start_date,
+            SupplierOrderItem.delivery_date <= end_date,
+            SupplierOrderItem.quantity > 0,
+        )
         .all()
     )
+    spend = _line_spend(db, items)
 
     products = {
         p.id: p
         for p in db.query(Product)
-        .filter(Product.id.in_({a.product_id for a in assignments} | {ln.product_id for ln in lines}))
+        .filter(Product.id.in_({it.product_id for it in items} | {ln.product_id for ln in lines}))
         .all()
-    } if (assignments or lines) else {}
+    } if (items or lines) else {}
     categories = {c.id: c.name for c in db.query(ProductCategory).all()}
     units = {u.id: u.code for u in db.query(ProductUnit).all()}
     suppliers = {
-        s.id: s for s in db.query(Supplier).filter(Supplier.id.in_({a.supplier_id for a in assignments})).all()
-    } if assignments else {}
+        s.id: s for s in db.query(Supplier).filter(Supplier.id.in_({it.supplier_id for it in items})).all()
+    } if items else {}
+
+    # ---- fulfilled orders: every product on the order placed with a supplier ----
+    placed = {(it.branch_id, it.product_id, it.delivery_date) for it in items}
+    lines_by_order: dict[int, list[OrderLine]] = {}
+    for ln in lines:
+        if float(ln.quantity) > 0:
+            lines_by_order.setdefault(ln.order_id, []).append(ln)
+    fulfilled_ids = {
+        o.id
+        for o in orders
+        if lines_by_order.get(o.id)
+        and all((o.branch_id, ln.product_id, o.delivery_date) in placed for ln in lines_by_order[o.id])
+    }
 
     # ---- daily rows ----
     orders_by_date: dict[date, list[Order]] = {}
     for o in orders:
         orders_by_date.setdefault(o.delivery_date, []).append(o)
-    assignments_by_date: dict[date, list[SupplierAssignment]] = {}
-    for a in assignments:
-        assignments_by_date.setdefault(a.delivery_date, []).append(a)
+    items_by_date: dict[date, list[SupplierOrderItem]] = {}
+    for it in items:
+        items_by_date.setdefault(it.delivery_date, []).append(it)
 
-    all_dates = sorted(set(orders_by_date.keys()) | set(assignments_by_date.keys()))
+    all_dates = sorted(set(orders_by_date.keys()) | set(items_by_date.keys()))
     daily = []
     for d in all_dates:
         day_orders = orders_by_date.get(d, [])
-        day_assignments = assignments_by_date.get(d, [])
         daily.append(
             DailyReportRow(
                 delivery_date=d,
                 orders_count=len(day_orders),
-                assigned_orders_count=sum(1 for o in day_orders if o.status in ("ASSIGNED", "CONFIRMED")),
+                assigned_orders_count=sum(1 for o in day_orders if o.id in fulfilled_ids),
                 branches_count=len({o.branch_id for o in day_orders}),
-                spend=sum(float(a.quantity) * float(a.agreed_price) for a in day_assignments),
+                spend=sum(spend[it.id] or 0.0 for it in items_by_date.get(d, [])),
             )
         )
 
     # ---- by supplier ----
     supplier_agg: dict[int, dict] = {}
-    for a in assignments:
-        agg = supplier_agg.setdefault(a.supplier_id, {"spend": 0.0, "lines": 0})
-        agg["spend"] += float(a.quantity) * float(a.agreed_price)
+    for it in items:
+        agg = supplier_agg.setdefault(it.supplier_id, {"spend": 0.0, "lines": 0})
+        agg["spend"] += spend[it.id] or 0.0
         agg["lines"] += 1
     by_supplier = [
         SupplierSpendRow(
@@ -106,11 +152,11 @@ def build_report(db: Session, start_date: date, end_date: date) -> AdminReportOu
 
     # ---- by category ----
     category_agg: dict[str, dict] = {}
-    for a in assignments:
-        product = products.get(a.product_id)
+    for it in items:
+        product = products.get(it.product_id)
         cat_name = categories.get(product.category_id, "—") if product else "—"
         agg = category_agg.setdefault(cat_name, {"spend": 0.0, "lines": 0})
-        agg["spend"] += float(a.quantity) * float(a.agreed_price)
+        agg["spend"] += spend[it.id] or 0.0
         agg["lines"] += 1
     by_category = [
         CategorySpendRow(category_name=name, spend=agg["spend"], lines_count=agg["lines"])
@@ -125,10 +171,8 @@ def build_report(db: Session, start_date: date, end_date: date) -> AdminReportOu
         agg["quantity"] += float(ln.quantity)
         agg["orders"].add(ln.order_id)
     product_spend: dict[int, float] = {}
-    for a in assignments:
-        product_spend[a.product_id] = product_spend.get(a.product_id, 0.0) + float(a.quantity) * float(
-            a.agreed_price
-        )
+    for it in items:
+        product_spend[it.product_id] = product_spend.get(it.product_id, 0.0) + (spend[it.id] or 0.0)
 
     top_products = []
     for pid, agg in product_agg.items():
@@ -150,17 +194,15 @@ def build_report(db: Session, start_date: date, end_date: date) -> AdminReportOu
     top_products.sort(key=lambda r: r.total_quantity, reverse=True)
     top_products = top_products[:15]
 
-    total_spend = sum(float(a.quantity) * float(a.agreed_price) for a in assignments)
-    assigned_orders = sum(1 for o in orders if o.status in ("ASSIGNED", "CONFIRMED"))
-
     return AdminReportOut(
         start_date=start_date,
         end_date=end_date,
         totals=ReportTotals(
             total_orders=len(orders),
-            assigned_orders=assigned_orders,
-            fulfillment_rate=(assigned_orders / len(orders)) if orders else 0.0,
-            total_spend=total_spend,
+            assigned_orders=len(fulfilled_ids),
+            fulfillment_rate=(len(fulfilled_ids) / len(orders)) if orders else 0.0,
+            total_spend=sum(v or 0.0 for v in spend.values()),
+            unpriced_lines=sum(1 for v in spend.values() if v is None),
             days_count=(end_date - start_date).days + 1,
         ),
         daily=daily,
