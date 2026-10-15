@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ApiError } from "../../api/client";
 import {
   EmailStatus,
@@ -19,6 +19,8 @@ import {
   revokeOrderDeadlineException,
 } from "../../api/branches";
 import { Skeleton } from "../shared/ui/Skeleton";
+import SignaturePad, { SignaturePadHandle } from "../shared/SignaturePad";
+import { SparSignature, fetchSparSignature, saveSparSignature } from "../../api/finalPrices";
 
 function todayISO(): string {
   return new Date().toISOString().slice(0, 10);
@@ -159,9 +161,204 @@ export default function AdminSettings() {
       </div>
       {error && <p className="text-tomato-600 text-sm px-1">{error}</p>}
 
+      <FinalPriceSignaturePanel />
+
       <EmailNotificationsPanel />
 
       <LateSubmissionPanel />
+    </div>
+  );
+}
+
+/**
+ * SPAR's signature on supplier final price lists — drawn here or uploaded
+ * as an image (converted to PNG in the browser), then stamped
+ * automatically on every list suppliers download.
+ */
+function FinalPriceSignaturePanel() {
+  const [current, setCurrent] = useState<SparSignature | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState("");
+  const [title, setTitle] = useState("");
+  const [uploaded, setUploaded] = useState<string | null>(null);
+  const [hasInk, setHasInk] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const pad = useRef<SignaturePadHandle>(null);
+
+  useEffect(() => {
+    fetchSparSignature()
+      .then((s) => {
+        setCurrent(s);
+        setName(s.signatory_name ?? "");
+        setTitle(s.signatory_title ?? "");
+        setEditing(!s.signature_image);
+      })
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Could not load the signature."));
+  }, []);
+
+  function onFile(file: File | undefined) {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setError("Choose a PNG or JPG image of the signature.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        // Scaled down to keep the stored image small; white background so a
+        // transparent PNG still prints cleanly.
+        const scale = Math.min(1, 600 / img.width, 220 / img.height);
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext("2d")!;
+        ctx.fillStyle = "#FFFFFF";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        setUploaded(canvas.toDataURL("image/png"));
+        setError(null);
+      };
+      img.onerror = () => setError("That image couldn't be read.");
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  async function save() {
+    const image = uploaded ?? pad.current?.toDataURL() ?? null;
+    if (!name.trim()) return setError("Enter the name of the person signing for SPAR.");
+    if (!image) return setError("Draw the signature in the box or upload an image of it.");
+    setSaving(true);
+    setError(null);
+    try {
+      const s = await saveSparSignature({
+        signatory_name: name.trim(),
+        signatory_title: title.trim() || null,
+        signature_image: image,
+      });
+      setCurrent(s);
+      setEditing(false);
+      setUploaded(null);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not save the signature.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const input =
+    "w-full border border-sage-300 rounded-full px-4 py-2 text-sm bg-sage-50/60 focus:outline-none focus:ring-2 focus:ring-crate-700/30 focus:border-crate-700 focus:bg-white";
+
+  return (
+    <div className="bg-white rounded-2xl shadow-card border border-sage-100 p-6">
+      <h2 className="font-display font-semibold text-lg text-crate-950 mb-1">Signature on final price lists</h2>
+      <p className="text-sm text-crate-800/50 mb-4">
+        After the supplier approval cutoff, suppliers see their final prices and can download them as Excel or PDF.
+        This signature is added to every list automatically.
+      </p>
+      {!current && !error && <Skeleton className="h-24 w-full" />}
+      {current && !editing && current.signature_image && (
+        <div className="space-y-3">
+          <div className="bg-white border border-sage-200 rounded-lg p-2 inline-block">
+            <img src={current.signature_image} alt="SPAR signature" className="h-20 w-auto" />
+          </div>
+          <div className="text-sm">
+            <p className="font-medium text-crate-950">{current.signatory_name}</p>
+            {current.signatory_title && <p className="text-crate-800/60">{current.signatory_title}</p>}
+            {current.updated_at && (
+              <p className="text-xs text-crate-800/40 mt-1">
+                Set {new Date(current.updated_at).toLocaleString()}
+                {current.updated_by_name ? ` by ${current.updated_by_name}` : ""}
+              </p>
+            )}
+          </div>
+          <button
+            onClick={() => setEditing(true)}
+            className="text-sm bg-white text-crate-800 border border-crate-700/40 rounded-full px-4 py-2 font-semibold hover:bg-sage-50"
+          >
+            Change signature
+          </button>
+        </div>
+      )}
+      {current && editing && (
+        <div className="space-y-4">
+          <div className="grid sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wide text-crate-800/60 mb-1.5">Name</label>
+              <input value={name} onChange={(e) => setName(e.target.value)} maxLength={120} className={input} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wide text-crate-800/60 mb-1.5">
+                Title (optional)
+              </label>
+              <input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                maxLength={120}
+                placeholder="e.g. Commercial Manager"
+                className={input}
+              />
+            </div>
+          </div>
+          {uploaded ? (
+            <div className="space-y-2">
+              <div className="bg-white border border-sage-200 rounded-lg p-2 inline-block">
+                <img src={uploaded} alt="Uploaded signature" className="h-20 w-auto" />
+              </div>
+              <button onClick={() => setUploaded(null)} className="block text-xs text-crate-700 hover:underline">
+                Remove image and draw instead
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <SignaturePad ref={pad} onChange={setHasInk} />
+              <div className="flex flex-wrap items-center gap-4 text-xs">
+                {hasInk && (
+                  <button onClick={() => pad.current?.clear()} className="text-crate-700 hover:underline">
+                    Clear
+                  </button>
+                )}
+                <label className="text-crate-700 hover:underline cursor-pointer">
+                  …or upload an image of the signature
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg"
+                    className="hidden"
+                    onChange={(e) => {
+                      onFile(e.target.files?.[0]);
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+              </div>
+            </div>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={save}
+              disabled={saving}
+              className="text-sm bg-crate-700 text-white rounded-full px-4 py-2 font-semibold hover:bg-crate-800 disabled:opacity-50"
+            >
+              {saving ? "Saving…" : "Save signature"}
+            </button>
+            {current.signature_image && (
+              <button
+                onClick={() => {
+                  setEditing(false);
+                  setUploaded(null);
+                  setError(null);
+                }}
+                className="text-sm text-crate-800/70 rounded-full px-4 py-2 hover:bg-sage-50"
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+      {error && <p className="text-tomato-600 text-sm mt-3">{error}</p>}
     </div>
   );
 }

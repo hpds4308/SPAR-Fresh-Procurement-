@@ -3,12 +3,13 @@ import { useAuth } from "../auth/AuthContext";
 import DashboardShell from "../shared/DashboardShell";
 import { useTabParam } from "../shared/useTabParam";
 import { SidebarItem } from "../shared/Sidebar";
-import { IconTag, IconClock, IconBranches, IconChat, IconLog, IconUser, IconShield, IconReceipt } from "../shared/Icons";
+import { IconTag, IconClock, IconBranches, IconChat, IconLog, IconUser, IconShield, IconReceipt, IconList } from "../shared/Icons";
 import { fetchMyUnreadCount } from "../../api/messages";
 import { fetchMyPendingCount } from "../../api/priceApprovals";
 import PriceForm from "./PriceForm";
 import PriceHistory from "./PriceHistory";
 import PriceApprovals from "./PriceApprovals";
+import FinalPrices from "./FinalPrices";
 import OrdersByBranch from "./OrdersByBranch";
 import PurchaseOrderList from "../shared/PurchaseOrderList";
 import { fetchMyPurchaseOrder, fetchMyPurchaseOrders } from "../../api/purchaseOrders";
@@ -19,7 +20,7 @@ import { fetchMyAccount } from "../../api/suppliers";
 import WelcomeScreen from "./WelcomeScreen";
 import { FadeSwitch } from "../shared/ui/FadeSwitch";
 
-const TABS = ["submit", "history", "approvals", "byBranch", "purchaseOrders", "messages", "guidelines", "account"] as const;
+const TABS = ["submit", "history", "approvals", "finalPrices", "byBranch", "purchaseOrders", "messages", "guidelines", "account"] as const;
 type Tab = (typeof TABS)[number];
 
 const iconProps = { width: 17, height: 17 };
@@ -87,6 +88,7 @@ export default function SupplierDashboard() {
     { id: "submit", label: "Submit Prices", icon: <IconTag {...iconProps} /> },
     { id: "history", label: "My Submitted Prices", icon: <IconClock {...iconProps} /> },
     { id: "approvals", label: "Price Approvals", icon: <IconShield {...iconProps} />, badge: pendingSheets },
+    { id: "finalPrices", label: "Final Prices", icon: <IconList {...iconProps} /> },
     { id: "byBranch", label: "Orders by Branch", icon: <IconBranches {...iconProps} /> },
     { id: "purchaseOrders", label: "Purchase Orders", icon: <IconReceipt {...iconProps} /> },
     { id: "messages", label: "Messages", icon: <IconChat {...iconProps} />, badge: unread },
@@ -145,6 +147,7 @@ export default function SupplierDashboard() {
             }}
           />
         )}
+        {tab === "finalPrices" && <FinalPrices />}
         {tab === "byBranch" && <OrdersByBranch />}
         {tab === "purchaseOrders" && (
           <PurchaseOrderList fetchList={fetchMyPurchaseOrders} fetchOne={fetchMyPurchaseOrder} />
