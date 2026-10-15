@@ -2,7 +2,8 @@ import { ReactNode, useEffect, useRef, useState } from "react";
 import DashboardShell from "../shared/DashboardShell";
 import { useTabParam } from "../shared/useTabParam";
 import { SidebarItem } from "../shared/Sidebar";
-import { IconBasket, IconTruck, IconTag, IconChart, IconChat, IconClock, IconGrid, IconStore, IconBranches, IconLog, IconSettings, IconUser, IconPercent, IconShield, IconReceipt, IconList } from "../shared/Icons";
+import { IconTruck, IconChart, IconChat, IconGrid, IconStore, IconBranches, IconSettings } from "../shared/Icons";
+import { CountBadge } from "../shared/ui/Badge";
 import { fetchAdminUnreadCount } from "../../api/messages";
 import { fetchAdminAttentionCount } from "../../api/priceApprovals";
 import { fetchUnreviewedAutoOrders } from "../../api/orders";
@@ -13,6 +14,7 @@ import ReportsView from "./ReportsView";
 import SupplierOrderBuilder from "./SupplierOrderBuilder";
 import AdminPurchaseOrders, { PoFocus } from "./AdminPurchaseOrders";
 import SupplierPricesView from "./SupplierPricesView";
+import AdminSupplierPriceHistory from "./AdminSupplierPriceHistory";
 import AdminPriceApprovals from "./AdminPriceApprovals";
 import AdminKeellsPrices from "./AdminKeellsPrices";
 import AdminMarketPrices from "./AdminMarketPrices";
@@ -25,8 +27,48 @@ import AdminAuditLog from "./AdminAuditLog";
 import AdminSettings from "./AdminSettings";
 import AdminUsers from "./AdminUsers";
 import AdminAccount from "./AdminAccount";
-const TABS = ["orders", "orderHistory", "supplierOrders", "purchaseOrders", "supplierPrices", "priceApprovals", "keellsPrices", "marketPrices", "marketPriceHistory", "masterData", "productList", "promotions", "messages", "reports", "auditLog", "settings", "users", "account"] as const;
+const TABS = ["orders", "orderHistory", "supplierPrices", "supplierOrders", "purchaseOrders", "priceApprovals", "supplierPriceHistory", "keellsPrices", "marketPrices", "marketPriceHistory", "masterData", "productList", "promotions", "messages", "reports", "auditLog", "settings", "users", "account"] as const;
 type Tab = (typeof TABS)[number];
+
+// The sidebar shows these sections; each one's pages appear as sub-tabs
+// across the top of the content. The URL still names the page (?tab=...),
+// so links and refreshes land on the exact sub-tab.
+const SECTIONS = ["branches", "suppliers", "masterData", "messages", "reports", "competitorPrices", "settings"] as const;
+type Section = (typeof SECTIONS)[number];
+
+const SECTION_TABS: Record<Section, { id: Tab; label: string }[]> = {
+  branches: [
+    { id: "orders", label: "Branch Orders" },
+    { id: "orderHistory", label: "Branch Order History" },
+  ],
+  suppliers: [
+    { id: "supplierPrices", label: "Supplier Prices" },
+    { id: "supplierOrders", label: "Supplier Orders" },
+    { id: "purchaseOrders", label: "Purchase Orders" },
+    { id: "priceApprovals", label: "Price Approvals" },
+    { id: "supplierPriceHistory", label: "Suppliers Price History" },
+  ],
+  masterData: [{ id: "masterData", label: "Master Data Sheet" }],
+  messages: [{ id: "messages", label: "Messages" }],
+  reports: [{ id: "reports", label: "Reports" }],
+  competitorPrices: [
+    { id: "keellsPrices", label: "Keells Prices" },
+    { id: "marketPrices", label: "Local Market Prices" },
+    { id: "marketPriceHistory", label: "Price History" },
+  ],
+  settings: [
+    { id: "settings", label: "General" },
+    { id: "productList", label: "Product List" },
+    { id: "promotions", label: "Promotions" },
+    { id: "auditLog", label: "Audit Log" },
+    { id: "users", label: "Accounts" },
+    { id: "account", label: "My Account" },
+  ],
+};
+
+function sectionOf(tab: Tab): Section {
+  return SECTIONS.find((s) => SECTION_TABS[s].some((t) => t.id === tab)) ?? "branches";
+}
 
 const iconProps = { width: 17, height: 17 };
 const UNREAD_POLL_MS = 15000;
@@ -54,6 +96,14 @@ export default function AdminDashboard() {
   useEffect(() => {
     setVisited((prev) => (prev.has(tab) ? prev : new Set(prev).add(tab)));
   }, [tab]);
+
+  // Reopening a section returns to the sub-tab last used in it.
+  const section = sectionOf(tab);
+  const lastTabInSection = useRef<Partial<Record<Section, Tab>>>({});
+  lastTabInSection.current[section] = tab;
+  function openSection(next: Section) {
+    setTab(lastTabInSection.current[next] ?? SECTION_TABS[next][0].id);
+  }
 
   // Renders `content` once the tab has ever been opened, then keeps it in
   // the DOM permanently (hidden via CSS, not unmounted) so its component
@@ -112,52 +162,69 @@ export default function AdminDashboard() {
     return () => clearTimeout(t);
   }, [tab]);
 
-  const navItems: SidebarItem<Tab>[] = [
-    { id: "orders", label: "Branch Orders", icon: <IconBasket {...iconProps} />, badge: autoOrders },
-    { id: "orderHistory", label: "Order History", icon: <IconClock {...iconProps} /> },
-    { id: "supplierOrders", label: "Supplier Orders", icon: <IconTruck {...iconProps} /> },
-    { id: "purchaseOrders", label: "Purchase Orders", icon: <IconReceipt {...iconProps} /> },
-    { id: "supplierPrices", label: "Supplier Prices", icon: <IconTag {...iconProps} /> },
-    { id: "priceApprovals", label: "Price Approvals", icon: <IconShield {...iconProps} />, badge: rejectedSheets },
-    { id: "keellsPrices", label: "Keells Prices", icon: <IconStore {...iconProps} /> },
-    { id: "marketPrices", label: "Local Market Prices", icon: <IconBranches {...iconProps} /> },
-    { id: "marketPriceHistory", label: "Price History", icon: <IconChart {...iconProps} /> },
+  // Attention counts per page, rolled up onto the section in the sidebar.
+  const tabBadges: Partial<Record<Tab, number>> = {
+    orders: autoOrders,
+    priceApprovals: rejectedSheets,
+    messages: unread,
+  };
+  const sectionBadge = (sec: Section) => SECTION_TABS[sec].reduce((sum, t) => sum + (tabBadges[t.id] ?? 0), 0);
+
+  const navItems: SidebarItem<Section>[] = [
+    { id: "branches", label: "Branches", icon: <IconBranches {...iconProps} />, badge: sectionBadge("branches") },
+    { id: "suppliers", label: "Suppliers", icon: <IconTruck {...iconProps} />, badge: sectionBadge("suppliers") },
     { id: "masterData", label: "Master Data Sheet", icon: <IconGrid {...iconProps} /> },
-    { id: "productList", label: "Product List", icon: <IconList {...iconProps} /> },
-    { id: "promotions", label: "Promotions", icon: <IconPercent {...iconProps} /> },
-    { id: "messages", label: "Messages", icon: <IconChat {...iconProps} />, badge: unread },
+    { id: "messages", label: "Messages", icon: <IconChat {...iconProps} />, badge: sectionBadge("messages") },
     { id: "reports", label: "Reports", icon: <IconChart {...iconProps} /> },
-    { id: "auditLog", label: "Audit Log", icon: <IconLog {...iconProps} /> },
-    { id: "users", label: "Accounts", icon: <IconUser {...iconProps} /> },
+    { id: "competitorPrices", label: "Competitor Prices", icon: <IconStore {...iconProps} /> },
     { id: "settings", label: "Settings", icon: <IconSettings {...iconProps} /> },
-    { id: "account", label: "My Account", icon: <IconUser {...iconProps} /> },
   ];
+
+  const subTabs = SECTION_TABS[section];
 
   return (
     <DashboardShell
       title="Admin / Procurement Dashboard"
       subtitle="Central view across all branches and suppliers"
       navItems={navItems}
-      activeNav={tab}
-      onNavChange={setTab}
+      activeNav={section}
+      onNavChange={openSection}
       unreadCount={unread}
       onBellClick={() => setTab("messages")}
     >
+      {subTabs.length > 1 && (
+        <div className="-mx-1 mb-5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div role="tablist" className="flex gap-1 bg-sage-100 rounded-full p-1 w-max mx-1">
+            {subTabs.map((t) => {
+              const active = t.id === tab;
+              const badge = tabBadges[t.id];
+              return (
+                <button
+                  key={t.id}
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setTab(t.id)}
+                  className={`flex items-center gap-1.5 whitespace-nowrap text-sm rounded-full px-4 py-1.5 transition-colors duration-150 ${
+                    active ? "bg-white text-crate-950 font-semibold shadow-sm" : "text-crate-800/60 hover:text-crate-800 font-medium"
+                  }`}
+                >
+                  {t.label}
+                  {!!badge && <CountBadge count={badge} />}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
       {keepAlive(
         "orders",
         <>
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-crate-800/60 mb-3">
-            Branch Orders
-          </h2>
           <OrderMatrixView onAutoOrdersChanged={setAutoOrders} />
         </>
       )}
       {keepAlive(
         "orderHistory",
         <>
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-crate-800/60 mb-3">
-            Order History
-          </h2>
           <AdminOrderHistory />
         </>
       )}
@@ -178,27 +245,18 @@ export default function AdminDashboard() {
       {keepAlive(
         "purchaseOrders",
         <>
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-crate-800/60 mb-3">
-            Purchase Orders
-          </h2>
           <AdminPurchaseOrders focus={poFocus} />
         </>
       )}
       {keepAlive(
         "supplierPrices",
         <>
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-crate-800/60 mb-3">
-            Supplier Prices
-          </h2>
           <SupplierPricesView />
         </>
       )}
       {keepAlive(
         "priceApprovals",
         <>
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-crate-800/60 mb-3">
-            Price Approvals
-          </h2>
           <AdminPriceApprovals
             onChanged={() =>
               fetchAdminAttentionCount()
@@ -211,27 +269,18 @@ export default function AdminDashboard() {
       {keepAlive(
         "keellsPrices",
         <>
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-crate-800/60 mb-3">
-            Keells Prices
-          </h2>
           <AdminKeellsPrices />
         </>
       )}
       {keepAlive(
         "marketPrices",
         <>
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-crate-800/60 mb-3">
-            Local Market Prices
-          </h2>
           <AdminMarketPrices />
         </>
       )}
       {keepAlive(
         "marketPriceHistory",
         <>
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-crate-800/60 mb-3">
-            Price History
-          </h2>
           <AdminMarketPriceHistory />
         </>
       )}
@@ -247,18 +296,12 @@ export default function AdminDashboard() {
       {keepAlive(
         "productList",
         <>
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-crate-800/60 mb-3">
-            Product List
-          </h2>
           <AdminProductList />
         </>
       )}
       {keepAlive(
         "promotions",
         <>
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-crate-800/60 mb-3">
-            Promotions
-          </h2>
           <AdminPromotions />
         </>
       )}
@@ -271,13 +314,11 @@ export default function AdminDashboard() {
           <AdminMessages />
         </>
       )}
+      {keepAlive("supplierPriceHistory", <AdminSupplierPriceHistory />)}
       {keepAlive("reports", <ReportsView />)}
       {keepAlive(
         "auditLog",
         <>
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-crate-800/60 mb-3">
-            Audit Log
-          </h2>
           <AdminAuditLog />
         </>
       )}

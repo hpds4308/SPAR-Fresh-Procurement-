@@ -243,3 +243,51 @@ def test_last_price_fallback_respects_supplier_isolation(
     last_b = pricing_service.get_last_prices(db_session, user_b)
     assert len(last_a) == 1 and float(last_a[0].price) == 111.0
     assert len(last_b) == 1 and float(last_b[0].price) == 222.0
+
+
+# ---- Suppliers Price History (list_all_prices over a date range) ----
+
+
+def _quote(db_session, supplier, user, product, delivery, price):
+    row = SupplierPrice(
+        supplier_id=supplier.id, product_id=product.id, delivery_date=delivery, price=price, unit_code="KG",
+        submitted_by=user.id,
+    )
+    db_session.add(row)
+    db_session.commit()
+    return row
+
+
+def test_list_all_prices_date_range_marks_lowest_per_delivery_date(db_session, make_supplier, make_user, make_product):
+    a, b = make_supplier(), make_supplier()
+    a_user, b_user = make_user(role="SUPPLIER", supplier=a), make_user(role="SUPPLIER", supplier=b)
+    product = make_product()
+    day1, day2, outside = date(2026, 3, 2), date(2026, 3, 4), date(2026, 3, 20)
+    _quote(db_session, a, a_user, product, day1, 100)
+    _quote(db_session, b, b_user, product, day1, 120)
+    # Day 2: B is cheaper. Lowest must be judged per date, not across the range.
+    _quote(db_session, a, a_user, product, day2, 130)
+    _quote(db_session, b, b_user, product, day2, 110)
+    _quote(db_session, a, a_user, product, outside, 50)
+
+    rows = pricing_service.list_all_prices(db_session, start_date=day1, end_date=day2)
+
+    assert {(r["supplier_id"], r["delivery_date"]) for r in rows} == {(a.id, day1), (b.id, day1), (a.id, day2), (b.id, day2)}
+    lowest = {(r["supplier_id"], r["delivery_date"]) for r in rows if r["is_lowest_for_product"]}
+    assert lowest == {(a.id, day1), (b.id, day2)}
+
+    only_b = pricing_service.list_all_prices(db_session, supplier_id=b.id, start_date=day1, end_date=day2)
+    assert {r["supplier_id"] for r in only_b} == {b.id}
+
+
+@pytest.mark.parametrize(
+    "start, end",
+    [
+        (date(2026, 3, 1), None),
+        (date(2026, 3, 5), date(2026, 3, 1)),
+        (date(2026, 1, 1), date(2026, 12, 31)),
+    ],
+)
+def test_list_all_prices_rejects_bad_ranges(db_session, start, end):
+    with pytest.raises(ValidationFailedError):
+        pricing_service.list_all_prices(db_session, start_date=start, end_date=end)

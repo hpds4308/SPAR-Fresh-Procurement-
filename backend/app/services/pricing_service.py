@@ -38,6 +38,8 @@ from app.services import settings_service
 from app.services import price_approval_service
 
 BUSINESS_TZ = ZoneInfo("Asia/Colombo")
+# Longest range Suppliers Price History (list_all_prices) can load at once.
+MAX_PRICE_HISTORY_DAYS = 120
 
 
 def get_submission_weekdays(db: Session) -> list[int]:
@@ -569,6 +571,8 @@ def list_all_prices(
     delivery_date: date | None = None,
     supplier_id: int | None = None,
     product_id: int | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ):
     """
     Admin-only view: every supplier's quoted price across the whole
@@ -576,11 +580,25 @@ def list_all_prices(
     without going product-by-product. Defaults to the current submission
     cycle's delivery date (the most recent Mon/Wed/Fri submission's
     delivery date) when none is given.
-    """
-    if delivery_date is None:
-        delivery_date = _current_cycle_delivery_date(datetime.now(BUSINESS_TZ))
 
-    query = db.query(SupplierPrice).filter(SupplierPrice.delivery_date == delivery_date)
+    With start_date and end_date it covers every delivery date in that
+    range instead (Suppliers Price History); lowest / second-lowest are
+    still worked out per delivery date.
+    """
+    if start_date is not None or end_date is not None:
+        if start_date is None or end_date is None:
+            raise ValidationFailedError("Give both a start date and an end date.")
+        if start_date > end_date:
+            raise ValidationFailedError("The start date must be on or before the end date.")
+        if (end_date - start_date).days > MAX_PRICE_HISTORY_DAYS:
+            raise ValidationFailedError(f"Pick a range of at most {MAX_PRICE_HISTORY_DAYS} days.")
+        query = db.query(SupplierPrice).filter(
+            SupplierPrice.delivery_date >= start_date, SupplierPrice.delivery_date <= end_date
+        )
+    else:
+        if delivery_date is None:
+            delivery_date = _current_cycle_delivery_date(datetime.now(BUSINESS_TZ))
+        query = db.query(SupplierPrice).filter(SupplierPrice.delivery_date == delivery_date)
     if supplier_id:
         query = query.filter(SupplierPrice.supplier_id == supplier_id)
     if product_id:
@@ -593,16 +611,17 @@ def list_all_prices(
     products = {p.id: p for p in db.query(Product).filter(Product.id.in_(product_ids)).all()}
     categories = {c.id: c.name for c in db.query(ProductCategory).all()}
 
-    lowest_by_product: dict[int, float] = {}
-    prices_by_product: dict[int, list[float]] = {}
+    lowest_by_product: dict[tuple[int, date], float] = {}
+    prices_by_product: dict[tuple[int, date], list[float]] = {}
     for r in rows:
         price = float(r.price)
-        prices_by_product.setdefault(r.product_id, []).append(price)
-        current = lowest_by_product.get(r.product_id)
+        key = (r.product_id, r.delivery_date)
+        prices_by_product.setdefault(key, []).append(price)
+        current = lowest_by_product.get(key)
         if current is None or price < current:
-            lowest_by_product[r.product_id] = price
+            lowest_by_product[key] = price
 
-    second_lowest_by_product = {pid: second_lowest_price(prices) for pid, prices in prices_by_product.items()}
+    second_lowest_by_product = {key: second_lowest_price(prices) for key, prices in prices_by_product.items()}
     statuses = price_approval_service.row_statuses(db, rows)
 
     result = []
@@ -610,7 +629,8 @@ def list_all_prices(
         supplier = suppliers.get(r.supplier_id)
         product = products.get(r.product_id)
         price = float(r.price)
-        second_lowest = second_lowest_by_product.get(r.product_id)
+        key = (r.product_id, r.delivery_date)
+        second_lowest = second_lowest_by_product.get(key)
         approval_status, revision, counter_price = statuses[r.id]
         result.append(
             {
@@ -631,7 +651,7 @@ def list_all_prices(
                 "rejection_reason": revision.rejection_reason if revision and approval_status == "REJECTED" else None,
                 "counter_price": counter_price,
                 "delivery_date": r.delivery_date,
-                "is_lowest_for_product": price == lowest_by_product.get(r.product_id),
+                "is_lowest_for_product": price == lowest_by_product.get(key),
                 "second_lowest_price": second_lowest,
                 "is_second_lowest_for_product": second_lowest is not None and price == second_lowest,
             }
@@ -643,6 +663,7 @@ def list_all_prices(
         key=lambda row: (
             category_display_order.get(row["category_name"], len(category_display_order)),
             row["product_description"],
+            row["delivery_date"],
             row["price"],
         )
     )

@@ -146,9 +146,14 @@ export function fetchAllPrices(params?: {
   deliveryDate?: string;
   supplierId?: number;
   productId?: number;
+  // Both together load every delivery date in the range (price history).
+  startDate?: string;
+  endDate?: string;
 }): Promise<AdminSupplierPrice[]> {
   const qs = new URLSearchParams();
   if (params?.deliveryDate) qs.set("delivery_date", params.deliveryDate);
+  if (params?.startDate) qs.set("start_date", params.startDate);
+  if (params?.endDate) qs.set("end_date", params.endDate);
   if (params?.supplierId) qs.set("supplier_id", String(params.supplierId));
   if (params?.productId) qs.set("product_id", String(params.productId));
   const query = qs.toString();

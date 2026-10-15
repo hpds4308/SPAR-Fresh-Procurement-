@@ -148,6 +148,8 @@ def admin_all_prices(
     delivery_date: date | None = None,
     supplier_id: int | None = None,
     product_id: int | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
     admin: User = Depends(require_roles("ADMIN")),
     db: Session = Depends(get_db),
 ):
@@ -155,8 +157,9 @@ def admin_all_prices(
     Every supplier's quoted price across the whole catalogue for one
     delivery date — the admin's browse/compare view, as opposed to
     /orders/admin/product/{id}/comparison which looks at one product at a time.
+    start_date + end_date return every delivery date in that range instead.
     """
-    rows = pricing_service.list_all_prices(db, delivery_date, supplier_id, product_id)
+    rows = pricing_service.list_all_prices(db, delivery_date, supplier_id, product_id, start_date, end_date)
     return [AdminSupplierPriceOut(**row) for row in rows]
 
 
