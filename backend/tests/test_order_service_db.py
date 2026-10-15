@@ -135,10 +135,10 @@ def test_oversized_quantity_rejected_at_schema_level():
 
 def test_quantity_at_max_boundary_accepted(db_session, branch_ctx):
     branch_user, product = branch_ctx
-    line = OrderLineCreate(product_id=product.id, quantity=99999999.99)
+    line = OrderLineCreate(product_id=product.id, quantity=99999999.9)  # 2nd decimal must be 0
     order = order_service.save_draft_order(db_session, branch_user, OrderCreate(lines=[line]))
     lines = _lines(db_session, order)
-    assert float(lines[0].quantity) == 99999999.99
+    assert float(lines[0].quantity) == 99999999.9
 
 
 def test_unknown_product_id_rejected(db_session, branch_ctx):

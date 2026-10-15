@@ -17,7 +17,12 @@ from app.schemas.pricing import AdjustPriceRequest, PriceEntry, ReferencePriceSe
 from app.schemas.supplier_order import SupplierOrderItemIn
 
 
-@pytest.mark.parametrize("value", [1, 10, 100, 1000, MAX_NUMERIC_10_2])
+# Order quantities and supplier prices also need a 0 second decimal
+# (test_one_decimal.py), so their highest value is 99999999.90.
+MAX_ONE_DECIMAL = 99999999.9
+
+
+@pytest.mark.parametrize("value", [1, 10, 100, 1000, MAX_ONE_DECIMAL])
 def test_order_line_quantity_accepts_valid_and_boundary_values(value):
     OrderLineCreate(product_id=1, quantity=value)
 
@@ -41,7 +46,7 @@ def test_delivery_received_quantity_respects_the_same_ceiling():
         DeliveryLineConfirm(product_id=1, received_quantity=MAX_NUMERIC_10_2 + 1)
 
 
-@pytest.mark.parametrize("value", [1, 100, MAX_NUMERIC_10_2])
+@pytest.mark.parametrize("value", [1, 100, MAX_ONE_DECIMAL])
 def test_supplier_price_accepts_valid_and_boundary_values(value):
     PriceEntry(product_id=1, price=value)
 

@@ -27,7 +27,7 @@ from app.models.market_reference_price import MarketReferencePrice
 from app.models.product import Product, ProductCategory, ProductUnit
 from app.models.supplier import Supplier
 from app.models.user import User
-from app.schemas._limits import MAX_NUMERIC_10_2
+from app.schemas._limits import MAX_NUMERIC_10_2, one_decimal_error
 from app.schemas.pricing import (
     ExcelPriceLinePreview,
     ExcelPricePreviewOut,
@@ -383,6 +383,8 @@ def _parse_excel_price(raw) -> tuple[float | None, str | None]:
         return None, "Price must be greater than zero (leave it blank if you don't supply this product)."
     if value > MAX_NUMERIC_10_2:
         return None, f"Price exceeds the maximum allowed value ({MAX_NUMERIC_10_2:,.2f})."
+    if error := one_decimal_error(value, "Price"):
+        return None, error
     return round(value, 2), None
 
 

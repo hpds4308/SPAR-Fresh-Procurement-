@@ -14,6 +14,7 @@ import {
 import { CategoryBadge } from "../shared/ui/CategoryBadge";
 import { PromotionBadge, ProductPromotion } from "../shared/ui/PromotionBadge";
 import { useActivePromotions } from "../shared/useActivePromotions";
+import { ONE_DECIMAL_STEP, formatOneDecimal, isOneDecimal } from "../shared/oneDecimal";
 
 function formatDate(iso: string): string {
   const d = new Date(iso + "T00:00:00");
@@ -171,6 +172,7 @@ export default function OrderForm({ onSubmitted }: { onSubmitted: () => void }) 
   );
 
   function setQty(productId: number, value: string) {
+    if (!isOneDecimal(value)) return; // e.g. 5.71 — the second decimal must be 0
     setQuantities((prev) => ({ ...prev, [productId]: value }));
     setDraftSaved(false);
   }
@@ -365,10 +367,14 @@ export default function OrderForm({ onSubmitted }: { onSubmitted: () => void }) 
               <input
                 type="number"
                 min="0"
-                step="0.01"
+                step={ONE_DECIMAL_STEP}
                 placeholder="0"
                 value={quantities[p.id] ?? ""}
                 onChange={(e) => setQty(p.id, e.target.value)}
+                onBlur={(e) => {
+                  const v = formatOneDecimal(e.target.value);
+                  if (v !== e.target.value) setQty(p.id, v);
+                }}
                 className="w-24 border border-sage-300 bg-sage-50/60 rounded-full px-3 py-1.5 text-sm text-right text-crate-950 focus:outline-none focus:ring-2 focus:ring-crate-700/30 focus:border-crate-700 focus:bg-white transition-all duration-150"
               />
               <span className="text-xs text-crate-800/40 w-10">{p.unit_code}</span>

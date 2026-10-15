@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from pydantic import BaseModel, Field, field_validator
 
-from app.schemas._limits import MAX_NUMERIC_10_2
+from app.schemas._limits import MAX_NUMERIC_10_2, one_decimal_error
 
 
 class OrderLineCreate(BaseModel):
@@ -12,6 +12,8 @@ class OrderLineCreate(BaseModel):
     @field_validator("quantity")
     @classmethod
     def round_quantity(cls, v: float) -> float:
+        if error := one_decimal_error(v, "Quantity"):
+            raise ValueError(error)
         return round(v, 2)
 
 

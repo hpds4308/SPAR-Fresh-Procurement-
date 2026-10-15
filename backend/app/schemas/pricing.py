@@ -1,7 +1,7 @@
 from datetime import date
 from pydantic import BaseModel, Field, field_validator
 
-from app.schemas._limits import MAX_NUMERIC_10_2
+from app.schemas._limits import MAX_NUMERIC_10_2, one_decimal_error
 
 
 class PriceEntry(BaseModel):
@@ -11,6 +11,8 @@ class PriceEntry(BaseModel):
     @field_validator("price")
     @classmethod
     def round_price(cls, v: float) -> float:
+        if error := one_decimal_error(v, "Price"):
+            raise ValueError(error)
         return round(v, 2)
 
 
