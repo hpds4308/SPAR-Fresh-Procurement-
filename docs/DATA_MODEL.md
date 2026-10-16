@@ -51,16 +51,13 @@ that's intentional, not an oversight.
 ## Master Data Sheet's Cost Price is NOT the same calculation
 
 Master Data Sheet's "Cost Price" column is deliberately different from
-Supplier Orders' Cost Price: it's the **highest of suppliers' most recent
-SUBMITTED prices** — explicitly never their Adjusted Price, even though
-Adjusted Price is what shows in the per-supplier columns right next to
-it. Computed live in `master_data_service._latest_prices`
-(`submitted_only`, not `adjusted_or_submitted`). This is a margin-analysis
-figure (a conservative ceiling for GP% math based on what suppliers are
-actually asking), not a "what will we pay" figure. Don't try to unify
-this with Supplier Orders' Cost Price — they answer different questions,
-and don't accidentally swap `submitted_only` for `adjusted_or_submitted`
-when touching this function — that's the one thing this rule depends on.
+Supplier Orders' Cost Price: it's the **highest of the per-supplier prices
+shown in the same row** (SPAR's sent price where Admin has sent one, else
+the supplier's submitted price). Computed live from
+`master_data_service._latest_prices`. Since 2026-10-16 it follows those
+columns; before that it used suppliers' own submitted prices only, which
+made it disagree with the numbers beside it. Don't try to unify this with
+Supplier Orders' Cost Price — they answer different questions.
 
 ## Adjusted Price: draft vs. sent
 

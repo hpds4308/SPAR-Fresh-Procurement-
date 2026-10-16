@@ -460,8 +460,7 @@ export default function AdminMasterData() {
       </div>
       <p className="text-[11px] text-crate-800/35 px-1">
         POS Code is fixed, sourced from the original uploaded product data — not editable here. Cost Price is
-        the highest current SUBMITTED price among suppliers who've quoted an item — not their Adjusted Price —
-        it's computed, not editable. Keells Price is the latest price entered on Keells Prices — edit it
+        the highest of the supplier prices in the same row — it's computed, not editable. Keells Price is the latest price entered on Keells Prices — edit it
         there. Supplier columns mirror Supplier Prices and are read-only here; edit them
         there. Target GP% defaults to 30% until you set your own.
       </p>

@@ -14,10 +14,10 @@ Field ownership:
   product data (database/seed/products.csv). If it ever needs
   re-syncing (e.g. after test data drifted), run
   scripts/restore_pos_codes.py rather than editing it here.
-- cost_price: NOT editable — the highest price among suppliers' most
-  recent SUBMITTED prices (never their Adjusted Price — see
-  _latest_prices below for why that's a deliberate, separate figure).
-  Computed live, never stored.
+- cost_price: NOT editable — the highest of the per-supplier prices
+  shown in the same row (SPAR's sent price where there is one, else the
+  supplier's submitted price — see _latest_prices). Computed live, never
+  stored.
 - keells_price: NOT editable — the most recent Keells retail price for
   the product, any date. Read-only mirror of Keells Prices.
 - Supplier Adjusted CP columns: read-only mirror of Supplier Prices,
@@ -45,27 +45,21 @@ from app.schemas.master_data import (
 
 def _latest_prices(
     db: Session,
-) -> tuple[dict[tuple[int, int], float], dict[tuple[int, int], tuple[float, date]]]:
+) -> tuple[dict[tuple[int, int], float], dict[tuple[int, int], date]]:
     """
-    One query, two views of the same rows — for every (supplier_id,
-    product_id) pair, that supplier's most recent quote, regardless of
-    delivery date:
+    For every (supplier_id, product_id) pair, that supplier's most recent
+    quote, regardless of delivery date:
 
-    - `adjusted_or_submitted`: SPAR's price once Admin has sent it to the
-      supplier (the latest one sent, i.e. SPAR's final price after a
-      second round), whether the supplier approved it, rejected it or
-      never answered; otherwise the submitted price. Shown in the
-      per-supplier "Adjusted CP" columns. A draft adjustment that was
+    - `prices`: SPAR's price once Admin has sent it to the supplier (the
+      latest one sent, i.e. SPAR's final price after a second round),
+      whether the supplier approved it, rejected it or never answered;
+      otherwise the submitted price. Shown in the per-supplier columns,
+      and Cost Price is the highest of these. A draft adjustment that was
       never sent doesn't count. Only this sheet works this way — Supplier
       Orders, POs and the supplier's Final Prices use the agreed price
       (see price_approval_service.row_statuses).
-    - `submitted_only`: (price, delivery_date) — always the supplier's own
-      submitted price, never an adjustment, plus the date it was
-      submitted for. Used for Cost Price specifically — Cost Price should
-      reflect what suppliers are actually asking, not a negotiated figure
-      Admin may have typed in, so the two must not be conflated. The date
-      is carried through so the sheet can show admin which supplier's
-      quote won and when it was submitted.
+    - `dates`: the delivery date that quote was submitted for, so the
+      sheet can show which supplier's price is the Cost Price and when.
     """
     rows = (
         db.query(SupplierPrice)
@@ -76,12 +70,9 @@ def _latest_prices(
     for r in rows:
         latest.setdefault((r.supplier_id, r.product_id), r)
     spar_prices = price_approval_service.sent_prices(db, list(latest.values()))
-    adjusted_or_submitted: dict[tuple[int, int], float] = {}
-    submitted_only: dict[tuple[int, int], tuple[float, date]] = {}
-    for key, r in latest.items():
-        adjusted_or_submitted[key] = spar_prices.get(r.id, float(r.price))
-        submitted_only[key] = (float(r.price), r.delivery_date)
-    return adjusted_or_submitted, submitted_only
+    prices = {key: spar_prices.get(r.id, float(r.price)) for key, r in latest.items()}
+    dates = {key: r.delivery_date for key, r in latest.items()}
+    return prices, dates
 
 
 def get_master_data_sheet(db: Session) -> MasterDataSheetOut:
@@ -95,25 +86,24 @@ def get_master_data_sheet(db: Session) -> MasterDataSheetOut:
         .order_by(Product.category_id, Product.description)
         .all()
     )
-    latest_prices, latest_submitted = _latest_prices(db)
+    latest_prices, latest_dates = _latest_prices(db)
     keells = {r.product_id: r for r in pricing_service.get_last_reference_prices(db, "KEELLS")}
 
     rows = []
     for p in products:
         supplier_prices = {s.id: latest_prices.get((s.id, p.id)) for s in suppliers}
-        # Cost Price = the highest of suppliers' latest SUBMITTED prices —
-        # deliberately not the "Adjusted CP" values shown alongside it.
-        # Also track which supplier + delivery date that winning quote came
-        # from, so Admin can see who it was and when, next to the number.
-        submitted_for_product = [
-            (s.id, *latest_submitted[(s.id, p.id)]) for s in suppliers if (s.id, p.id) in latest_submitted
-        ]
+        # Cost Price = the highest of the supplier prices shown in this
+        # row's supplier columns. Also track which supplier + delivery date
+        # it came from, so Admin can see who it was and when.
         cost_price = None
         cost_price_supplier_name = None
         cost_price_date = None
-        if submitted_for_product:
-            winning_supplier_id, cost_price, cost_price_date = max(submitted_for_product, key=lambda t: t[1])
-            cost_price_supplier_name = next(s.supplier_name for s in suppliers if s.id == winning_supplier_id)
+        quoted = [s for s in suppliers if supplier_prices[s.id] is not None]
+        if quoted:
+            winner = max(quoted, key=lambda s: supplier_prices[s.id])
+            cost_price = supplier_prices[winner.id]
+            cost_price_supplier_name = winner.supplier_name
+            cost_price_date = latest_dates[(winner.id, p.id)]
 
         selling_price = float(p.selling_price) if p.selling_price is not None else None
         computed_gp = None
@@ -169,16 +159,15 @@ def auto_generate_selling_prices(db: Session) -> int:
     if not products:
         return 0
 
-    _, latest_submitted = _latest_prices(db)
+    latest_prices, _ = _latest_prices(db)
     supplier_ids = [s.id for s in db.query(Supplier).filter(Supplier.status == "ACTIVE").all()]
 
     updated = 0
     for p in products:
-        submitted_for_product = [latest_submitted.get((sid, p.id)) for sid in supplier_ids]
-        submitted_for_product = [v[0] for v in submitted_for_product if v is not None]
-        if not submitted_for_product:
+        prices_for_product = [latest_prices[(sid, p.id)] for sid in supplier_ids if (sid, p.id) in latest_prices]
+        if not prices_for_product:
             continue
-        cost_price = max(submitted_for_product)
+        cost_price = max(prices_for_product)
 
         target_gp = float(p.target_gp_percent) if p.target_gp_percent is not None else 0.30
         if target_gp >= 1:

@@ -328,9 +328,19 @@ def test_master_data_uses_spar_price_once_sent(db_session, ctx):
     assert latest[key] == 90.0  # sent — SPAR's price, even before the supplier answers
 
     _approve(db_session, ctx, rev)
-    latest, submitted = master_data_service._latest_prices(db_session)
+    latest, _ = master_data_service._latest_prices(db_session)
     assert latest[key] == 90.0
-    assert submitted[key][0] == 100.0  # Cost Price still uses the submitted price
+
+
+def test_master_data_cost_price_is_highest_supplier_column(db_session, ctx):
+    _adjust_all(db_session, ctx)
+    _send(db_session, ctx)
+    sheet = master_data_service.get_master_data_sheet(db_session)
+    row = next(r for r in sheet.rows if r.product_id == ctx["rows"][0].product_id)
+    shown = [v for v in row.supplier_prices.values() if v is not None]
+    assert row.cost_price == max(shown) == 90.0  # SPAR's sent price, not the submitted 100
+    assert row.cost_price_supplier_name == ctx["supplier"].supplier_name
+    assert row.cost_price_date == ctx["delivery"]
 
 
 def test_approve_endpoint_end_to_end(client, db_session, ctx, auth_headers):
