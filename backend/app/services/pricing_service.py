@@ -670,6 +670,148 @@ def list_all_prices(
     return result
 
 
+# Same wording as the badges on the Supplier Prices page (RowApprovalBadge).
+_APPROVAL_LABELS = {
+    "DRAFT": "Draft",
+    "PENDING": "Awaiting signature",
+    "APPROVED": "Approved",
+    "REJECTED": "Rejected",
+    "EXPIRED": "Not approved",
+}
+# MKT Price on the Supplier Prices page: 70% of the Keells price.
+MKT_FACTOR = 0.7
+
+
+def build_admin_prices_excel(db: Session, delivery_date: date | None = None, supplier_id: int | None = None) -> tuple[bytes, date]:
+    """
+    Admin's Supplier Prices table as .xlsx: one row per product with the
+    Keells and MKT prices, then Supplier Price / Adjusted Price / Status
+    per supplier. Keells is looked up the way the page does it: today's
+    entry, else the most recent one ever entered (with its date shown).
+    """
+    import io
+
+    from openpyxl import Workbook
+    from openpyxl.drawing.image import Image as XLImage
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.utils import get_column_letter
+
+    if delivery_date is None:
+        delivery_date = _current_cycle_delivery_date(datetime.now(BUSINESS_TZ))
+    rows = list_all_prices(db, delivery_date, supplier_id)
+
+    today = datetime.now(BUSINESS_TZ).date()
+    keells = {r.product_id: r for r in get_last_reference_prices(db, "KEELLS")}
+    keells.update({r.product_id: r for r in list_reference_prices(db, today, "KEELLS")})
+
+    suppliers = sorted({(r["supplier_name"], r["supplier_id"]) for r in rows})
+    products: dict[int, dict] = {}
+    for r in rows:
+        p = products.setdefault(r["product_id"], {"row": r, "cells": {}})
+        p["cells"][r["supplier_id"]] = r
+
+    fixed = ["Product Code", "Category", "Product", "Keells Price", "Keells Date", "MKT Price"]
+    per_supplier = ["Supplier Price", "Adjusted Price", "Status"]
+    last_col = len(fixed) + len(per_supplier) * len(suppliers)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Supplier Prices"
+
+    ws.row_dimensions[1].height = 42
+    logo = XLImage(str(_SPAR_LOGO_PATH))
+    logo.width, logo.height = 280, 44  # source is 1014x161
+    ws.add_image(logo, "A1")
+
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=max(last_col, 6))
+    ws["A2"] = f"Supplier Prices — delivery {delivery_date:%A %d %B %Y}"
+    ws["A2"].font = Font(bold=True, size=14, color=_SPAR_GREEN)
+    ws.row_dimensions[2].height = 22
+    ws.merge_cells(start_row=3, start_column=1, end_row=3, end_column=max(last_col, 6))
+    ws["A3"] = (
+        f"MKT Price = Keells price × {int(MKT_FACTOR * 100)}%. Keells Date is when that Keells price was entered. "
+        "Bold green = lowest supplier price for the item."
+    )
+    ws["A3"].font = Font(italic=True, size=9, color="666666")
+
+    green = PatternFill(start_color=_SPAR_GREEN, end_color=_SPAR_GREEN, fill_type="solid")
+    keells_fill = PatternFill(start_color="DCFCE7", end_color="DCFCE7", fill_type="solid")
+    mkt_fill = PatternFill(start_color="FFFBEB", end_color="FFFBEB", fill_type="solid")
+    adj_fill = PatternFill(start_color="DBEAFE", end_color="DBEAFE", fill_type="solid")
+    lowest_fill = PatternFill(start_color="E8F5EC", end_color="E8F5EC", fill_type="solid")
+    left_edge = Border(left=Side(style="thin", color="BBBBBB"))
+    white_bold = Font(bold=True, color="FFFFFF")
+    centre = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    # Two header rows: supplier names merged over their three columns, then
+    # the column titles. Fixed columns span both rows.
+    top, sub = 5, 6
+    for col, title in enumerate(fixed, start=1):
+        ws.merge_cells(start_row=top, start_column=col, end_row=sub, end_column=col)
+        cell = ws.cell(row=top, column=col, value=title)
+        cell.font, cell.fill, cell.alignment = white_bold, green, centre
+    for i, (name, _) in enumerate(suppliers):
+        first = len(fixed) + 1 + i * len(per_supplier)
+        ws.merge_cells(start_row=top, start_column=first, end_row=top, end_column=first + len(per_supplier) - 1)
+        cell = ws.cell(row=top, column=first, value=name)
+        cell.font, cell.fill, cell.alignment = white_bold, green, centre
+        for j, title in enumerate(per_supplier):
+            cell = ws.cell(row=sub, column=first + j, value=title)
+            cell.font, cell.fill, cell.alignment = white_bold, green, centre
+    ws.row_dimensions[sub].height = 30
+
+    row_no = sub
+    for product_id, p in products.items():
+        row_no += 1
+        info = p["row"]
+        ref = keells.get(product_id)
+        keells_price = float(ref.price) if ref else None
+        values = [
+            info["product_code"],
+            info["category_name"],
+            info["product_description"],
+            keells_price,
+            ref.delivery_date if ref else None,
+            round(keells_price * MKT_FACTOR, 2) if keells_price is not None else None,
+        ]
+        for col, value in enumerate(values, start=1):
+            ws.cell(row=row_no, column=col, value=value)
+        ws.cell(row=row_no, column=4).fill = keells_fill
+        ws.cell(row=row_no, column=5).fill = keells_fill
+        ws.cell(row=row_no, column=5).number_format = "dd mmm yyyy"
+        ws.cell(row=row_no, column=6).fill = mkt_fill
+        for col in (4, 6):
+            ws.cell(row=row_no, column=col).number_format = "#,##0.00"
+
+        for i, (_, sid) in enumerate(suppliers):
+            first = len(fixed) + 1 + i * len(per_supplier)
+            cell = p["cells"].get(sid)
+            price_cell = ws.cell(row=row_no, column=first, value=cell["price"] if cell else None)
+            price_cell.number_format = "#,##0.00"
+            price_cell.border = left_edge
+            adj_cell = ws.cell(row=row_no, column=first + 1, value=cell["adjusted_price"] if cell else None)
+            adj_cell.number_format = "#,##0.00"
+            adj_cell.fill = adj_fill
+            if not cell:
+                continue
+            if cell["is_lowest_for_product"]:
+                price_cell.font = Font(bold=True, color=_SPAR_GREEN)
+                price_cell.fill = lowest_fill
+            status = _APPROVAL_LABELS.get(cell["approval_status"] or "", "")
+            if cell["approval_status"] == "REJECTED" and cell["counter_price"] is not None:
+                status += f" — supplier's price {cell['counter_price']:.2f}"
+            ws.cell(row=row_no, column=first + 2, value=status or None)
+
+    widths = [14, 12, 36, 13, 13, 12] + [14, 14, 18] * len(suppliers)
+    for col, width in enumerate(widths, start=1):
+        ws.column_dimensions[get_column_letter(col)].width = width
+    ws.freeze_panes = ws.cell(row=sub + 1, column=len(fixed) + 1)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue(), delivery_date
+
+
 def set_adjusted_price(db: Session, admin: User, price_id: int, adjusted_price: float | None) -> SupplierPrice:
     """
     Admin sets (or clears, with None) their negotiated price for one

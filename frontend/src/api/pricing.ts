@@ -219,3 +219,29 @@ export async function downloadPriceTemplate(): Promise<void> {
   a.remove();
   window.URL.revokeObjectURL(url);
 }
+
+/** Admin's Supplier Prices table, with Keells and MKT prices, as .xlsx. */
+export async function downloadAdminPrices(deliveryDate: string, supplierId?: number): Promise<void> {
+  const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+  const access = localStorage.getItem("spar_access_token");
+  const params = new URLSearchParams({ delivery_date: deliveryDate });
+  if (supplierId) params.set("supplier_id", String(supplierId));
+  const res = await fetch(`${API_BASE}/api/v1/pricing/admin/export?${params}`, {
+    headers: access ? { Authorization: `Bearer ${access}` } : {},
+  });
+  if (!res.ok) {
+    throw new Error("Could not download the supplier prices.");
+  }
+  const blob = await res.blob();
+  // Set here too because a cross-origin response doesn't expose Content-Disposition.
+  const filename = `supplier-prices-${deliveryDate}.xlsx`;
+
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.URL.revokeObjectURL(url);
+}

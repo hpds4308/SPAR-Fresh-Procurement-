@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ApiError } from "../../api/client";
 import {
   AdminSupplierPrice,
+  downloadAdminPrices,
   fetchAllPrices,
   fetchLastReferencePrices,
   fetchPriceWindow,
@@ -70,6 +71,8 @@ export default function SupplierPricesView() {
   // Editing a price the supplier has signed (or is about to) cancels that
   // whole sheet — confirm first.
   const [confirmEdit, setConfirmEdit] = useState<{ row: AdminSupplierPrice; raw: string } | null>(null);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   // Keells reference prices, keyed by product_id — independent of the
   // supplier/adjusted-price drafts above, and independent of which
@@ -359,6 +362,18 @@ export default function SupplierPricesView() {
     }
   }
 
+  async function handleDownload() {
+    setDownloading(true);
+    setDownloadError(null);
+    try {
+      await downloadAdminPrices(deliveryDate, supplierId || undefined);
+    } catch {
+      setDownloadError("Could not download the file. Please try again.");
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   async function handleWithdraw(supplierId: number, revisionId: number) {
     setSendAllState((s) => ({ ...s, [supplierId]: "sending" }));
     setSendError((e) => ({ ...e, [supplierId]: "" }));
@@ -427,7 +442,17 @@ export default function SupplierPricesView() {
             {productRows.length} item{productRows.length === 1 ? "" : "s"} · {supplierCount} supplier
             {supplierCount === 1 ? "" : "s"}
           </div>
+
+          <button
+            onClick={handleDownload}
+            disabled={downloading || !deliveryDate || productRows.length === 0}
+            title="Download this table, with Keells and MKT prices, as an Excel file"
+            className="text-sm bg-gradient-to-b from-crate-700 to-crate-800 text-white rounded-full px-4 py-2 font-semibold hover:brightness-110 active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 shadow-md shadow-crate-800/20 transition-all duration-150"
+          >
+            {downloading ? "Preparing…" : "Download Excel"}
+          </button>
         </div>
+        {downloadError && <p className="text-xs text-tomato-600 mt-2">{downloadError}</p>}
         {deliveryDate && (
           <p className="text-xs text-crate-800/40 mt-3">
             Showing quotes for {formatDate(deliveryDate)}. Set an Adjusted Price for one or more items, then click{" "}

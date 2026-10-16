@@ -163,6 +163,22 @@ def admin_all_prices(
     return [AdminSupplierPriceOut(**row) for row in rows]
 
 
+@router.get("/admin/export")
+def admin_export_prices(
+    delivery_date: date | None = None,
+    supplier_id: int | None = None,
+    admin: User = Depends(require_roles("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """The Supplier Prices table (with Keells and MKT prices) as .xlsx."""
+    content, used_date = pricing_service.build_admin_prices_excel(db, delivery_date, supplier_id)
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="supplier-prices-{used_date.isoformat()}.xlsx"'},
+    )
+
+
 @router.patch("/admin/{price_id}/adjust")
 def admin_adjust_price(
     price_id: int,
