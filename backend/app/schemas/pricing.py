@@ -192,3 +192,42 @@ class ExcelPricePreviewOut(BaseModel):
     # Rows with a product code but no price — the supplier isn't quoting
     # that product, so they're left out rather than reported as errors.
     blank_price_count: int
+
+
+class KeellsExcelLine(BaseModel):
+    """One row of an uploaded Keells price file, after validation."""
+
+    row_number: int
+    dc_code: str
+    system_name: str | None = None
+    keells_name: str | None = None
+    product_id: int | None = None
+    product_description: str | None = None
+    unit: str | None = None
+    price: float | None = None
+    error: str | None = None
+
+
+class KeellsExcelMissing(BaseModel):
+    dc_code: str
+    system_name: str
+
+
+class KeellsExcelPreviewOut(BaseModel):
+    """Never saves anything. Importing is all-or-nothing: only allowed when error_count is 0."""
+
+    delivery_date: date
+    lines: list[KeellsExcelLine]
+    valid_count: int
+    error_count: int
+    # Keells comparison products with no row in the file — they'll have no
+    # Keells price for this date after importing.
+    not_in_file: list[KeellsExcelMissing]
+    # KEELLS prices already saved for this date, which the import replaces.
+    existing_count: int
+
+
+class KeellsExcelImportOut(BaseModel):
+    delivery_date: date
+    imported: int
+    replaced: int

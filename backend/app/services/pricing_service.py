@@ -13,6 +13,7 @@ Resubmitting a price for the same product/delivery date before the cutoff
 overwrites the previous quote (upsert), so a supplier can correct a typo
 or adjust before the window closes without creating duplicate rows.
 """
+import logging
 from datetime import datetime, date, timedelta, time, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -38,6 +39,7 @@ from app.services import settings_service
 from app.services import price_approval_service
 
 BUSINESS_TZ = ZoneInfo("Asia/Colombo")
+logger = logging.getLogger("spar.pricing")
 # Longest range Suppliers Price History (list_all_prices) can load at once.
 MAX_PRICE_HISTORY_DAYS = 120
 
@@ -954,20 +956,41 @@ def set_reference_price(
     return row
 
 
-def clear_reference_prices(db: Session, delivery_date: date, source: str = "KEELLS") -> int:
+def replace_reference_prices(
+    db: Session, admin: User, delivery_date: date, prices: dict[int, float], source: str = "KEELLS"
+) -> int:
     """
-    Deletes every reference price row for one source/date. Used by
-    keells_scrape_service.run_scrape to fully REPLACE a day's KEELLS
-    prices with a fresh scrape rather than merging on top of whatever was
-    there before (the Keells Price page is sync-only now — see
-    AdminKeellsPrices.tsx — so nothing should be left over from a manual
-    entry or a stale prior scrape once a new one has run). Returns the
-    number of rows removed.
+    REPLACES one source's reference prices for one date with `prices`
+    ({product_id: price}) in a single transaction: the date's old rows are
+    deleted and the new ones written together, then committed once — so a
+    failure part-way leaves the old prices exactly as they were. Other
+    dates and other sources are never touched. Used by both the Keells
+    sync (keells_scrape_service) and the Keells Excel import
+    (keells_import_service). Returns how many old rows were replaced.
     """
-    deleted = (
-        db.query(MarketReferencePrice)
-        .filter(MarketReferencePrice.delivery_date == delivery_date, MarketReferencePrice.source == source)
-        .delete(synchronize_session=False)
-    )
-    db.commit()
-    return deleted
+    if not prices:
+        raise ValidationFailedError("There are no prices to save, so nothing was changed.")
+    now = datetime.now(timezone.utc)
+    try:
+        replaced = (
+            db.query(MarketReferencePrice)
+            .filter(MarketReferencePrice.delivery_date == delivery_date, MarketReferencePrice.source == source)
+            .delete(synchronize_session=False)
+        )
+        db.add_all(
+            MarketReferencePrice(
+                product_id=product_id,
+                source=source,
+                delivery_date=delivery_date,
+                price=price,
+                updated_by=admin.id,
+                updated_at=now,
+            )
+            for product_id, price in prices.items()
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Saving %s reference prices for %s failed; rolled back", source, delivery_date)
+        raise
+    return replaced

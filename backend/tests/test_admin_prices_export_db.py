@@ -24,9 +24,10 @@ def test_excel_has_keells_mkt_and_each_suppliers_prices(db_session, ctx):
     today = datetime.now(pricing_service.BUSINESS_TZ).date()
     first, second = ctx["rows"]
     # Today's Keells price for the first item; only an older one for the second.
-    db_session.add(MarketReferencePrice(product_id=first.product_id, source="KEELLS", price=200, delivery_date=today))
+    stamp = dict(updated_by=ctx["admin"].id, updated_at=datetime.now(pricing_service.BUSINESS_TZ))
+    db_session.add(MarketReferencePrice(product_id=first.product_id, source="KEELLS", price=200, delivery_date=today, **stamp))
     old = today - timedelta(days=3)
-    db_session.add(MarketReferencePrice(product_id=second.product_id, source="KEELLS", price=150, delivery_date=old))
+    db_session.add(MarketReferencePrice(product_id=second.product_id, source="KEELLS", price=150, delivery_date=old, **stamp))
     db_session.commit()
     _adjust_all(db_session, ctx)  # 100 -> 90, 110 -> 95
 

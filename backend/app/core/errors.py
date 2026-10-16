@@ -50,6 +50,12 @@ class ConflictError(AppError):
     message = "This action conflicts with existing data."
 
 
+class UpstreamServiceError(AppError):
+    """An outside service we depend on (e.g. keellssuper.com) failed or refused us."""
+    status_code = 502
+    message = "An outside service didn't respond as expected. Please try again later."
+
+
 def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
     async def handle_app_error(request: Request, exc: AppError):

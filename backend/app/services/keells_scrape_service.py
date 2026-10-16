@@ -19,11 +19,13 @@ Runs two ways:
 2. POST /pricing/reference/keells-sync — an admin-triggered immediate
    run, for refreshing today's prices without waiting on the schedule.
 """
+import logging
 import re
 from datetime import date
 
 from sqlalchemy.orm import Session
 
+from app.core.errors import UpstreamServiceError
 from app.models.product import Product
 from app.models.user import Role, User, UserRole
 from app.services import pricing_service
@@ -38,10 +40,58 @@ PRICE_SELECTOR = ".product-card-final-priceV2"
 ARROW_SELECTOR = "button.page-number-button-arrow"
 
 
-class KeellsScrapeError(Exception):
-    """Raised when the scrape can't produce any matched prices at all (site
-    down, layout changed, zero matches) — the caller (script or API route)
-    logs/surfaces this and moves on rather than crashing."""
+logger = logging.getLogger("spar.keells")
+
+# Shown to Admin as-is — no technical detail; the server log has that.
+BLOCKED_MESSAGE = (
+    "Keells has blocked automatic price retrieval from our server. Existing prices were not changed. "
+    "Please upload the latest Keells price Excel file."
+)
+UNREACHABLE_MESSAGE = (
+    "Couldn't reach keellssuper.com. Existing prices were not changed. "
+    "Please try again later or upload the latest Keells price Excel file."
+)
+NO_PRODUCTS_MESSAGE = (
+    "keellssuper.com didn't show any products. Existing prices were not changed. "
+    "Please upload the latest Keells price Excel file."
+)
+NO_MATCHES_MESSAGE = (
+    "Read the Keells site but none of its products matched ours — its layout may have changed. "
+    "Existing prices were not changed. Please upload the latest Keells price Excel file."
+)
+
+# Cloudflare's challenge page ("Performing security verification") is what
+# keellssuper.com serves an automated browser from a cloud server.
+_BLOCK_STATUSES = {403, 429, 503}
+_BLOCK_PAGE_MARKERS = ("performing security verification", "verify you are human")
+
+
+class KeellsScrapeError(UpstreamServiceError):
+    """The scrape couldn't produce prices (blocked, site down, layout
+    changed, zero matches). An AppError, so the API answers 502 with a
+    readable message; the scheduled worker logs it and carries on. Existing
+    prices are never touched when this is raised."""
+
+
+def _looks_blocked(page) -> bool:
+    try:
+        text = f"{page.title()} {page.inner_text('body', timeout=2_000)}".lower()
+    except Exception:
+        return False
+    return any(marker in text for marker in _BLOCK_PAGE_MARKERS)
+
+
+def _wait_for_products(page, url: str, timeout: int) -> None:
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
+    try:
+        page.locator(NAME_SELECTOR).first.wait_for(state="visible", timeout=timeout)
+    except PlaywrightTimeoutError:
+        if _looks_blocked(page):
+            logger.warning("Keells sync blocked (security check page, no products): %s", url)
+            raise KeellsScrapeError(BLOCKED_MESSAGE)
+        logger.warning("Keells sync: no products appeared within %d ms: %s", timeout, url)
+        raise KeellsScrapeError(NO_PRODUCTS_MESSAGE)
 
 
 # =============================================================
@@ -178,7 +228,20 @@ def _scrape_category(page, url: str, category: str, needs_view_all: bool) -> lis
     price} for one category page, walking every page of results the same
     way the reference scraper does: click "View All" first if needed, then
     repeatedly click the right pagination arrow until it disappears."""
-    page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+    from playwright.sync_api import Error as PlaywrightError
+
+    try:
+        response = page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+    except PlaywrightError as e:
+        logger.warning("Keells sync: could not open %s: %s", url, e)
+        raise KeellsScrapeError(UNREACHABLE_MESSAGE) from e
+    status = response.status if response is not None else None
+    if status in _BLOCK_STATUSES:
+        logger.warning("Keells sync blocked: HTTP %s from %s", status, url)
+        raise KeellsScrapeError(BLOCKED_MESSAGE)
+    if status is not None and status >= 400:
+        logger.warning("Keells sync: HTTP %s from %s", status, url)
+        raise KeellsScrapeError(UNREACHABLE_MESSAGE)
 
     if needs_view_all:
         # The page is a client-rendered SPA — how long the "View All"
@@ -190,15 +253,19 @@ def _scrape_category(page, url: str, category: str, needs_view_all: bool) -> lis
         try:
             view_all.first.wait_for(state="visible", timeout=20_000)
         except Exception:
+            if _looks_blocked(page):
+                logger.warning("Keells sync blocked (security check page, no View All): %s", url)
+                raise KeellsScrapeError(BLOCKED_MESSAGE)
+            logger.warning("Keells sync: View All button never appeared: %s", url)
             return []  # never appeared — same as "not found" before
         view_all.first.scroll_into_view_if_needed()
         page.wait_for_timeout(300)
         view_all.first.click(force=True)
         page.wait_for_timeout(1500)
-        page.locator(NAME_SELECTOR).first.wait_for(state="visible", timeout=20_000)
+        _wait_for_products(page, url, 20_000)
         page.wait_for_timeout(500)
     else:
-        page.locator(NAME_SELECTOR).first.wait_for(state="visible", timeout=20_000)
+        _wait_for_products(page, url, 20_000)
 
     products: dict[str, dict] = {}
 
@@ -305,14 +372,12 @@ def run_scrape(db: Session, admin: User | None = None, delivery_date: date | Non
     matches against REQUIRED_PRODUCTS, and REPLACES the day's KEELLS
     reference prices with what it found — for `delivery_date`, or the
     current price window's delivery date if not given (same default used
-    everywhere else reference prices are set). "Replaces" means every
-    existing KEELLS price for that date is cleared first (see
-    pricing_service.clear_reference_prices) and only what this run
-    actually matches is written back, so nothing stale (a manual entry,
-    an item dropped from Keells, a previous day's carried-forward value)
-    lingers after a sync — the Keells Price page is sync-only, not
-    hand-editable. Raises KeellsScrapeError if nothing could be matched
-    at all, in which case existing prices are left untouched.
+    everywhere else reference prices are set). "Replaces" means that
+    date's KEELLS prices become exactly what this run matched, in one
+    transaction (pricing_service.replace_reference_prices), so nothing
+    stale lingers after a sync. Raises KeellsScrapeError if the site
+    blocks us, won't load, or nothing could be matched — existing prices
+    are left untouched in every such case.
     """
     from playwright.sync_api import sync_playwright  # imported lazily — only the scrape worker needs this
 
@@ -320,29 +385,37 @@ def run_scrape(db: Session, admin: User | None = None, delivery_date: date | Non
     if not admin:
         raise KeellsScrapeError("No active ADMIN account found to attribute this import to.")
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        try:
-            page = browser.new_page()
-            local_fruits = _scrape_category(page, LOCAL_FRUITS_URL, "Local Fruits", needs_view_all=False)
-            fresh_vegetables = _scrape_category(page, FRESH_VEGETABLES_URL, "Fresh Vegetables", needs_view_all=True)
-        finally:
-            browser.close()
+    from playwright.sync_api import Error as PlaywrightError
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            try:
+                page = browser.new_page()
+                local_fruits = _scrape_category(page, LOCAL_FRUITS_URL, "Local Fruits", needs_view_all=False)
+                fresh_vegetables = _scrape_category(page, FRESH_VEGETABLES_URL, "Fresh Vegetables", needs_view_all=True)
+            finally:
+                browser.close()
+    except KeellsScrapeError:
+        raise
+    except PlaywrightError as e:
+        # Any other timeout/navigation failure — a readable error instead of
+        # an unhandled 500 (which the browser only sees as "Failed to fetch",
+        # since that response carries no CORS headers).
+        logger.warning("Keells sync failed in the browser: %s", e)
+        raise KeellsScrapeError(UNREACHABLE_MESSAGE) from e
 
     all_scraped = local_fruits + fresh_vegetables
     matched = _match_required_products(all_scraped)
     if not matched:
-        raise KeellsScrapeError(
-            "Scraped the Keells site but matched zero known items — page layout may have changed."
-        )
+        logger.warning("Keells sync: scraped %d products but matched none", len(all_scraped))
+        raise KeellsScrapeError(NO_MATCHES_MESSAGE)
 
     products_by_code = {p.product_code: p for p in db.query(Product).all()}
     if delivery_date is None:
         delivery_date = pricing_service.get_price_window(db).delivery_date
 
-    pricing_service.clear_reference_prices(db, delivery_date, SOURCE)
-
-    saved = 0
+    prices: dict[int, float] = {}
     skipped_no_price = 0
     unmatched: list[dict] = []
     for row in matched:
@@ -354,8 +427,16 @@ def run_scrape(db: Session, admin: User | None = None, delivery_date: date | Non
         if not product:
             unmatched.append({"dc_code": row["dc_code"], "system_name": row["system_name"]})
             continue
-        pricing_service.set_reference_price(db, admin, product.id, delivery_date, price, SOURCE)
-        saved += 1
+        prices[product.id] = price
+    if not prices:
+        logger.warning("Keells sync: %d matches but no usable prices", len(matched))
+        raise KeellsScrapeError(NO_MATCHES_MESSAGE)
+
+    pricing_service.replace_reference_prices(db, admin, delivery_date, prices, SOURCE)
+    saved = len(prices)
+    logger.info(
+        "Keells sync saved %d prices for %s (scraped %d, matched %d)", saved, delivery_date, len(all_scraped), len(matched)
+    )
 
     return {
         "delivery_date": delivery_date,

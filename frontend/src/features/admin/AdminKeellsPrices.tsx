@@ -1,7 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError } from "../../api/client";
 import { compareProductDisplayOrder, fetchProducts, Product } from "../../api/orders";
-import { fetchReferencePrices, KeellsSyncResult, ReferencePrice, syncKeellsPrices } from "../../api/pricing";
+import {
+  fetchReferencePrices,
+  importKeellsExcel,
+  KeellsExcelImportResult,
+  KeellsExcelPreview,
+  KeellsSyncResult,
+  previewKeellsExcel,
+  ReferencePrice,
+  syncKeellsPrices,
+} from "../../api/pricing";
+import KeellsExcelPreviewModal from "./KeellsExcelPreviewModal";
 import EmptyState from "../shared/EmptyState";
 import { SkeletonTable } from "../shared/ui/Skeleton";
 import { CategoryBadge } from "../shared/ui/CategoryBadge";
@@ -21,12 +31,13 @@ function todayIso(): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-// This page is sync-only, not hand-editable: prices come exclusively from
-// "Sync from Keells Now" (or the daily scheduled scrape), which replaces
-// the whole day's KEELLS prices in one shot — see
-// keells_scrape_service.run_scrape / pricing_service.clear_reference_prices.
-// A product with no synced price for the selected date is left out of the
-// list entirely rather than shown as a blank row.
+// Not hand-editable: prices come from an uploaded Keells price Excel (the
+// scraper's keells-required-products.xlsx — the supported way while
+// keellssuper.com blocks our server) or "Sync from Keells Now". Either one
+// replaces the whole day's KEELLS prices in one transaction — see
+// keells_import_service / keells_scrape_service and
+// pricing_service.replace_reference_prices. A product with no price for the
+// selected date is left out of the list rather than shown as a blank row.
 export default function AdminKeellsPrices() {
   const [products, setProducts] = useState<Product[]>([]);
   const [prices, setPrices] = useState<ReferencePrice[]>([]);
@@ -40,14 +51,22 @@ export default function AdminKeellsPrices() {
   const [syncResult, setSyncResult] = useState<KeellsSyncResult | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
 
+  // Excel upload: checked first (preview), imported only on confirm.
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [reading, setReading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [excel, setExcel] = useState<{ file: File; preview: KeellsExcelPreview } | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importResult, setImportResult] = useState<KeellsExcelImportResult | null>(null);
+
   function reloadPrices() {
     return fetchReferencePrices(deliveryDate).then(setPrices);
   }
 
   async function handleSyncNow() {
     setSyncing(true);
-    setSyncError(null);
-    setSyncResult(null);
+    clearMessages();
     try {
       const result = await syncKeellsPrices(deliveryDate);
       setSyncResult(result);
@@ -58,6 +77,46 @@ export default function AdminKeellsPrices() {
       setSyncError(err instanceof ApiError ? err.message : "Could not sync prices from Keells.");
     } finally {
       setSyncing(false);
+    }
+  }
+
+  function clearMessages() {
+    setSyncError(null);
+    setSyncResult(null);
+    setUploadError(null);
+    setImportResult(null);
+  }
+
+  async function handleExcelChosen(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // so choosing the same file again still fires onChange
+    if (!file || !deliveryDate) return;
+    clearMessages();
+    setReading(true);
+    try {
+      const preview = await previewKeellsExcel(file, deliveryDate);
+      setImportError(null);
+      setExcel({ file, preview });
+    } catch (err) {
+      setUploadError(err instanceof ApiError ? err.message : "Could not read that Excel file. Please try again.");
+    } finally {
+      setReading(false);
+    }
+  }
+
+  async function handleImport() {
+    if (!excel) return;
+    setImporting(true);
+    setImportError(null);
+    try {
+      const result = await importKeellsExcel(excel.file, excel.preview.delivery_date);
+      setExcel(null);
+      setImportResult(result);
+      if (result.delivery_date === deliveryDate) await reloadPrices();
+    } catch (err) {
+      setImportError(err instanceof ApiError ? err.message : "Could not import the prices. Please try again.");
+    } finally {
+      setImporting(false);
     }
   }
 
@@ -143,21 +202,38 @@ export default function AdminKeellsPrices() {
             ))}
           </select>
           <span className="text-xs text-crate-800/40">{filteredProducts.length} items</span>
+          <input ref={fileInput} type="file" accept=".xlsx" className="hidden" onChange={handleExcelChosen} />
           <button
             type="button"
-            disabled={syncing || !deliveryDate}
-            onClick={handleSyncNow}
+            disabled={reading || syncing || !deliveryDate}
+            onClick={() => fileInput.current?.click()}
             className="border border-crate-700/30 bg-crate-700 hover:bg-crate-800 rounded-full px-4 py-1.5 text-sm text-white transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {reading ? "Reading file…" : "Upload Keells Excel"}
+          </button>
+          <button
+            type="button"
+            disabled={syncing || reading || !deliveryDate}
+            onClick={handleSyncNow}
+            className="border border-sage-300 text-crate-800 hover:bg-sage-50 rounded-full px-4 py-1.5 text-sm transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {syncing ? "Syncing from Keells…" : "Sync from Keells Now"}
           </button>
         </div>
         {deliveryDate && (
           <p className="text-xs text-crate-800/40 mt-3">
-            Keells prices are sync-only — there's nothing to type in here. "Sync from Keells Now" scrapes
-            keellssuper.com directly (this also runs automatically once a day), replacing every price below for{" "}
-            {formatDate(deliveryDate)} with what it finds. A product with no current match from Keells simply won't
-            appear in the list.
+            There's nothing to type in here. Pick the date, then upload the Keells price Excel
+            (keells-required-products.xlsx from the Keells scraper) to set the prices for {formatDate(deliveryDate)}.
+            Keells currently blocks "Sync from Keells Now" from our server, so the Excel upload is the reliable way.
+            Either one replaces every price below for that date; other dates aren't changed. A product with no price
+            simply won't appear in the list.
+          </p>
+        )}
+        {uploadError && <p className="text-xs text-tomato-600 mt-2">{uploadError}</p>}
+        {importResult && (
+          <p className="text-xs text-crate-700 mt-2">
+            Imported {importResult.imported} Keells price{importResult.imported === 1 ? "" : "s"} for{" "}
+            {formatDate(importResult.delivery_date)}.
           </p>
         )}
         {syncError && <p className="text-xs text-tomato-600 mt-2">{syncError}</p>}
@@ -182,7 +258,7 @@ export default function AdminKeellsPrices() {
         ) : filteredProducts.length === 0 ? (
           <EmptyState
             icon={<IconTag width={20} height={20} />}
-            title={prices.length === 0 ? "No Keells prices synced for this date yet" : "No products match your filters"}
+            title={prices.length === 0 ? "No Keells prices for this date yet" : "No products match your filters"}
           />
         ) : (
           <div className="divide-y divide-sage-100">
@@ -207,6 +283,18 @@ export default function AdminKeellsPrices() {
         )}
       </div>
       {error && products.length > 0 && <p className="text-tomato-600 text-sm px-1">{error}</p>}
+
+      {excel && (
+        <KeellsExcelPreviewModal
+          fileName={excel.file.name}
+          preview={excel.preview}
+          dateLabel={formatDate(excel.preview.delivery_date)}
+          importing={importing}
+          error={importError}
+          onImport={handleImport}
+          onClose={() => setExcel(null)}
+        />
+      )}
     </div>
   );
 }

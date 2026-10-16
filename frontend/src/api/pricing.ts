@@ -112,6 +112,45 @@ export function syncKeellsPrices(deliveryDate: string): Promise<KeellsSyncResult
   });
 }
 
+export type KeellsExcelLine = {
+  row_number: number;
+  dc_code: string;
+  system_name: string | null;
+  keells_name: string | null;
+  product_id: number | null;
+  product_description: string | null;
+  unit: string | null;
+  price: number | null;
+  error: string | null;
+};
+
+export type KeellsExcelPreview = {
+  delivery_date: string;
+  lines: KeellsExcelLine[];
+  valid_count: number;
+  error_count: number;
+  not_in_file: { dc_code: string; system_name: string }[];
+  existing_count: number;
+};
+
+export type KeellsExcelImportResult = { delivery_date: string; imported: number; replaced: number };
+
+// Checks a Keells price file (the scraper's keells-required-products.xlsx)
+// for deliveryDate. Saves nothing.
+export function previewKeellsExcel(file: File, deliveryDate: string): Promise<KeellsExcelPreview> {
+  const body = new FormData();
+  body.append("file", file);
+  return apiFetch(`/pricing/reference/keells-excel/preview?delivery_date=${deliveryDate}`, { method: "POST", body });
+}
+
+// Replaces deliveryDate's Keells prices with the file's — all or nothing;
+// the server re-checks the file.
+export function importKeellsExcel(file: File, deliveryDate: string): Promise<KeellsExcelImportResult> {
+  const body = new FormData();
+  body.append("file", file);
+  return apiFetch(`/pricing/reference/keells-excel/import?delivery_date=${deliveryDate}`, { method: "POST", body });
+}
+
 export type AdminSupplierPrice = {
   id: number;
   supplier_id: number;

@@ -22,10 +22,13 @@ from app.schemas.pricing import (
     ReferencePriceOut,
     ReferencePriceSetRequest,
     ExcelPricePreviewOut,
+    KeellsExcelImportOut,
+    KeellsExcelPreviewOut,
 )
 from app.services import pricing_service
 from app.services import price_approval_service
 from app.services import keells_scrape_service
+from app.services import keells_import_service
 
 router = APIRouter(prefix="/pricing", dependencies=[Depends(get_current_user)])
 logger = logging.getLogger("spar.pricing")
@@ -277,14 +280,54 @@ async def sync_keells_prices(
     upload, just launch a headless browser server-side and upsert whatever
     it finds. Can take up to ~60s since it's a real page-by-page scrape.
     """
-    try:
-        result = await run_in_threadpool(keells_scrape_service.run_scrape, db, admin, delivery_date)
-    except keells_scrape_service.KeellsScrapeError as e:
-        raise ValidationFailedError(str(e))
+    # A blocked or failed scrape raises KeellsScrapeError: a 502 with a
+    # readable message, and no prices changed.
+    result = await run_in_threadpool(keells_scrape_service.run_scrape, db, admin, delivery_date)
     return KeellsSyncResultOut(
         delivery_date=result["delivery_date"],
         matched=result["matched"],
         saved=result["saved"],
         skipped_rows=result["skipped_no_price"],
         unmatched=result["unmatched"],
+    )
+
+
+# The scraper's file is ~10 KB for ~60 rows; this only rejects something clearly wrong.
+MAX_KEELLS_EXCEL_BYTES = 5 * 1024 * 1024
+
+
+async def _read_keells_upload(file: UploadFile) -> bytes:
+    contents = await file.read(MAX_KEELLS_EXCEL_BYTES + 1)
+    if len(contents) > MAX_KEELLS_EXCEL_BYTES:
+        raise ValidationFailedError("That file is too large — please upload the Keells price file as the scraper made it.")
+    return contents
+
+
+@router.post("/reference/keells-excel/preview", response_model=KeellsExcelPreviewOut)
+async def preview_keells_excel(
+    delivery_date: date,
+    file: UploadFile = File(...),
+    admin: User = Depends(require_roles("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """Checks every row of a Keells price file for `delivery_date` — saves nothing."""
+    contents = await _read_keells_upload(file)
+    return await run_in_threadpool(keells_import_service.preview_keells_excel, db, delivery_date, contents)
+
+
+@router.post("/reference/keells-excel/import", response_model=KeellsExcelImportOut)
+async def import_keells_excel(
+    delivery_date: date,
+    file: UploadFile = File(...),
+    admin: User = Depends(require_roles("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """
+    Replaces `delivery_date`'s Keells prices with the file's, in one
+    transaction — or changes nothing if any row has a problem. The file is
+    re-checked here, not trusted from the preview.
+    """
+    contents = await _read_keells_upload(file)
+    return await run_in_threadpool(
+        keells_import_service.import_keells_excel, db, admin, delivery_date, contents, file.filename
     )
