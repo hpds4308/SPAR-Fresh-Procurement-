@@ -15,7 +15,7 @@ import {
   PriceSheetDocument,
   SheetStatusBadge,
   formatDateTime,
-  formatLongDate,
+  formatSubmissionDate,
   formatSignDeadline,
   FinalOfferTag,
   rs,
@@ -103,7 +103,7 @@ export default function PriceApprovals({ onChanged }: { onChanged?: () => void }
             >
               <div className="flex-1 min-w-[12rem]">
                 <p className="font-semibold text-crate-950">
-                  {s.item_count} adjusted price{s.item_count === 1 ? "" : "s"} for delivery on {formatLongDate(s.delivery_date)}
+                  {s.item_count} adjusted price{s.item_count === 1 ? "" : "s"} · Date: {formatSubmissionDate(s.delivery_date)}
                 </p>
                 <p className="text-xs text-crate-800/50 mt-1">
                   Sent {formatDateTime(s.sent_at)} · respond by {formatSignDeadline(s.expires_at)}, or your own prices apply
@@ -126,7 +126,7 @@ export default function PriceApprovals({ onChanged }: { onChanged?: () => void }
                   className="w-full text-left py-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 hover:bg-sage-50/60 transition-colors"
                 >
                   <span className="flex-1 min-w-[12rem]">
-                    <span className="block text-sm text-crate-950">Delivery {formatLongDate(s.delivery_date)}</span>
+                    <span className="block text-sm text-crate-950">Date: {formatSubmissionDate(s.delivery_date)}</span>
                     <span className="block text-xs text-crate-800/50 mt-0.5">
                       {s.item_count} item{s.item_count === 1 ? "" : "s"} · sent {formatDateTime(s.sent_at)}
                       {s.responded_at ? ` · responded ${formatDateTime(s.responded_at)}` : ""}
@@ -183,7 +183,7 @@ function SheetDetail({ id, onBack, onChanged }: { id: number; onBack: () => void
               </Button>
             )}
           </div>
-          <PriceSheetDocument sheet={sheet} priceLabel="Your price" />
+          <PriceSheetDocument sheet={sheet} priceLabel="Your price" submissionDate />
           <StatusNote sheet={sheet} />
         </div>
       )}
@@ -311,7 +311,7 @@ function ResponseForm({ sheet, onDone }: { sheet: PriceSheet; onDone: (s: PriceS
             <p className="text-xs uppercase tracking-wide text-crate-800/40 font-semibold">SPAR price sheet #{sheet.id}</p>
             <h3 className="font-display text-lg font-semibold text-crate-950 mt-0.5">{sheet.supplier_name}</h3>
             <p className="text-sm text-crate-800/60 mt-1">
-              Delivery on {formatLongDate(sheet.delivery_date)} · sent {formatDateTime(sheet.sent_at)}
+              Date: {formatSubmissionDate(sheet.delivery_date)} · sent {formatDateTime(sheet.sent_at)}
               {sheet.sent_by_name ? ` by ${sheet.sent_by_name}` : ""}
             </p>
           </div>
@@ -470,8 +470,8 @@ function ResponseForm({ sheet, onDone }: { sheet: PriceSheet; onDone: (s: PriceS
             />
             <span>
               I agree, on behalf of <strong>{sheet.supplier_name}</strong>, to supply the {approved.length} approved item
-              {approved.length === 1 ? "" : "s"} at the SPAR prices shown for delivery on{" "}
-              <strong>{formatLongDate(sheet.delivery_date)}</strong>.
+              {approved.length === 1 ? "" : "s"} at the SPAR prices shown for{" "}
+              <strong>{formatSubmissionDate(sheet.delivery_date)}</strong>.
             </span>
           </label>
           <div>

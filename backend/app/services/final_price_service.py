@@ -24,7 +24,7 @@ import base64
 import hashlib
 import io
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -160,7 +160,7 @@ def build_list(db: Session, supplier_user: User, delivery_date: date) -> dict:
     final_at = approvals.expires_at(delivery_date, cutoff)
     if approvals._now() < final_at:
         raise ValidationFailedError(
-            f"Prices for delivery on {delivery_date:%A %d %B} become final at "
+            f"Prices for {_submission_day(delivery_date):%A %d %B} become final at "
             f"{approvals.format_cutoff(cutoff)} on {final_at:%A %d %B}."
         )
     rows = (
@@ -169,7 +169,7 @@ def build_list(db: Session, supplier_user: User, delivery_date: date) -> dict:
         .all()
     )
     if not rows:
-        raise NotFoundError(f"You didn't submit prices for delivery on {delivery_date:%A %d %B}.")
+        raise NotFoundError(f"You didn't submit prices for {_submission_day(delivery_date):%A %d %B}.")
 
     products = {p.id: p for p in db.query(Product).filter(Product.id.in_([r.product_id for r in rows]))}
     categories = {c.id: c.name for c in db.query(ProductCategory)}
@@ -246,13 +246,18 @@ def _png_bytes(data_url: str) -> bytes:
     return base64.b64decode(data_url.split(",", 1)[1])
 
 
+def _submission_day(delivery_date: date) -> date:
+    """The day the supplier submitted these prices — shown to suppliers as "Date"."""
+    return delivery_date - timedelta(days=approvals.SUBMISSION_DAYS_BEFORE_DELIVERY)
+
+
 def _when(dt: datetime) -> str:
     return f"{approvals.format_cutoff(dt.time())} on {dt:%A %d %B %Y}"
 
 
 def filename(data: dict, ext: str) -> str:
     safe = "".join(c if c.isalnum() else "-" for c in data["supplier_name"]).strip("-").lower() or "supplier"
-    return f"spar-final-prices-{safe}-{data['delivery_date'].isoformat()}.{ext}"
+    return f"spar-final-prices-{safe}-{_submission_day(data['delivery_date']).isoformat()}.{ext}"
 
 
 # ---- Excel ----
@@ -281,7 +286,7 @@ def build_excel(data: dict) -> bytes:
         ws.row_dimensions[row].height = height
 
     banner(2, f"Final Price List — {data['supplier_name']}", Font(bold=True, size=14, color=_SPAR_GREEN), 22)
-    banner(3, f"Delivery date: {data['delivery_date']:%A %d %B %Y}", Font(bold=True, size=11), 18)
+    banner(3, f"Date: {_submission_day(data['delivery_date']):%A %d %B %Y}", Font(bold=True, size=11), 18)
     banner(
         4,
         f"Prices final at {_when(data['finalized_at'])}  ·  Reference {data['reference']}",
@@ -401,14 +406,14 @@ def build_pdf(data: dict) -> bytes:
         rightMargin=14 * mm,
         topMargin=14 * mm,
         bottomMargin=16 * mm,
-        title=f"SPAR final price list — {data['supplier_name']} — {data['delivery_date'].isoformat()}",
+        title=f"SPAR final price list — {data['supplier_name']} — {_submission_day(data['delivery_date']).isoformat()}",
         author="SPAR Fresh Procurement",
     )
     story = [
         Image(str(_SPAR_LOGO_PATH), width=60 * mm, height=60 * mm * 161 / 1014),
         Spacer(1, 4 * mm),
         Paragraph(f"Final Price List — {esc(data['supplier_name'])}", title),
-        Paragraph(f"<b>Delivery date:</b> {data['delivery_date']:%A %d %B %Y}", body),
+        Paragraph(f"<b>Date:</b> {_submission_day(data['delivery_date']):%A %d %B %Y}", body),
         Paragraph(f"Prices final at {_when(data['finalized_at'])} &nbsp;·&nbsp; Reference {data['reference']}", small),
         Spacer(1, 5 * mm),
     ]
@@ -487,7 +492,7 @@ def build_pdf(data: dict) -> bytes:
     signatures.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0)]))
     story.append(KeepTogether([signatures]))
 
-    footer_text = f"SPAR final price list · {data['supplier_name']} · delivery {data['delivery_date'].isoformat()} · Ref {data['reference']}"
+    footer_text = f"SPAR final price list · {data['supplier_name']} · date {_submission_day(data['delivery_date']).isoformat()} · Ref {data['reference']}"
 
     def footer(canvas, doc_) -> None:
         canvas.saveState()

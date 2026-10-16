@@ -48,6 +48,22 @@ export function formatLongDate(iso: string): string {
   });
 }
 
+// Suppliers submit prices 2 days before delivery
+// (SUBMISSION_DAYS_BEFORE_DELIVERY in the backend). Supplier pages show
+// that submission day as "Date" rather than the delivery date.
+const SUBMISSION_DAYS_BEFORE_DELIVERY = 2;
+
+export function submissionDateIso(deliveryIso: string): string {
+  const d = new Date(deliveryIso + "T00:00:00");
+  d.setDate(d.getDate() - SUBMISSION_DAYS_BEFORE_DELIVERY);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+export function formatSubmissionDate(deliveryIso: string): string {
+  return formatLongDate(submissionDateIso(deliveryIso));
+}
+
 export function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString(undefined, {
     day: "numeric",
@@ -273,7 +289,22 @@ export function SignatureRecord({ sheet }: { sheet: PriceSheet }) {
  * Printable agreement: the items plus the signature record, wrapped in
  * .print-area so window.print() (Save as PDF) outputs just this.
  */
-export function PriceSheetDocument({ sheet, priceLabel }: { sheet: PriceSheet; priceLabel: string }) {
+export function PriceSheetDocument({
+  sheet,
+  priceLabel,
+  submissionDate = false,
+}: {
+  sheet: PriceSheet;
+  priceLabel: string;
+  // Supplier view: show the submission day as "Date" instead of the delivery date.
+  submissionDate?: boolean;
+}) {
+  const dateText = submissionDate
+    ? `Date: ${formatSubmissionDate(sheet.delivery_date)}`
+    : `Delivery on ${formatLongDate(sheet.delivery_date)}`;
+  const forDate = submissionDate
+    ? `for ${formatSubmissionDate(sheet.delivery_date)}`
+    : `for delivery on ${formatLongDate(sheet.delivery_date)}`;
   return (
     <div className="print-area space-y-5">
       <div>
@@ -282,7 +313,7 @@ export function PriceSheetDocument({ sheet, priceLabel }: { sheet: PriceSheet; p
         </p>
         <h3 className="font-display text-lg font-semibold text-crate-950 mt-0.5">{sheet.supplier_name}</h3>
         <p className="text-sm text-crate-800/60 mt-1">
-          Delivery on {formatLongDate(sheet.delivery_date)} · sent {formatDateTime(sheet.sent_at)}
+          {dateText} · sent {formatDateTime(sheet.sent_at)}
           {sheet.sent_by_name ? ` by ${sheet.sent_by_name}` : ""}
         </p>
       </div>
@@ -291,7 +322,7 @@ export function PriceSheetDocument({ sheet, priceLabel }: { sheet: PriceSheet; p
         <p className="text-sm text-crate-800/80">
           {sheet.signer_name ? `${sheet.signer_name} agreed on behalf of ${sheet.supplier_name}` : `${sheet.supplier_name} agreed`}{" "}
           to supply {sheet.status === "PARTIAL" ? "the items marked Approved" : "the items above"} at the SPAR prices
-          shown for delivery on {formatLongDate(sheet.delivery_date)}.
+          shown {forDate}.
         </p>
       )}
       {(sheet.status === "PARTIAL" || sheet.status === "REJECTED") && sheet.rejection_reason && (

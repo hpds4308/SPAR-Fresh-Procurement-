@@ -16,11 +16,8 @@ import { CategoryBadge } from "../shared/ui/CategoryBadge";
 import PriceExcelPreviewModal from "./PriceExcelPreviewModal";
 import { ProductPromotion } from "../shared/ui/PromotionBadge";
 import { ONE_DECIMAL_STEP, formatOneDecimal, isOneDecimal } from "../shared/oneDecimal";
+import { formatSubmissionDate, submissionDateIso } from "../shared/PriceSheetParts";
 
-function formatDate(iso: string): string {
-  const d = new Date(iso + "T00:00:00");
-  return d.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
-}
 
 // Only some products have a real photo on file (named by product code);
 // most don't. Nothing is shown by default — hovering the item name pops
@@ -221,8 +218,8 @@ export default function PriceForm({ onSubmitted }: { onSubmitted: () => void }) 
     setPrices({});
   }
 
-  function shortDate(iso: string): string {
-    const d = new Date(iso + "T00:00:00");
+  function shortDate(deliveryIso: string): string {
+    const d = new Date(submissionDateIso(deliveryIso) + "T00:00:00");
     return d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
   }
 
@@ -330,7 +327,7 @@ export default function PriceForm({ onSubmitted }: { onSubmitted: () => void }) 
       <div className="bg-white rounded-2xl shadow-[0_10px_30px_-12px_rgba(21,56,38,0.15)] border border-sage-100 p-6">
         <p className="text-crate-700 font-semibold">Prices submitted successfully.</p>
         <p className="text-crate-800/60 text-sm mt-1">
-          They apply to delivery on {window_ ? formatDate(window_.delivery_date) : "today"}.
+          Date: {window_ ? formatSubmissionDate(window_.delivery_date) : "today"}.
           You can still adjust them before the {window_?.cutoff_time} cutoff.
         </p>
         <button
@@ -350,7 +347,7 @@ export default function PriceForm({ onSubmitted }: { onSubmitted: () => void }) 
         <PriceExcelPreviewModal
           fileName={excel.fileName}
           preview={excel.preview}
-          deliveryDateLabel={window_ ? formatDate(window_.delivery_date) : null}
+          dateLabel={window_ ? formatSubmissionDate(window_.delivery_date) : null}
           submitting={excelSubmitting}
           error={excelError}
           onSubmit={handleExcelSubmit}
@@ -361,7 +358,7 @@ export default function PriceForm({ onSubmitted }: { onSubmitted: () => void }) 
       <div className="p-6 border-b border-sage-100">
         {window_ && (
           <p className="text-sm text-crate-800/70">
-            Pricing for delivery on <span className="font-medium text-crate-800">{formatDate(window_.delivery_date)}</span>{" "}
+            Date: <span className="font-medium text-crate-800">{formatSubmissionDate(window_.delivery_date)}</span>{" "}
             &middot; closes at {window_.cutoff_time} today &middot; you can resubmit to update a price
             before then
           </p>

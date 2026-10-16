@@ -6,7 +6,7 @@ import { ProductPromotion } from "../shared/ui/PromotionBadge";
 export default function PriceExcelPreviewModal({
   fileName,
   preview,
-  deliveryDateLabel,
+  dateLabel,
   submitting,
   error,
   onSubmit,
@@ -15,7 +15,7 @@ export default function PriceExcelPreviewModal({
 }: {
   fileName: string;
   preview: ExcelPricePreview;
-  deliveryDateLabel: string | null;
+  dateLabel: string | null;
   submitting: boolean;
   error: string | null;
   onSubmit: () => void;
@@ -106,7 +106,7 @@ export default function PriceExcelPreviewModal({
           {valid > 0 && (
             <p className="text-xs text-crate-800/60 mb-3">
               Submitting replaces your price list
-              {deliveryDateLabel ? ` for delivery on ${deliveryDateLabel}` : ""} — any product without a price in
+              {dateLabel ? ` for ${dateLabel}` : ""} — any product without a price in
               this file will be removed from it.
             </p>
           )}

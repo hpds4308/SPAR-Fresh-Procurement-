@@ -4,7 +4,7 @@ import { SupplierPrice, fetchMyPrices, fetchPriceWindow } from "../../api/pricin
 import EmptyState from "../shared/EmptyState";
 import { SkeletonTable } from "../shared/ui/Skeleton";
 import { IconTag } from "../shared/Icons";
-import { RowApprovalBadge } from "../shared/PriceSheetParts";
+import { RowApprovalBadge, formatSubmissionDate } from "../shared/PriceSheetParts";
 import { ProductPromotion } from "../shared/ui/PromotionBadge";
 
 export default function PriceHistory({ refreshKey }: { refreshKey: number }) {
@@ -56,14 +56,16 @@ export default function PriceHistory({ refreshKey }: { refreshKey: number }) {
       <EmptyState
         icon={<IconTag width={20} height={20} />}
         title="No prices submitted yet"
-        description={deliveryDate ? `Submit your prices for delivery on ${deliveryDate} from the Submit Prices tab.` : undefined}
+        description={deliveryDate ? `Submit your prices for ${formatSubmissionDate(deliveryDate)} from the Submit Prices tab.` : undefined}
       />
     );
   }
 
   return (
     <div className="bg-white rounded-2xl shadow-[0_10px_30px_-12px_rgba(21,56,38,0.15)] border border-sage-100 p-6">
-      <p className="text-sm text-crate-800/60 mb-3">Prices submitted for delivery on {deliveryDate}</p>
+      <p className="text-sm text-crate-800/60 mb-3">
+        Date: {deliveryDate ? formatSubmissionDate(deliveryDate) : ""}
+      </p>
       <table className="w-full text-sm">
         <thead>
           <tr className="text-crate-800/40 text-left text-xs uppercase tracking-wide">

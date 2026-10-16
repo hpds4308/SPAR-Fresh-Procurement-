@@ -67,7 +67,8 @@ export function fetchMyFinalPrices(deliveryDate: string): Promise<FinalPriceList
 export async function downloadMyFinalPrices(
   deliveryDate: string,
   supplierName: string,
-  format: "excel" | "pdf"
+  format: "excel" | "pdf",
+  fileDate: string = deliveryDate
 ): Promise<void> {
   const blob = await apiFetchBlob(`/final-prices/mine/${format}?delivery_date=${deliveryDate}`);
   // Built here too because a cross-origin response doesn't expose Content-Disposition.
@@ -75,7 +76,7 @@ export async function downloadMyFinalPrices(
   const url = window.URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `spar-final-prices-${safe}-${deliveryDate}.${format === "excel" ? "xlsx" : "pdf"}`;
+  a.download = `spar-final-prices-${safe}-${fileDate}.${format === "excel" ? "xlsx" : "pdf"}`;
   document.body.appendChild(a);
   a.click();
   a.remove();

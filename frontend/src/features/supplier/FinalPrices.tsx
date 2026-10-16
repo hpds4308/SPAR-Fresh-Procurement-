@@ -10,7 +10,7 @@ import {
 import EmptyState from "../shared/EmptyState";
 import { SkeletonTable } from "../shared/ui/Skeleton";
 import { IconReceipt } from "../shared/Icons";
-import { formatDateTime, formatLongDate, formatSignDeadline, rs } from "../shared/PriceSheetParts";
+import { formatDateTime, formatSignDeadline, formatSubmissionDate, rs, submissionDateIso } from "../shared/PriceSheetParts";
 import { ProductPromotion } from "../shared/ui/PromotionBadge";
 
 const CARD = "bg-white rounded-2xl shadow-[0_10px_30px_-12px_rgba(21,56,38,0.15)] border border-sage-100";
@@ -62,7 +62,7 @@ export default function FinalPrices() {
     setDownloading(format);
     setDownloadError(null);
     try {
-      await downloadMyFinalPrices(list.delivery_date, list.supplier_name, format);
+      await downloadMyFinalPrices(list.delivery_date, list.supplier_name, format, submissionDateIso(list.delivery_date));
     } catch (err) {
       setDownloadError(err instanceof ApiError ? err.message : "Could not download the price list.");
     } finally {
@@ -73,7 +73,7 @@ export default function FinalPrices() {
   const upcoming =
     dates?.next_delivery_date && dates.next_final_at ? (
       <p className="text-xs text-crate-800/50">
-        Your prices for delivery on {formatLongDate(dates.next_delivery_date)} become final at{" "}
+        Your prices for {formatSubmissionDate(dates.next_delivery_date)} become final at{" "}
         {formatSignDeadline(dates.next_final_at)}.
       </p>
     ) : null;
@@ -93,7 +93,7 @@ export default function FinalPrices() {
       <div className={`${CARD} p-5 flex flex-wrap items-end gap-4`}>
         <div>
           <label className="block text-xs font-semibold uppercase tracking-wide text-crate-800/60 mb-1.5">
-            Delivery date
+            Date
           </label>
           <select
             value={selected ?? ""}
@@ -102,7 +102,7 @@ export default function FinalPrices() {
           >
             {dates?.dates.map((d) => (
               <option key={d} value={d}>
-                {formatLongDate(d)}
+                {formatSubmissionDate(d)}
               </option>
             ))}
           </select>
@@ -148,7 +148,7 @@ export default function FinalPrices() {
           <div className="flex flex-wrap items-baseline justify-between gap-2 mb-4">
             <div>
               <h2 className="font-display font-semibold text-lg text-crate-950">
-                Final prices — delivery on {formatLongDate(list.delivery_date)}
+                Final prices — Date: {formatSubmissionDate(list.delivery_date)}
               </h2>
               <p className="text-xs text-crate-800/50">
                 Final since {formatSignDeadline(list.finalized_at)} · Reference {list.reference}
