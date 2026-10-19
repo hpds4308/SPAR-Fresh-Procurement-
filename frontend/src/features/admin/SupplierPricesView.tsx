@@ -731,17 +731,37 @@ export default function SupplierPricesView() {
                         <div className="flex flex-col items-end gap-1">
                           <div className="flex items-center justify-end gap-1.5">
                             <input
-                              type="number"
-                              min="0"
-                              step="0.01"
+                              type="text"
+                              inputMode="numeric"
+                              data-adj-input
                               placeholder="—"
                               value={drafts[cell.id] ?? ""}
-                              onChange={(e) => setDrafts((d) => ({ ...d, [cell.id]: e.target.value }))}
+                              // Whole rupees only: anything from a decimal point on is dropped.
+                              onChange={(e) =>
+                                setDrafts((d) => ({
+                                  ...d,
+                                  [cell.id]: e.target.value.replace(/[.,].*$/, "").replace(/\D/g, ""),
+                                }))
+                              }
+                              onFocus={(e) => e.target.select()}
                               onBlur={(e) => saveAdjustedPrice(cell, e.target.value)}
                               onKeyDown={(e) => {
-                                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                                const input = e.target as HTMLInputElement;
+                                if (e.key === "Enter") input.blur();
+                                // Left/Right jump to the neighbouring supplier's Adjusted Price
+                                // box in the same row (leaving this one saves it on blur).
+                                if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+                                  const boxes = Array.from(
+                                    input.closest("tr")?.querySelectorAll<HTMLInputElement>("input[data-adj-input]") ?? []
+                                  );
+                                  const next = boxes[boxes.indexOf(input) + (e.key === "ArrowLeft" ? -1 : 1)];
+                                  if (next) {
+                                    e.preventDefault();
+                                    next.focus();
+                                  }
+                                }
                               }}
-                              className={`w-20 border rounded-lg px-2 py-1 text-right text-sm bg-sage-50/60 focus:outline-none focus:ring-2 focus:ring-crate-700/30 focus:border-crate-700 focus:bg-white transition-colors duration-150 ${
+                              className={`w-16 border rounded-lg px-2 py-1 text-right text-[9px] bg-sage-50/60 focus:outline-none focus:ring-2 focus:ring-crate-700/30 focus:border-crate-700 focus:bg-white transition-colors duration-150 ${
                                 state === "error" ? "border-tomato-500 ring-1 ring-tomato-500/30" : "border-sage-300"
                               }`}
                             />
