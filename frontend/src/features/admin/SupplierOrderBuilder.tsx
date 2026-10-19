@@ -312,6 +312,39 @@ export default function SupplierOrderBuilder({
     });
   }
 
+  // The per-branch tick in a column header: the same fill as the row tick,
+  // but down one branch's column for every item currently shown in the
+  // grid. Same non-destructive rule — a cell already typed in is kept.
+  function fillColumnFromDemand(branchId: number) {
+    setQty((prev) => {
+      const next = { ...prev };
+      for (const p of rows) {
+        const key = cellKey(p.id, branchId);
+        const ordered = demandByProduct.get(p.id)?.[String(branchId)] ?? 0;
+        const givenElsewhere = assignedElsewhereByBranch[key] ?? 0;
+        const d = Math.max(0, ordered - givenElsewhere);
+        if (d && !next[key]) next[key] = String(d);
+      }
+      return next;
+    });
+  }
+
+  // Second click on the column tick: clears that branch's cells (and any
+  // agreed price/notes on them) for every item shown, leaving other
+  // branches alone.
+  function clearColumnQty(branchId: number) {
+    setQty((prev) => {
+      const next = { ...prev };
+      for (const p of rows) delete next[cellKey(p.id, branchId)];
+      return next;
+    });
+    setExtra((prev) => {
+      const next = { ...prev };
+      for (const p of rows) delete next[cellKey(p.id, branchId)];
+      return next;
+    });
+  }
+
   // Turns a total-only Product Assignment ("200kg avocado to this
   // supplier") into a starting set of branch-level lines, since
   // SupplierAssignment itself carries no branch breakdown. Splits each
@@ -601,11 +634,40 @@ export default function SupplierOrderBuilder({
                     Required Qty
                     <div className="text-[9px] font-normal text-crate-800/35">Total branch demand</div>
                   </th>
-                  {branches.map((b) => (
-                    <th key={b.branch_id} className="px-3 py-2 font-semibold text-crate-800 text-center border-l border-sage-100 normal-case tracking-normal">
-                      {b.branch_name}
-                    </th>
-                  ))}
+                  {branches.map((b) => {
+                    // Column version of the row tick: checked once anything
+                    // is typed in this branch's column; disabled when there's
+                    // nothing left to fill and nothing to clear.
+                    const columnFilled = rows.some((p) => qty[cellKey(p.id, b.branch_id)]?.trim());
+                    const columnHasRemaining = rows.some((p) => {
+                      const ordered = demandByProduct.get(p.id)?.[String(b.branch_id)] ?? 0;
+                      return ordered - (assignedElsewhereByBranch[cellKey(p.id, b.branch_id)] ?? 0) > 0;
+                    });
+                    return (
+                      <th key={b.branch_id} className="px-3 py-2 font-semibold text-crate-800 text-center border-l border-sage-100 normal-case tracking-normal">
+                        {b.branch_name}
+                        <button
+                          type="button"
+                          onClick={() => (columnFilled ? clearColumnQty(b.branch_id) : fillColumnFromDemand(b.branch_id))}
+                          disabled={!columnHasRemaining && !columnFilled}
+                          title={
+                            columnFilled
+                              ? `Clear all ${b.branch_name} quantities`
+                              : `Fill every item's remaining ${b.branch_name} quantity into this column`
+                          }
+                          className={`mt-1 w-5 h-5 rounded-md border flex items-center justify-center mx-auto transition-colors duration-150 ${
+                            columnFilled
+                              ? "bg-crate-700 border-crate-700 text-white"
+                              : "border-sage-300 text-transparent hover:border-crate-700 hover:bg-sage-50"
+                          } disabled:opacity-25 disabled:cursor-default`}
+                        >
+                          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M1 5l3 3 5-6" />
+                          </svg>
+                        </button>
+                      </th>
+                    );
+                  })}
                   <th className="pl-3 py-2"></th>
                 </tr>
               </thead>
