@@ -98,10 +98,8 @@ export default function PriceForm({ onSubmitted }: { onSubmitted: () => void }) 
         const mine = await fetchMyPrices(w.delivery_date);
         if (cancelled) return;
 
-        // Last price ever quoted per product, regardless of date. Also
-        // doubles as the "new delivery date" fallback below: when this
-        // date has no submission yet, it's necessarily the supplier's
-        // most recent earlier one.
+        // Last price ever quoted per product, regardless of date — shown as
+        // the "last: Rs. …" hint, and the source of the pre-fill below.
         let last: LastPrice[] = [];
         try {
           last = await fetchLastPrices();
@@ -113,14 +111,23 @@ export default function PriceForm({ onSubmitted }: { onSubmitted: () => void }) 
         for (const lp of last) lastMap[lp.product_id] = lp;
         setLastPrices(lastMap);
 
-        // Pre-fill priority: this delivery date's own submission first;
-        // otherwise carry forward the supplier's latest previous price as
-        // a starting default. Either way these are just starting values —
-        // nothing is "submitted" for this date until Submit is clicked.
+        // Pre-fill: this date's own submission if there is one; otherwise
+        // exactly the supplier's most recent earlier submission day — and
+        // only that day. A product left blank on that day stays blank here,
+        // rather than resurfacing an older price from a day before it.
+        // Either way these are just starting values — nothing is
+        // "submitted" for this date until Submit is clicked.
         const prefill: Record<number, string> = {};
-        for (const mp of mine) prefill[mp.product_id] = String(mp.price);
-        for (const lp of last) {
-          if (!(lp.product_id in prefill)) prefill[lp.product_id] = String(lp.price);
+        if (mine.length > 0) {
+          for (const mp of mine) prefill[mp.product_id] = String(mp.price);
+        } else {
+          let latestDay = "";
+          for (const lp of last) {
+            if (lp.delivery_date < w.delivery_date && lp.delivery_date > latestDay) latestDay = lp.delivery_date;
+          }
+          for (const lp of last) {
+            if (lp.delivery_date === latestDay) prefill[lp.product_id] = String(lp.price);
+          }
         }
         setPrices(prefill);
       } catch (err) {
