@@ -94,6 +94,13 @@ export default function SupplierPricesView() {
   const itemHeadRef = useRef<HTMLTableCellElement>(null);
   const keellsHeadRef = useRef<HTMLTableCellElement>(null);
   const [stickyOffsets, setStickyOffsets] = useState({ keells: 0, mkt: 0 });
+  // Arrow-key navigation between Adjusted Price boxes: the scroll box, the
+  // frozen header/left columns a box must not hide behind, and which box has
+  // focus (its row and supplier column are highlighted).
+  const scrollBoxRef = useRef<HTMLDivElement>(null);
+  const theadRef = useRef<HTMLTableSectionElement>(null);
+  const mktHeadRef = useRef<HTMLTableCellElement>(null);
+  const [activeCell, setActiveCell] = useState<{ productId: number; supplierId: number } | null>(null);
 
   useEffect(() => {
     fetchSuppliers().then(setSuppliers).catch(() => {});
@@ -324,6 +331,51 @@ export default function SupplierPricesView() {
     savesInFlight.current.delete(save);
   }
 
+  // Focus an Adjusted Price box and scroll it (with its Supplier Price beside
+  // it) clear of the frozen header and Item/Keells/MKT columns.
+  function focusAdjustedBox(input: HTMLInputElement) {
+    input.focus({ preventScroll: true });
+    const adjCell = input.closest("td");
+    const box = scrollBoxRef.current;
+    if (!adjCell || !box) return;
+    adjCell.scrollIntoView({ block: "nearest", inline: "nearest" });
+    const priceCell = adjCell.previousElementSibling ?? adjCell;
+    const boxRect = box.getBoundingClientRect();
+    const cellLeft = priceCell.getBoundingClientRect().left;
+    const { right: cellRight, top: cellTop, bottom: cellBottom } = adjCell.getBoundingClientRect();
+    const minLeft = (mktHeadRef.current?.getBoundingClientRect().right ?? boxRect.left) + 8;
+    const maxRight = boxRect.left + box.clientLeft + box.clientWidth - 8;
+    const minTop = (theadRef.current?.getBoundingClientRect().bottom ?? boxRect.top) + 4;
+    const maxBottom = boxRect.top + box.clientTop + box.clientHeight - 4;
+    if (cellLeft < minLeft) box.scrollLeft -= minLeft - cellLeft;
+    else if (cellRight > maxRight) box.scrollLeft += cellRight - maxRight;
+    if (cellTop < minTop) box.scrollTop -= minTop - cellTop;
+    else if (cellBottom > maxBottom) box.scrollTop += cellBottom - maxBottom;
+  }
+
+  // Excel-style moves: Left/Right to the neighbouring supplier in the same row,
+  // Up/Down (and Enter) to the same supplier in the row above/below, skipping
+  // rows where that supplier quoted nothing. Leaving a box saves it on blur.
+  function moveFromAdjustedBox(input: HTMLInputElement, key: string): boolean {
+    const row = input.closest("tr");
+    if (!row) return false;
+    let next: HTMLInputElement | undefined;
+    if (key === "ArrowLeft" || key === "ArrowRight") {
+      const boxes = Array.from(row.querySelectorAll<HTMLInputElement>("input[data-adj-input]"));
+      next = boxes[boxes.indexOf(input) + (key === "ArrowLeft" ? -1 : 1)];
+    } else {
+      const selector = `input[data-adj-col="${input.dataset.adjCol}"]`;
+      let r = key === "ArrowUp" ? row.previousElementSibling : row.nextElementSibling;
+      while (r && !next) {
+        next = r.querySelector<HTMLInputElement>(selector) ?? undefined;
+        r = key === "ArrowUp" ? r.previousElementSibling : r.nextElementSibling;
+      }
+    }
+    if (!next) return false;
+    focusAdjustedBox(next);
+    return true;
+  }
+
   function cellsForSupplier(supplierId: number): AdminSupplierPrice[] {
     const out: AdminSupplierPrice[] = [];
     for (const p of productRows) {
@@ -500,7 +552,10 @@ export default function SupplierPricesView() {
         </div>
       )}
 
-      <div className="bg-white rounded-2xl shadow-[0_10px_30px_-12px_rgba(21,56,38,0.15)] border border-sage-100 overflow-auto max-h-[75vh]">
+      <div
+        ref={scrollBoxRef}
+        className="bg-white rounded-2xl shadow-[0_10px_30px_-12px_rgba(21,56,38,0.15)] border border-sage-100 overflow-auto max-h-[75vh]"
+      >
         {loading ? (
           <SkeletonTable rows={10} columns={5} />
         ) : error ? (
@@ -515,7 +570,7 @@ export default function SupplierPricesView() {
           </div>
         ) : (
           <table className="text-sm border-collapse">
-            <thead className="sticky top-0 z-20 bg-white">
+            <thead ref={theadRef} className="sticky top-0 z-20 bg-white">
               <tr className="bg-white text-crate-800/40 text-left text-xs uppercase tracking-wide border-b border-sage-100">
                 <th
                   ref={itemHeadRef}
@@ -535,6 +590,7 @@ export default function SupplierPricesView() {
                   </p>
                 </th>
                 <th
+                  ref={mktHeadRef}
                   rowSpan={2}
                   style={{ left: stickyOffsets.mkt }}
                   className="sticky z-30 bg-amber-50 px-4 py-2.5 text-center border-l border-r border-sage-200 align-middle normal-case tracking-normal shadow-[4px_0_6px_-4px_rgba(21,56,38,0.12)] min-w-[7rem]"
@@ -556,7 +612,11 @@ export default function SupplierPricesView() {
                       key={s.id}
                       colSpan={2}
                       className={`px-4 py-2.5 text-center border-l border-sage-100 normal-case tracking-normal ${
-                        colFilters[s.id] || colSort?.supplierId === s.id ? "bg-crate-700/10" : ""
+                        activeCell?.supplierId === s.id
+                          ? "bg-amber-200"
+                          : colFilters[s.id] || colSort?.supplierId === s.id
+                            ? "bg-crate-700/10"
+                            : ""
                       }`}
                     >
                       <div className="flex flex-col items-center gap-1.5">
@@ -620,12 +680,22 @@ export default function SupplierPricesView() {
               <tr className="bg-white text-crate-800/40 text-left text-[11px] uppercase tracking-wide border-b border-sage-100">
                 <th className="sticky left-0 z-30 bg-white px-4 pb-2 font-medium"></th>
                 {supplierColumns.map((s) => (
-                  <th key={`${s.id}-price`} className="px-3 pb-2 font-medium text-right border-l border-sage-100">
+                  <th
+                    key={`${s.id}-price`}
+                    className={`px-3 pb-2 font-medium text-right border-l border-sage-100 ${
+                      activeCell?.supplierId === s.id ? "bg-amber-200 text-crate-800" : ""
+                    }`}
+                  >
                     Supplier Price
                   </th>
                 )).flatMap((priceHeader, i) => [
                   priceHeader,
-                  <th key={`${supplierColumns[i].id}-adj`} className="px-3 pb-2 font-medium text-right bg-blue-100">
+                  <th
+                    key={`${supplierColumns[i].id}-adj`}
+                    className={`px-3 pb-2 font-medium text-right ${
+                      activeCell?.supplierId === supplierColumns[i].id ? "bg-amber-300 text-crate-800" : "bg-blue-100"
+                    }`}
+                  >
                     Adjusted Price
                   </th>,
                 ])}
@@ -652,7 +722,9 @@ export default function SupplierPricesView() {
                 <tr key={p.product_id}>
                   <td
                     title={`${p.description} ${p.code}`}
-                    className="sticky left-0 z-10 bg-white px-4 py-2.5 text-crate-950 w-60 min-w-[15rem] max-w-[15rem]"
+                    className={`sticky left-0 z-10 px-4 py-2.5 text-crate-950 w-60 min-w-[15rem] max-w-[15rem] ${
+                      activeCell?.productId === p.product_id ? "bg-amber-200 shadow-[inset_4px_0_0_#f59e0b]" : "bg-white"
+                    }`}
                   >
                     <span className="block break-words">{p.description}</span>
                     <span className="flex flex-wrap items-center gap-1.5 mt-0.5">
@@ -727,13 +799,21 @@ export default function SupplierPricesView() {
                       >
                         {cell.price.toFixed(2)}
                       </td>,
-                      <td key={`${s.id}-adj`} className="px-2 py-1.5 bg-blue-100">
+                      <td
+                        key={`${s.id}-adj`}
+                        className={`px-2 py-1.5 scroll-my-16 ${
+                          activeCell?.productId === p.product_id && activeCell.supplierId === s.id
+                            ? "bg-amber-300"
+                            : "bg-blue-100"
+                        }`}
+                      >
                         <div className="flex flex-col items-end gap-1">
                           <div className="flex items-center justify-end gap-1.5">
                             <input
                               type="text"
                               inputMode="numeric"
                               data-adj-input
+                              data-adj-col={s.id}
                               placeholder="—"
                               value={drafts[cell.id] ?? ""}
                               // Whole rupees only: anything from a decimal point on is dropped.
@@ -743,25 +823,26 @@ export default function SupplierPricesView() {
                                   [cell.id]: e.target.value.replace(/[.,].*$/, "").replace(/\D/g, ""),
                                 }))
                               }
-                              onFocus={(e) => e.target.select()}
-                              onBlur={(e) => saveAdjustedPrice(cell, e.target.value)}
+                              onFocus={(e) => {
+                                e.target.select();
+                                setActiveCell({ productId: p.product_id, supplierId: s.id });
+                              }}
+                              onBlur={(e) => {
+                                setActiveCell((a) =>
+                                  a?.productId === p.product_id && a.supplierId === s.id ? null : a
+                                );
+                                saveAdjustedPrice(cell, e.target.value);
+                              }}
                               onKeyDown={(e) => {
                                 const input = e.target as HTMLInputElement;
-                                if (e.key === "Enter") input.blur();
-                                // Left/Right jump to the neighbouring supplier's Adjusted Price
-                                // box in the same row (leaving this one saves it on blur).
-                                if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-                                  const boxes = Array.from(
-                                    input.closest("tr")?.querySelectorAll<HTMLInputElement>("input[data-adj-input]") ?? []
-                                  );
-                                  const next = boxes[boxes.indexOf(input) + (e.key === "ArrowLeft" ? -1 : 1)];
-                                  if (next) {
-                                    e.preventDefault();
-                                    next.focus();
-                                  }
+                                if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) {
+                                  if (moveFromAdjustedBox(input, e.key)) e.preventDefault();
+                                } else if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  if (!moveFromAdjustedBox(input, "ArrowDown")) input.blur();
                                 }
                               }}
-                              className={`w-16 border rounded-lg px-2 py-1 text-right text-[9px] bg-sage-50/60 focus:outline-none focus:ring-2 focus:ring-crate-700/30 focus:border-crate-700 focus:bg-white transition-colors duration-150 ${
+                              className={`w-16 border rounded-lg px-2 py-1 text-right text-[9px] bg-sage-50/60 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 focus:bg-white transition-colors duration-150 ${
                                 state === "error" ? "border-tomato-500 ring-1 ring-tomato-500/30" : "border-sage-300"
                               }`}
                             />
