@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ApiError } from "../../api/client";
 import {
   AdminSupplierPrice,
@@ -101,6 +102,48 @@ export default function SupplierPricesView() {
   const theadRef = useRef<HTMLTableSectionElement>(null);
   const mktHeadRef = useRef<HTMLTableCellElement>(null);
   const [activeCell, setActiveCell] = useState<{ productId: number; supplierId: number } | null>(null);
+  // Full screen: the page covers the whole window (under the dialogs and the
+  // column-filter menu, which are portaled to <body>), and the browser goes
+  // full screen too where it allows it. Leaving browser full screen (Esc)
+  // leaves this as well. The page is rendered into its own node, which moves
+  // to <body> while full screen — the dashboard's blurred card would
+  // otherwise trap `position: fixed` inside it — and moving the node keeps
+  // all the state (typed prices, filters) intact.
+  const [fullScreen, setFullScreen] = useState(false);
+  const [pageNode] = useState(() => document.createElement("div"));
+  const placeholderRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    (fullScreen ? document.body : placeholderRef.current)?.appendChild(pageNode);
+  }, [fullScreen, pageNode]);
+
+  useEffect(() => () => pageNode.remove(), [pageNode]);
+
+  function enterFullScreen() {
+    setFullScreen(true);
+    document.documentElement.requestFullscreen?.().catch(() => {});
+  }
+
+  function exitFullScreen() {
+    setFullScreen(false);
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  }
+
+  useEffect(() => {
+    if (!fullScreen) return;
+    function onFullscreenChange() {
+      if (!document.fullscreenElement) setFullScreen(false);
+    }
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
+  }, [fullScreen]);
+
+  useEffect(
+    () => () => {
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    },
+    []
+  );
 
   useEffect(() => {
     fetchSuppliers().then(setSuppliers).catch(() => {});
@@ -442,8 +485,12 @@ export default function SupplierPricesView() {
     }
   }
 
-  return (
-    <div className="space-y-5">
+  const content = (
+    <div
+      className={
+        fullScreen ? "fixed inset-0 z-40 flex flex-col gap-3 bg-gray-50 p-3 overflow-hidden" : "space-y-5"
+      }
+    >
       <div className="bg-white rounded-2xl shadow-[0_10px_30px_-12px_rgba(21,56,38,0.15)] border border-sage-100 p-5">
         <div className="flex flex-wrap items-end gap-4">
           <div>
@@ -503,9 +550,24 @@ export default function SupplierPricesView() {
           >
             {downloading ? "Preparing…" : "Download Excel"}
           </button>
+
+          <button
+            onClick={fullScreen ? exitFullScreen : enterFullScreen}
+            title={fullScreen ? "Back to the normal page" : "Show this table on the whole screen"}
+            className="flex items-center gap-1.5 text-sm border border-sage-300 bg-white text-crate-800 rounded-full px-4 py-2 font-semibold hover:bg-sage-50 active:scale-[0.98] transition-all duration-150"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              {fullScreen ? (
+                <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />
+              ) : (
+                <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
+              )}
+            </svg>
+            {fullScreen ? "Exit full screen" : "Full screen"}
+          </button>
         </div>
         {downloadError && <p className="text-xs text-tomato-600 mt-2">{downloadError}</p>}
-        {deliveryDate && (
+        {deliveryDate && !fullScreen && (
           <p className="text-xs text-crate-800/40 mt-3">
             Showing quotes for {formatDate(deliveryDate)}. Set an Adjusted Price for one or more items, then click{" "}
             <span className="font-medium text-crate-700">Send for approval</span> at the top of that supplier's
@@ -554,7 +616,9 @@ export default function SupplierPricesView() {
 
       <div
         ref={scrollBoxRef}
-        className="bg-white rounded-2xl shadow-[0_10px_30px_-12px_rgba(21,56,38,0.15)] border border-sage-100 overflow-auto max-h-[75vh]"
+        className={`bg-white rounded-2xl shadow-[0_10px_30px_-12px_rgba(21,56,38,0.15)] border border-sage-100 overflow-auto ${
+          fullScreen ? "flex-1 min-h-0" : "max-h-[75vh]"
+        }`}
       >
         {loading ? (
           <SkeletonTable rows={10} columns={5} />
@@ -905,4 +969,6 @@ export default function SupplierPricesView() {
       />
     </div>
   );
+
+  return <div ref={placeholderRef}>{createPortal(content, pageNode)}</div>;
 }
