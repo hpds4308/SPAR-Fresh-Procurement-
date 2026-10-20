@@ -906,7 +906,7 @@ export default function SupplierPricesView() {
                                   if (!moveFromAdjustedBox(input, "ArrowDown")) input.blur();
                                 }
                               }}
-                              className={`w-16 border rounded-lg px-2 py-1 text-right text-[9px] bg-sage-50/60 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 focus:bg-white transition-colors duration-150 ${
+                              className={`w-20 border rounded-lg px-2 py-1 text-right text-sm bg-sage-50/60 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 focus:bg-white transition-colors duration-150 ${
                                 state === "error" ? "border-tomato-500 ring-1 ring-tomato-500/30" : "border-sage-300"
                               }`}
                             />
