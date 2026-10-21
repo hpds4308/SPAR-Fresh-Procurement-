@@ -31,22 +31,10 @@ def my_supplier_orders(
     return supplier_order_service.get_my_orders_by_branch(db, current_user, delivery_date)
 
 
-@router.get("/mine/export")
-def export_my_supplier_orders(
-    delivery_date: date | None = None,
-    current_user: User = Depends(require_roles("SUPPLIER")),
-    db: Session = Depends(get_db),
-):
-    """Same data as /mine, pivoted into product-rows x branch-columns and
-    downloaded as .xlsx — mirrors the on-screen Orders by Branch table."""
-    from openpyxl import Workbook
-    from openpyxl.styles import Font, Alignment, PatternFill
-    from openpyxl.utils import get_column_letter
-
-    data = supplier_order_service.get_my_orders_by_branch(db, current_user, delivery_date)
-
-    # Pivot: same transformation the frontend does — one row per product,
-    # one column per branch, quantity in the cell.
+def _pivot_by_branch(data: MySupplierOrdersOut) -> tuple[list[dict], list[dict]]:
+    """Same transformation the frontend does — one row per product, one
+    column per branch, quantity in the cell. Shared by the Excel and PDF
+    downloads."""
     branches = [{"branch_id": b.branch_id, "branch_name": b.branch_name} for b in data.branches]
     products: dict[int, dict] = {}
     for branch in data.branches:
@@ -57,6 +45,7 @@ def export_my_supplier_orders(
                     "product_code": item.product_code,
                     "category_name": item.category_name,
                     "description": item.product_description,
+                    "unit_code": item.unit_code,
                     "cost_price": None,
                     "price_is_estimated": False,
                     "quantities": {},
@@ -70,6 +59,23 @@ def export_my_supplier_orders(
                 row["price_is_estimated"] = item.price_is_estimated
 
     rows = sorted(products.values(), key=lambda r: (r["category_name"], r["description"]))
+    return branches, rows
+
+
+@router.get("/mine/export")
+def export_my_supplier_orders(
+    delivery_date: date | None = None,
+    current_user: User = Depends(require_roles("SUPPLIER")),
+    db: Session = Depends(get_db),
+):
+    """Same data as /mine, pivoted into product-rows x branch-columns and
+    downloaded as .xlsx — mirrors the on-screen Orders by Branch table."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    data = supplier_order_service.get_my_orders_by_branch(db, current_user, delivery_date)
+    branches, rows = _pivot_by_branch(data)
 
     wb = Workbook()
     ws = wb.active
@@ -131,6 +137,154 @@ def export_my_supplier_orders(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/mine/export/pdf")
+def export_my_supplier_orders_pdf(
+    delivery_date: date | None = None,
+    current_user: User = Depends(require_roles("SUPPLIER")),
+    db: Session = Depends(get_db),
+):
+    """The Orders by Branch table as a printable PDF — same rows and columns
+    as the Excel download, landscape so every branch fits across the page."""
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import mm
+    from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+    from app.models.supplier import Supplier
+    from app.services.final_price_service import _SPAR_GREEN, _SPAR_LOGO_PATH
+
+    data = supplier_order_service.get_my_orders_by_branch(db, current_user, delivery_date)
+    branches, rows = _pivot_by_branch(data)
+    supplier = db.get(Supplier, current_user.supplier_id)
+    supplier_name = supplier.supplier_name if supplier else "—"
+
+    def esc(s: str) -> str:
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    def num(v: float | None) -> str:
+        if v is None:
+            return ""
+        return f"{v:,.0f}" if float(v).is_integer() else f"{v:,.2f}".rstrip("0")
+
+    page = landscape(A4)
+    margin = 12 * mm
+    green = colors.HexColor("#" + _SPAR_GREEN)
+    grey = colors.HexColor("#666666")
+    # Shrink the type a little when there are many branch columns.
+    font_size = 8 if len(branches) <= 8 else 7
+    styles = getSampleStyleSheet()
+    body = ParagraphStyle("body", parent=styles["Normal"], fontSize=font_size, leading=font_size + 2)
+    head = ParagraphStyle("head", parent=body, fontName="Helvetica-Bold", textColor=colors.white, alignment=1)
+    branch_head = ParagraphStyle("branch_head", parent=head, fontSize=font_size - 1, leading=font_size + 1)
+    small = ParagraphStyle("small", parent=body, fontSize=8, leading=10, textColor=grey)
+    title = ParagraphStyle("title", parent=styles["Title"], fontSize=16, leading=20, textColor=green, alignment=0, spaceAfter=2)
+
+    # Fixed columns: Code, Product, Unit, Cost Price, ...branches..., Total.
+    # Branch columns share what's left after giving Product a fair minimum.
+    usable = page[0] - 2 * margin
+    code_w, unit_w, price_w, total_w = 16 * mm, 10 * mm, 16 * mm, 15 * mm
+    fixed = code_w + unit_w + price_w + total_w
+    branch_w = min(22 * mm, max(12 * mm, (usable - fixed - 45 * mm) / max(len(branches), 1)))
+    product_w = usable - fixed - branch_w * len(branches)
+
+    header = [Paragraph(h, head) for h in ["Code", "Product", "Unit", "Cost Price"]]
+    header += [Paragraph(esc(b["branch_name"]), branch_head) for b in branches]
+    header.append(Paragraph("Total", head))
+    table_rows = [header]
+    branch_totals = {b["branch_id"]: 0.0 for b in branches}
+    for row in rows:
+        price = num(row["cost_price"]) + (" *" if row["price_is_estimated"] else "")
+        line = [row["product_code"], Paragraph(esc(row["description"]), body), row["unit_code"], price]
+        for b in branches:
+            qty = row["quantities"].get(b["branch_id"])
+            line.append(num(qty))
+            if qty is not None:
+                branch_totals[b["branch_id"]] += qty
+        line.append(num(row["total"]))
+        table_rows.append(line)
+    table_rows.append(
+        ["", "Total", "", ""] + [num(branch_totals[b["branch_id"]]) for b in branches] + [num(sum(r["total"] for r in rows))]
+    )
+
+    first_branch_col, last_col = 4, 4 + len(branches)
+    style = [
+        ("BACKGROUND", (0, 0), (-1, 0), green),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("FONTSIZE", (0, 0), (-1, -1), font_size),
+        ("ALIGN", (3, 1), (-1, -1), "RIGHT"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -2), [colors.white, colors.HexColor("#F4F8F5")]),
+        ("LINEBELOW", (0, 0), (-1, -1), 0.25, colors.HexColor("#D5E2D9")),
+        ("LINEAFTER", (3, 0), (last_col - 1, -1), 0.25, colors.HexColor("#D5E2D9")),
+        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+        ("FONTNAME", (last_col, 1), (last_col, -1), "Helvetica-Bold"),
+        ("LINEABOVE", (0, -1), (-1, -1), 0.8, green),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]
+    # Same pink as the Excel sheet on cells where a branch ordered the item.
+    for r, row in enumerate(rows, start=1):
+        for c, b in enumerate(branches, start=first_branch_col):
+            if b["branch_id"] in row["quantities"]:
+                style.append(("BACKGROUND", (c, r), (c, r), colors.HexColor("#FCE4E4")))
+    table = Table(
+        table_rows,
+        colWidths=[code_w, product_w, unit_w, price_w] + [branch_w] * len(branches) + [total_w],
+        repeatRows=1,
+    )
+    table.setStyle(TableStyle(style))
+
+    date_text = f"{data.delivery_date:%A %d %B %Y}" if data.delivery_date else "No orders yet"
+    logo = Image(str(_SPAR_LOGO_PATH), width=50 * mm, height=50 * mm * 161 / 1014)
+    logo.hAlign = "LEFT"
+    story = [
+        logo,
+        Spacer(1, 3 * mm),
+        Paragraph(f"Orders by Branch — {esc(supplier_name)}", title),
+        Paragraph(
+            f"<b>Delivery Date:</b> {date_text} &nbsp;·&nbsp; {len(branches)} store{'' if len(branches) == 1 else 's'}"
+            f" &nbsp;·&nbsp; {len(rows)} item{'' if len(rows) == 1 else 's'}"
+            f" &nbsp;·&nbsp; <b>Order value:</b> Rs. {data.grand_total:,.2f}",
+            body,
+        ),
+        Spacer(1, 4 * mm),
+        table,
+    ]
+    if any(r["price_is_estimated"] for r in rows):
+        story += [Spacer(1, 2 * mm), Paragraph("* Cost price estimated from an older date.", small)]
+
+    footer_text = f"SPAR orders by branch · {supplier_name} · delivery {data.delivery_date.isoformat() if data.delivery_date else '—'}"
+
+    def footer(canvas, doc_) -> None:
+        canvas.saveState()
+        canvas.setFont("Helvetica", 7)
+        canvas.setFillColor(grey)
+        canvas.drawString(margin, 7 * mm, footer_text)
+        canvas.drawRightString(page[0] - margin, 7 * mm, f"Page {doc_.page}")
+        canvas.restoreState()
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=page,
+        leftMargin=margin,
+        rightMargin=margin,
+        topMargin=margin,
+        bottomMargin=14 * mm,
+        title=f"Orders by Branch — {supplier_name} — {data.delivery_date.isoformat() if data.delivery_date else ''}",
+        author="SPAR Fresh Procurement",
+    )
+    doc.build(story, onFirstPage=footer, onLaterPages=footer)
+    buf.seek(0)
+
+    date_label = data.delivery_date.isoformat() if data.delivery_date else "no-orders"
+    return StreamingResponse(
+        buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="orders-by-branch-{date_label}.pdf"'},
     )
 
 

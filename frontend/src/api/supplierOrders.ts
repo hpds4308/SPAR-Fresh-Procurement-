@@ -54,11 +54,11 @@ export function fetchMySupplierOrders(deliveryDate?: string): Promise<MySupplier
   return apiFetch(`/supplier-orders/mine${qs}`);
 }
 
-export async function downloadMySupplierOrders(deliveryDate?: string): Promise<void> {
+export async function downloadMySupplierOrders(deliveryDate?: string, format: "excel" | "pdf" = "excel"): Promise<void> {
   const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
   const qs = deliveryDate ? `?delivery_date=${deliveryDate}` : "";
   const access = localStorage.getItem("spar_access_token");
-  const res = await fetch(`${API_BASE}/api/v1/supplier-orders/mine/export${qs}`, {
+  const res = await fetch(`${API_BASE}/api/v1/supplier-orders/mine/export${format === "pdf" ? "/pdf" : ""}${qs}`, {
     headers: access ? { Authorization: `Bearer ${access}` } : {},
   });
   if (!res.ok) {
@@ -67,7 +67,7 @@ export async function downloadMySupplierOrders(deliveryDate?: string): Promise<v
   const blob = await res.blob();
   const disposition = res.headers.get("Content-Disposition") ?? "";
   const match = disposition.match(/filename="?([^"]+)"?/);
-  const filename = match ? match[1] : "orders-by-branch.xlsx";
+  const filename = match ? match[1] : `orders-by-branch.${format === "pdf" ? "pdf" : "xlsx"}`;
 
   const url = window.URL.createObjectURL(blob);
   const a = document.createElement("a");

@@ -31,7 +31,7 @@ export default function OrdersByBranch() {
   const [selectedDate, setSelectedDate] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [downloading, setDownloading] = useState(false);
+  const [downloading, setDownloading] = useState<"excel" | "pdf" | null>(null);
   // Set right before the auto-select below triggers a second render with a
   // new selectedDate — lets the effect recognize "this date change was just
   // us echoing back data we already have" and skip a redundant re-fetch.
@@ -111,15 +111,15 @@ export default function OrdersByBranch() {
     return { branches: branchList.map((b) => ({ branch_id: b.branch_id, branch_name: b.branch_name })), rows, branchTotals, grandQty };
   }, [data]);
 
-  async function handleDownload() {
-    setDownloading(true);
+  async function handleDownload(format: "excel" | "pdf") {
+    setDownloading(format);
     setError(null);
     try {
-      await downloadMySupplierOrders(selectedDate);
+      await downloadMySupplierOrders(selectedDate, format);
     } catch {
       setError("Could not download the file. Please try again.");
     } finally {
-      setDownloading(false);
+      setDownloading(null);
     }
   }
 
@@ -170,13 +170,16 @@ export default function OrdersByBranch() {
         <span className="ml-auto text-sm font-semibold text-crate-800">
           Order value: Rs. {data.grand_total.toFixed(2)}
         </span>
-        <button
-          onClick={handleDownload}
-          disabled={downloading || rows.length === 0}
-          className="text-sm bg-gradient-to-b from-crate-700 to-crate-800 text-white rounded-full px-4 py-1.5 font-semibold hover:brightness-110 active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 shadow-md shadow-crate-800/20 transition-all duration-150"
-        >
-          {downloading ? "Preparing…" : "Download Excel"}
-        </button>
+        {(["excel", "pdf"] as const).map((format) => (
+          <button
+            key={format}
+            onClick={() => handleDownload(format)}
+            disabled={downloading !== null || rows.length === 0}
+            className="text-sm bg-gradient-to-b from-crate-700 to-crate-800 text-white rounded-full px-4 py-1.5 font-semibold hover:brightness-110 active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 shadow-md shadow-crate-800/20 transition-all duration-150"
+          >
+            {downloading === format ? "Preparing…" : format === "excel" ? "Download Excel" : "Download PDF"}
+          </button>
+        ))}
       </div>
 
       {rows.some((r) => r.costPriceIsEstimated) && (
