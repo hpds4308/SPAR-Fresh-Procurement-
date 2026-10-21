@@ -91,7 +91,11 @@ def export_my_supplier_orders(
 
     for row in rows:
         price_basis = "Estimated (older date)" if row["price_is_estimated"] else ("Confirmed" if row["cost_price"] is not None else "")
-        values = [row["product_code"], row["category_name"], row["description"], row["cost_price"], price_basis]
+        # Write numeric codes as numbers so suppliers can VLOOKUP them; codes
+        # with a leading zero stay text so the zero isn't lost.
+        code = row["product_code"]
+        code = int(code) if code.isdigit() and not code.startswith("0") else code
+        values = [code, row["category_name"], row["description"], row["cost_price"], price_basis]
         for b in branches:
             values.append(row["quantities"].get(b["branch_id"]))
         values.append(row["total"])
