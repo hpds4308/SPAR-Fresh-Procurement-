@@ -133,17 +133,19 @@ def get_assigned_quantities_by_branch(
 
 def get_supplier_price_preview(db: Session, supplier_id: int, delivery_date: date) -> dict[int, "_ResolvedPrice"]:
     """
-    This supplier's last submitted price list — the most recent delivery
-    date they quoted for, up to and including `delivery_date` (or their
-    latest list at all, if every quote is for a later date). Powers the
+    This supplier's last submitted price list — the list that covers
+    `delivery_date` (price_approval_service.price_list_date_for_delivery),
+    else their most recent one before it (or their latest list at all, if
+    every quote is for a later date). Powers the
     "Supplier Price" reference column on the Order Builder so Admin sees
     only what the supplier last quoted, not every item they ever priced.
     Each price is resolved the same way as a saved line's effective_price
     (sent Adjusted Price, else their own quote), and flagged as an
     estimate when the list is for an earlier date than this order.
     """
+    target = price_approval_service.price_list_date_for_delivery(db, delivery_date)
     base = db.query(func.max(SupplierPrice.delivery_date)).filter(SupplierPrice.supplier_id == supplier_id)
-    list_date = base.filter(SupplierPrice.delivery_date <= delivery_date).scalar() or base.scalar()
+    list_date = base.filter(SupplierPrice.delivery_date <= target).scalar() or base.scalar()
     if list_date is None:
         return {}
     rows = (
@@ -152,7 +154,7 @@ def get_supplier_price_preview(db: Session, supplier_id: int, delivery_date: dat
         .all()
     )
     return {
-        r.product_id: _ResolvedPrice(price, is_estimated=list_date != delivery_date, as_of=list_date, approval_status=status)
+        r.product_id: _ResolvedPrice(price, is_estimated=list_date != target, as_of=list_date, approval_status=status)
         for r, (price, status) in _prices_from_rows(db, rows)
     }
 
@@ -201,24 +203,25 @@ def _resolve_prices(
     the supplier's own submitted price. This is the fallback used when an
     order line has no explicit per-line agreed_price of its own.
 
-    Branch orders and supplier pricing both target delivery_date =
-    submission_date + 2, so an order's delivery_date usually DOES have an
-    exact price match by the time Admin builds the supplier order. It
-    won't when a supplier hasn't submitted for that date yet (missed
-    cutoff, new product, etc.) — in that case, fall back to that
-    supplier's most recent submitted price for the product, on ANY date,
-    and flag it as an estimate — better than showing nothing, but the
-    caller must be able to tell the difference from a confirmed
-    same-date price.
+    A delivery is priced from the list that covers it — Monday's prices
+    for Tuesday and Wednesday, and so on (price_approval_service.
+    price_list_date_for_delivery). That list won't exist yet when Admin
+    builds an order before the submission day (e.g. on Sunday for a
+    Tuesday delivery), or the supplier missed it / didn't price a product.
+    Then fall back to that supplier's most recent earlier price for the
+    product (any date, if there's none earlier) and flag it as an estimate
+    — better than showing nothing, but the caller must be able to tell
+    the difference from a confirmed price.
     """
     if not product_ids:
         return {}
+    list_date = price_approval_service.price_list_date_for_delivery(db, delivery_date)
 
     exact_rows = (
         db.query(SupplierPrice)
         .filter(
             SupplierPrice.supplier_id == supplier_id,
-            SupplierPrice.delivery_date == delivery_date,
+            SupplierPrice.delivery_date == list_date,
             SupplierPrice.product_id.in_(product_ids),
         )
         .all()
@@ -232,7 +235,14 @@ def _resolve_prices(
         fallback_rows = (
             db.query(SupplierPrice)
             .filter(SupplierPrice.supplier_id == supplier_id, SupplierPrice.product_id.in_(missing))
-            .order_by(SupplierPrice.product_id, SupplierPrice.delivery_date.desc(), SupplierPrice.id.desc())
+            # Earlier lists first (newest of those first), later ones only if
+            # there's nothing earlier.
+            .order_by(
+                SupplierPrice.product_id,
+                (SupplierPrice.delivery_date > list_date).asc(),
+                SupplierPrice.delivery_date.desc(),
+                SupplierPrice.id.desc(),
+            )
             .all()
         )
         seen: set[int] = set()

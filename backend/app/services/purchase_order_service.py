@@ -18,7 +18,7 @@ import hashlib
 import json
 import re
 from collections import defaultdict
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
@@ -37,7 +37,7 @@ from app.schemas.purchase_order import (
     PurchaseOrderSummaryOut,
     PurchaseOrderSupplierOut,
 )
-from app.services import notification_service, supplier_order_service
+from app.services import notification_service, price_approval_service, supplier_order_service
 
 
 def _code_part(code: str) -> str:
@@ -77,6 +77,9 @@ def _current_lines(db: Session, supplier_id: int, delivery_date: date) -> list[d
                 "line_total": it.line_total,
                 "price_is_estimated": it.price_is_estimated,
                 "notes": it.notes,
+                # Only used to decide whether the PO can be issued yet;
+                # dropped before the snapshot is stored.
+                "has_agreed_price": it.agreed_price is not None,
             }
         )
     lines.sort(key=lambda ln: (ln["branch_name"], ln["product_description"]))
@@ -98,7 +101,41 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _prices_not_final_reason(db: Session, delivery_date: date, lines: list[dict]) -> str | None:
+    """
+    Why this order can't be issued as a PO yet, or None if it can. A PO
+    must carry real prices: those from the price list that covers the
+    delivery (Monday's for Tuesday/Wednesday, ...), and only once that
+    list is final at the supplier approval cutoff on its submission day.
+    Lines with an agreed price set on Supplier Orders don't wait for it.
+    """
+    waiting = [ln for ln in lines if ln["unit_price"] is not None and not ln.get("has_agreed_price")]
+    if not waiting:
+        return None
+    list_date = price_approval_service.price_list_date_for_delivery(db, delivery_date)
+    submission_day = list_date - timedelta(days=price_approval_service.SUBMISSION_DAYS_BEFORE_DELIVERY)
+    cutoff = price_approval_service.approval_cutoff(db)
+    final_at = price_approval_service.expires_at(list_date, cutoff)
+    rule = f"{delivery_date:%A} {delivery_date.day} {delivery_date:%B} deliveries use {submission_day:%A} {submission_day.day} {submission_day:%B} prices"
+    if _now() < final_at:
+        return (
+            f"{rule}, which are final at {price_approval_service.format_cutoff(cutoff)} that day. "
+            "Issue this PO after that."
+        )
+    estimated = sorted({ln["product_description"] for ln in waiting if ln["price_is_estimated"]})
+    if estimated:
+        shown = ", ".join(estimated[:5]) + (f" and {len(estimated) - 5} more" if len(estimated) > 5 else "")
+        return (
+            f"{rule}, but this supplier gave no {submission_day:%A} price for: {shown}. "
+            "Set an agreed price for them on Supplier Orders before issuing the PO."
+        )
+    return None
+
+
 def issue_purchase_order(db: Session, admin: User, supplier_id: int, delivery_date: date) -> PurchaseOrder:
+    # Read up front: touching an expired `admin` after the new PO is added
+    # would autoflush it before issued_by is set.
+    admin_id = admin.id
     supplier = db.get(Supplier, supplier_id)
     if not supplier:
         raise NotFoundError("Supplier not found.")
@@ -117,6 +154,11 @@ def issue_purchase_order(db: Session, admin: User, supplier_id: int, delivery_da
             f"{len(unpriced)} line(s) have no price yet: {shown}. "
             "Set an agreed price for them on Supplier Orders before issuing the PO."
         )
+    reason = _prices_not_final_reason(db, delivery_date, lines)
+    if reason:
+        raise ValidationFailedError(reason)
+    for ln in lines:
+        ln.pop("has_agreed_price", None)
 
     total = round(sum(ln["line_total"] for ln in lines), 2)
     snapshot_hash = _hash_lines(lines)
@@ -146,7 +188,7 @@ def issue_purchase_order(db: Session, admin: User, supplier_id: int, delivery_da
     po.items = lines
     po.total_amount = total
     po.snapshot_hash = snapshot_hash
-    po.issued_by = admin.id
+    po.issued_by = admin_id
     po.issued_at = _now()
     po.cancelled_by = None
     po.cancelled_at = None
@@ -155,7 +197,7 @@ def issue_purchase_order(db: Session, admin: User, supplier_id: int, delivery_da
 
     write_audit_log(
         db,
-        user_id=admin.id,
+        user_id=admin_id,
         role="ADMIN",
         action=action,
         entity_type="purchase_order",
@@ -316,6 +358,7 @@ def list_admin_rows(db: Session, delivery_date: date) -> list[PurchaseOrderAdmin
                 line_count=len(lines),
                 order_total=round(sum(ln["line_total"] or 0 for ln in lines), 2),
                 unpriced_line_count=sum(1 for ln in lines if ln["unit_price"] is None),
+                issue_blocked_reason=_prices_not_final_reason(db, delivery_date, lines),
                 purchase_order=summaries.get(supplier_id),
                 is_outdated=po is not None and po.status == "ISSUED" and po.snapshot_hash != _hash_lines(lines),
             )

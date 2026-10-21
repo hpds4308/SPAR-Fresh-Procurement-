@@ -81,5 +81,8 @@ class PurchaseOrderAdminRowOut(BaseModel):
     line_count: int
     order_total: float
     unpriced_line_count: int
+    # Set when the PO can't be issued yet because the delivery's price
+    # list isn't final (purchase_order_service._prices_not_final_reason).
+    issue_blocked_reason: str | None = None
     purchase_order: PurchaseOrderSummaryOut | None
     is_outdated: bool

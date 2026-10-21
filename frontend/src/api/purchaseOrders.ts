@@ -63,6 +63,7 @@ export type PurchaseOrderAdminRow = {
   line_count: number;
   order_total: number;
   unpriced_line_count: number;
+  issue_blocked_reason: string | null;
   purchase_order: PurchaseOrderSummary | null;
   is_outdated: boolean;
 };

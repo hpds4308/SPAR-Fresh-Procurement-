@@ -82,6 +82,23 @@ def _now() -> datetime:
 SUBMISSION_DAYS_BEFORE_DELIVERY = 2
 
 
+def price_list_date_for_delivery(db: Session, delivery_date: date) -> date:
+    """
+    The delivery_date a delivery's price list is stored under. Suppliers
+    price on the submission weekdays (Admin > Settings, default Mon/Wed/Fri)
+    and each list covers every delivery up to the next one: Monday's prices
+    cover Tuesday and Wednesday, Wednesday's cover Thursday and Friday,
+    Friday's cover Saturday, Sunday and Monday. A list is stored under its
+    submission day + 2, so e.g. a Tuesday delivery -> Monday's list -> the
+    Wednesday key.
+    """
+    days = settings_service.parse_weekdays(settings_service.get_setting(db, settings_service.SUPPLIER_PRICE_DAYS))
+    submission_day = delivery_date - timedelta(days=1)
+    while submission_day.weekday() not in days:
+        submission_day -= timedelta(days=1)
+    return submission_day + timedelta(days=SUBMISSION_DAYS_BEFORE_DELIVERY)
+
+
 def approval_cutoff(db: Session) -> time:
     """Admin > Settings "Supplier approval cutoff", e.g. 14:00."""
     hh, mm = settings_service.get_setting(db, settings_service.SUPPLIER_APPROVAL_DEADLINE).split(":")

@@ -170,7 +170,7 @@ export default function AdminPurchaseOrders({ focus }: { focus?: PoFocus | null 
             {rows.map((row) => {
               const po = row.purchase_order;
               const busy = busySupplierId === row.supplier_id;
-              const canIssue = row.line_count > 0 && row.unpriced_line_count === 0;
+              const canIssue = row.line_count > 0 && row.unpriced_line_count === 0 && !row.issue_blocked_reason;
               return (
                 <li key={row.supplier_id} className="px-5 py-3.5 flex flex-wrap items-center gap-x-4 gap-y-2">
                   <div className="min-w-0 flex-1">
@@ -191,6 +191,9 @@ export default function AdminPurchaseOrders({ focus }: { focus?: PoFocus | null 
                         {row.unpriced_line_count} line{row.unpriced_line_count === 1 ? " has" : "s have"} no price — set an
                         agreed price on Supplier Orders first.
                       </p>
+                    )}
+                    {row.unpriced_line_count === 0 && row.issue_blocked_reason && (
+                      <p className="text-xs text-mango-700 mt-0.5">{row.issue_blocked_reason}</p>
                     )}
                   </div>
                   <div className="flex items-center gap-2 flex-wrap">

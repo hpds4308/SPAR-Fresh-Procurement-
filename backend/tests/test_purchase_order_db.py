@@ -231,3 +231,88 @@ def test_branch_can_search_its_purchase_orders_by_number_or_supplier(
     assert search("green valley") == [f"PO-{DELIVERY_DATE:%y%m%d}-SUP12-BR07"]
     assert search("SUP99") == []
     assert len(search("")) == 2
+
+
+# --- Prices come from the list that covers the delivery ----------------------
+# Suppliers price Mon/Wed/Fri (the default setting). Monday's list covers
+# Tuesday + Wednesday deliveries and is stored under Wednesday; Friday's
+# covers Saturday-Monday and is stored under Sunday.
+FRI, SUN, MON, TUE, WED = (date(2026, 10, 16) + timedelta(days=i) for i in (0, 2, 3, 4, 5))
+
+
+def _add_price(db, supplier, user, product, list_key, price):
+    from app.models.pricing import SupplierPrice
+
+    db.add(
+        SupplierPrice(
+            supplier_id=supplier.id, product_id=product.id, delivery_date=list_key, price=price, unit_code="KG", submitted_by=user.id
+        )
+    )
+    db.commit()
+
+
+def _at(monkeypatch, day, hour):
+    from datetime import datetime
+
+    from app.services.price_approval_service import BUSINESS_TZ
+
+    monkeypatch.setattr(purchase_order_service, "_now", lambda: datetime(day.year, day.month, day.day, hour, tzinfo=BUSINESS_TZ))
+
+
+def _save_tuesday_order(db, admin, supplier, branch, product):
+    supplier_order_service.set_supplier_order(
+        db, admin, supplier.id, TUE, SetSupplierOrderRequest(items=[SupplierOrderItemIn(branch_id=branch.id, product_id=product.id, quantity=10)])
+    )
+
+
+def test_tuesday_delivery_is_priced_from_mondays_list(db_session, make_branch, make_supplier, make_product, make_user, admin_user):
+    supplier, branch, product = make_supplier(), make_branch(), make_product()
+    supplier_user = make_user(role="SUPPLIER", supplier=supplier)
+    _add_price(db_session, supplier, supplier_user, product, SUN, 40)  # Friday's list
+    _add_price(db_session, supplier, supplier_user, product, WED, 50)  # Monday's list
+    _add_price(db_session, supplier, supplier_user, product, WED + timedelta(days=2), 60)  # Wednesday's list
+    _save_tuesday_order(db_session, admin_user, supplier, branch, product)
+
+    item = supplier_order_service.get_supplier_order(db_session, supplier.id, TUE).items[0]
+    assert item.effective_price == 50 and not item.price_is_estimated
+
+
+def test_po_waits_for_mondays_prices_to_be_final(
+    db_session, make_branch, make_supplier, make_product, make_user, admin_user, monkeypatch
+):
+    supplier, branch, product = make_supplier(), make_branch(), make_product()
+    supplier_user = make_user(role="SUPPLIER", supplier=supplier)
+    _add_price(db_session, supplier, supplier_user, product, SUN, 40)  # Friday's list only
+    _save_tuesday_order(db_session, admin_user, supplier, branch, product)
+
+    # Sunday: Monday's prices don't exist yet — Friday's 40 is only an estimate.
+    _at(monkeypatch, SUN, 10)
+    with pytest.raises(ValidationFailedError, match="Monday"):
+        purchase_order_service.issue_purchase_order(db_session, admin_user, supplier.id, TUE)
+    row = purchase_order_service.list_admin_rows(db_session, TUE)[0]
+    assert row.issue_blocked_reason and "Monday" in row.issue_blocked_reason
+
+    # Monday morning: submitted, but not final until the 2 PM approval cutoff.
+    _add_price(db_session, supplier, supplier_user, product, WED, 50)
+    _at(monkeypatch, MON, 11)
+    with pytest.raises(ValidationFailedError, match="final at"):
+        purchase_order_service.issue_purchase_order(db_session, admin_user, supplier.id, TUE)
+
+    # Monday after the cutoff: issued at Monday's real price.
+    _at(monkeypatch, MON, 15)
+    po = purchase_order_service.issue_purchase_order(db_session, admin_user, supplier.id, TUE)
+    assert float(po.total_amount) == 10 * 50
+    assert "has_agreed_price" not in po.items[0]
+
+
+def test_po_after_cutoff_flags_products_missing_from_mondays_list(
+    db_session, make_branch, make_supplier, make_product, make_user, admin_user, monkeypatch
+):
+    supplier, branch, product = make_supplier(), make_branch(), make_product(description="LEEKS")
+    supplier_user = make_user(role="SUPPLIER", supplier=supplier)
+    _add_price(db_session, supplier, supplier_user, product, SUN, 40)  # never priced on Monday
+    _save_tuesday_order(db_session, admin_user, supplier, branch, product)
+
+    _at(monkeypatch, MON, 15)
+    with pytest.raises(ValidationFailedError, match="no Monday price for: LEEKS"):
+        purchase_order_service.issue_purchase_order(db_session, admin_user, supplier.id, TUE)
