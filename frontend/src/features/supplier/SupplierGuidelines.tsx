@@ -38,6 +38,55 @@ export default function SupplierGuidelines() {
             අමතන්න.
           </p>
           <p className="font-semibold text-crate-950">ස්තූතියි!</p>
+
+          <ul className="list-disc pl-6 space-y-4 pt-2">
+            <li>
+              <p className="font-semibold text-crate-950">එළවළු හෝ පලතුරු සඳහා මිල ගනන් ඉදිරිපත් කිරීම:-</p>
+              <p className="mt-1.5">
+                මෙහිදී submit price tab එක භාවිතා කර ඔබට මිල ගණන් ඉදිරිපත් කල හැක.
+                <br />
+                පලමු වර ඔබ මිල ගණන් ඉදිරිපත් කල පසු, එය මෙම පද්ධතිය මඟින් ගබඩා කර තබා ගනී.
+                <br />
+                ඔබ විසින් නැවත මිළ ගණන් ඉදිරිපත් කිරීමේ දී පරණ මිල ගණන් submit price යටතේ පෙන්වයි.
+                <br />
+                වෙබ් පිටුවේ අවසාන කොටසේ clear all මත click කිරීමෙන් පරණ මිල ගණන් ඉවත් කරගත් පසුව නව මිල ගණන් ඔබට
+                ඇතුලත් කල හැක.
+                <br />
+                පෙර දිනයේ මිල ගණන් නැවත වෙනස් නොවන්නේනම් එය clear all නොකර submit කල හැක.
+                <br />
+                නැතිනම් නව clear all කර නව මිළ ගණන් ඉදිරිපත් කර submit කල හැක.
+              </p>
+              <p className="mt-3">
+                ඔබ excel file එකක් භාවිතා කර මිල ගණන් ඉදිරිපත් කරන්නේ නම්, submit price tab යටතේ ඇති තිරයේ
+                Download Excel Sheet මඟින් excel file format එකක් download කර ගත හැක.
+                <br />
+                පසුව එම excel file එක වෙත මිළ ගණන් ඇතුලත් කර submit prices tab යටතේ upload excel option එක හරහා
+                එය submit කල හැක.
+              </p>
+              <p className="mt-3">
+                මිළ ගණන් සාර්ථකව ඉදිරිපත් වූ පසු Prices Submitted Successfully යනුවෙන් දිස්වේ.
+                <br />
+                එසේ නොවේනම් ඉහත ඇති දුරකතනය අමතන්න.
+              </p>
+            </li>
+            <li>
+              ඉදිරිපත් කෙරූ මිල ගණන් My Submitted Prices tab යටතේ ද,
+              <br />
+              ඉදිරිපත් කල නව මිළ ගණන් වෙනස් වීම Price Approvals යටතේ ද,
+              <br />
+              ඉදිරිපත් කල මිල ගණන් වෙනස් වූ පසු අවසාන මිල Final Price Tab යටතේ ද,
+              <br />
+              ශාඛා සඳහා ඇණවුම් Orders by Branch Tab යටතේ ද,
+              <br />
+              මිල ගණන් ඇතුලත් ඇණවුම් Purchase Orders යටතේ ද,
+              <br />
+              SPAR Head Office සඳහා පණිවිඩ එක් කිරීම Messages යටතේ ද,
+              <br />
+              සැපයුම්කරුගේ මාර්ගෝපදේශ Supplier Guidelines Tab යටතේ ද,
+              <br />
+              ඔබගේ ගිණුමේ තොරතුරු ඇතුලත් කිරීම Account Tab යටතේ ද ලබා ගත හැක.
+            </li>
+          </ul>
         </section>
 
         <div className="border-t border-sage-100 my-7" />
