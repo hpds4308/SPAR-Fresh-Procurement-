@@ -117,6 +117,50 @@ export default function SupplierGuidelines() {
             .
           </p>
           <p className="font-semibold text-crate-950">Thank you!</p>
+
+          <ul className="list-disc pl-6 space-y-4 pt-2">
+            <li>
+              <p className="font-semibold text-crate-950">Submitting Prices for Vegetables or Fruits:</p>
+              <p className="mt-1.5">
+                You can submit your prices using the Submit Price tab.
+                <br />
+                Once you submit prices for the first time, the system will save them. When you submit prices
+                again, your previously submitted prices will appear under the Submit Price tab.
+                <br />
+                You can remove the previous prices by clicking Clear All at the bottom of the webpage. After
+                clearing the previous prices, you can enter and submit new prices.
+                <br />
+                If the prices remain unchanged from the previous day, you can submit them without clicking Clear
+                All. Otherwise, click Clear All, enter the new prices, and submit them.
+              </p>
+              <p className="mt-3">
+                If you wish to submit prices using an Excel file, you can download the Excel template by clicking
+                Download Excel Sheet under the Submit Price tab.
+                <br />
+                Enter the prices into the downloaded Excel file and upload it using the Upload Excel option under
+                the Submit Prices tab.
+              </p>
+              <p className="mt-3">
+                Once the prices have been submitted successfully, the message &ldquo;Prices Submitted
+                Successfully&rdquo; will appear.
+                <br />
+                If this message does not appear, please contact the telephone number provided above.
+              </p>
+            </li>
+            <li>
+              <p className="font-semibold text-crate-950">Other Tabs and Their Functions:</p>
+              <ul className="list-[circle] pl-6 mt-1.5 space-y-1">
+                <li>My Submitted Prices &ndash; View the prices you have submitted.</li>
+                <li>Price Approvals &ndash; View newly submitted prices and changes to those prices.</li>
+                <li>Final Price &ndash; View the final prices after the submitted prices have been reviewed and updated.</li>
+                <li>Orders by Branch &ndash; View orders placed by individual branches.</li>
+                <li>Purchase Orders &ndash; View purchase orders containing prices.</li>
+                <li>Messages &ndash; Send messages to SPAR Head Office.</li>
+                <li>Supplier Guidelines &ndash; View the guidelines for suppliers.</li>
+                <li>Account &ndash; Enter and manage your account information.</li>
+              </ul>
+            </li>
+          </ul>
         </section>
       </div>
     </div>
