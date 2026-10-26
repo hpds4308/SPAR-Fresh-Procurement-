@@ -429,6 +429,11 @@ export default function SupplierOrderBuilder({
     return total;
   }, [filledCells, qty, extra, supplierPrices]);
 
+  const totalKg = useMemo(
+    () => filledCells.reduce((sum, key) => sum + (parseFloat(qty[key]) || 0), 0),
+    [filledCells, qty],
+  );
+
   async function handleSave() {
     if (!supplierId) {
       setError("Choose a supplier first.");
@@ -823,6 +828,10 @@ export default function SupplierOrderBuilder({
         {filledCells.length > 0 && (
           <div className="flex flex-col items-end mt-3 text-sm text-crate-800/70">
             <div>
+              Total kgs:{" "}
+              <span className="font-semibold text-crate-950 ml-1.5 mr-6">
+                {parseFloat(totalKg.toFixed(2))} kg
+              </span>
               Estimated total:{" "}
               <span className="font-semibold text-crate-950 ml-1.5">Rs. {grandTotal.toFixed(2)}</span>
             </div>
