@@ -94,10 +94,17 @@ nano frontend/.env.production
   that same domain through to the backend, so this is just your domain,
   not a separate backend address.
 
-## 6. Edit the Caddyfile
+## 6. Set the domain for Caddy
 
-Open `Caddyfile` and replace `yourdomain.com` with your actual domain —
-this is the only edit it needs.
+The `Caddyfile` itself needs no edits: add your domain to `.env.production`
+(the Compose one, in this directory):
+
+```
+SITE_ADDRESS=yourdomain.com
+```
+
+Without it Caddy serves plain HTTP on port 80 (handy for a first test on
+the server's IP), with no HTTPS.
 
 ## 7. Build and start everything
 

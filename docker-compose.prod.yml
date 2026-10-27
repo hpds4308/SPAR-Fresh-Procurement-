@@ -18,14 +18,18 @@
 #     just point your domain's DNS at the server and it handles the rest.
 services:
   db:
-    image: postgres:16
+    # 18 to match the data copied from Railway (Postgres 18) — a dump
+    # restores into the same or a newer major version only.
+    image: postgres:18
     restart: unless-stopped
     environment:
       POSTGRES_USER: spar_user
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: spar_procurement
     volumes:
-      - spar_db_data:/var/lib/postgresql/data
+      # Postgres 18+ images keep data in a versioned subfolder of
+      # /var/lib/postgresql, so the volume mounts the parent.
+      - spar_db_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U spar_user -d spar_procurement"]
       interval: 5s
@@ -66,7 +70,9 @@ services:
     depends_on:
       - backend
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:80/"]
+      # 127.0.0.1, not localhost: busybox wget tries IPv6 first and nginx
+      # only listens on IPv4, so "localhost" reports unhealthy forever.
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:80/"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -89,7 +95,7 @@ services:
   # up and forget. See docs/HOSTING.md for how to restore from one of
   # these dumps.
   db-backup:
-    image: postgres:16
+    image: postgres:18
     restart: unless-stopped
     environment:
       POSTGRES_USER: spar_user
@@ -103,7 +109,7 @@ services:
     volumes:
       - ./docker/backup_db.sh:/backup_db.sh:ro
       - db_backups:/backups
-    entrypoint: ["sh", "/backup_db.sh"]
+    entrypoint: ["bash", "/backup_db.sh"]
 
   # Reuses the backend image just to run scripts/import_harti_prices.py on
   # its own daily schedule — informational-only local market prices, so a
@@ -140,6 +146,11 @@ services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    environment:
+      # The site's domain (see Caddyfile); unset or empty = plain HTTP on
+      # port 80. Never pass it through empty: Caddy would then read the
+      # site block as its global options and refuse to start.
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
     ports:
       - "80:80"
       - "443:443"

@@ -1,10 +1,12 @@
-#!/bin/sh
+#!/bin/bash
 # Runs inside the db-backup service (docker-compose.prod.yml), reusing the
-# postgres:16 image purely for its pg_dump binary — no separate image to
+# postgres image purely for its pg_dump binary — no separate image to
 # build or host cron job to remember to set up. Dumps immediately on
 # startup, then repeats on BACKUP_INTERVAL_SECONDS, deleting dumps older
 # than BACKUP_RETENTION_DAYS so the volume doesn't grow forever.
-set -eu
+# pipefail: without it a failed pg_dump still "succeeds" through gzip and
+# leaves an empty dump that looks like a good backup.
+set -euo pipefail
 
 BACKUP_DIR="${BACKUP_DIR:-/backups}"
 RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-14}"

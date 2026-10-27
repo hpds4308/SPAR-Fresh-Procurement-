@@ -1,8 +1,13 @@
 # Caddy gets free, automatic HTTPS just from having a real domain here —
 # no certificate files, no renewal cron job, nothing else to configure.
-# Replace yourdomain.com with your actual domain before deploying, and
-# make sure its DNS A record points at this server's IP first.
-yourdomain.com {
+# The address comes from SITE_ADDRESS in .env (next to
+# docker-compose.prod.yml), e.g. SITE_ADDRESS=procurement.sparsl.com —
+# its DNS A record must point at this server, and ports 80 + 443 must
+# reach it, before Caddy can get the certificate. With SITE_ADDRESS unset
+# the site is served as plain HTTP on port 80 (any address, e.g. the
+# server's IP) and there is no HTTPS.
+{$SITE_ADDRESS::80} {
+	encode zstd gzip
 	# Applied to every response Caddy sends, whether it came from the
 	# frontend (the actual HTML page) or the backend (JSON API + the
 	# Swagger docs page, when not disabled by APP_ENV=production) — this
@@ -16,13 +21,17 @@ yourdomain.com {
 	# the app uses React's style={{...}} prop in a number of places,
 	# which renders as inline style="" attributes — script-src does not
 	# get the same allowance, since inline <script> is the actual XSS
-	# vector this header exists to reduce.
+	# vector this header exists to reduce. The one inline script that IS
+	# allowed is index.html's boot-splash fallback, by its sha256 hash —
+	# without it the splash never clears. Editing that script changes the
+	# hash; backend/tests/test_caddyfile_csp.py catches a stale one.
+	# blob: in img-src/media-src is for chat attachment previews.
 	header {
-		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		Strict-Transport-Security "max-age=31536000"
 		X-Content-Type-Options "nosniff"
 		X-Frame-Options "DENY"
 		Referrer-Policy "strict-origin-when-cross-origin"
-		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'sha256-hIQCfoEQlMuJdhsj6zFrSPmze7oQn7PHIRetwWmJJdI='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
 		-Server
 	}
 	handle /api/* {
