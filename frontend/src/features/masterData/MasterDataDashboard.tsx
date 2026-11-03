@@ -1,27 +1,47 @@
 import { useAuth } from "../auth/AuthContext";
 import DashboardShell from "../shared/DashboardShell";
-import { IconGrid } from "../shared/Icons";
+import EmptyState from "../shared/EmptyState";
+import { IconGrid, IconReceipt, IconTag } from "../shared/Icons";
 import { SidebarItem } from "../shared/Sidebar";
+import { FadeSwitch } from "../shared/ui/FadeSwitch";
+import { useTabParam } from "../shared/useTabParam";
+import CostPricesView from "./CostPricesView";
 import MasterDataSheetView from "./MasterDataSheetView";
 
-type Tab = "sheet";
+const TABS = ["sheet", "costPrices", "sellingPrices"] as const;
+type Tab = (typeof TABS)[number];
+
+const iconProps = { width: 17, height: 17 };
 
 const navItems: SidebarItem<Tab>[] = [
-  { id: "sheet", label: "Master Data Sheet", icon: <IconGrid width={17} height={17} /> },
+  { id: "sheet", label: "Master Data Sheet", icon: <IconGrid {...iconProps} /> },
+  { id: "costPrices", label: "Cost Prices", icon: <IconReceipt {...iconProps} /> },
+  { id: "sellingPrices", label: "Selling Prices", icon: <IconTag {...iconProps} /> },
 ];
 
 /** Head Office Master Data Team — only the sheet Admin sends them. */
 export default function MasterDataDashboard() {
   const { user } = useAuth();
+  const [tab, setTab] = useTabParam(TABS, "sheet");
   return (
     <DashboardShell
       title="Master Data Team"
       subtitle={user ? `Signed in as ${user.username}` : "Master Data Team"}
       navItems={navItems}
-      activeNav="sheet"
-      onNavChange={() => {}}
+      activeNav={tab}
+      onNavChange={setTab}
     >
-      <MasterDataSheetView />
+      <FadeSwitch tabKey={tab}>
+        {tab === "sheet" && <MasterDataSheetView />}
+        {tab === "costPrices" && <CostPricesView />}
+        {tab === "sellingPrices" && (
+          <EmptyState
+            icon={<IconTag width={20} height={20} />}
+            title="Selling Prices"
+            description="Coming soon."
+          />
+        )}
+      </FadeSwitch>
     </DashboardShell>
   );
 }

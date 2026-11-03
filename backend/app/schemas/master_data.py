@@ -91,6 +91,30 @@ class MasterDataSendOut(BaseModel):
     email_error: str | None = None
 
 
+class CostPriceItemOut(BaseModel):
+    product_id: int
+    product_code: str
+    pos_code: str
+    description: str
+    category_name: str
+    cost_price: float
+    price_date: date | None = None  # delivery date the supplier quoted it for
+
+
+class SupplierCostPricesOut(BaseModel):
+    supplier_name: str
+    items: list[CostPriceItemOut]
+
+
+class CostPricesOut(BaseModel):
+    """Cost Price column of the latest sent sheet, grouped by the supplier whose price it is."""
+
+    version: int
+    sent_at: datetime
+    suppliers: list[SupplierCostPricesOut]
+    skipped_no_pos_code: list[str]  # have a cost price but no POS code — can't go in the POS files
+
+
 class PublishSummaryOut(BaseModel):
     version: int
     published_at: datetime

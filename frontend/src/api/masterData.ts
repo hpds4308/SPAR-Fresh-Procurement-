@@ -141,3 +141,35 @@ export function downloadTeamSheet(): Promise<void> {
 export function publishSellingPrices(): Promise<PublishSummary> {
   return apiFetch("/master-data/team/publish", { method: "POST" });
 }
+
+export type CostPriceItem = {
+  product_id: number;
+  product_code: string;
+  pos_code: string;
+  description: string;
+  category_name: string;
+  cost_price: number;
+  price_date: string | null;
+};
+
+export type SupplierCostPrices = {
+  supplier_name: string;
+  items: CostPriceItem[];
+};
+
+export type CostPrices = {
+  version: number;
+  sent_at: string;
+  suppliers: SupplierCostPrices[];
+  skipped_no_pos_code: string[];
+};
+
+/** Master Data Team: Cost Price column of the latest sent sheet, by supplier. 404 before the first send. */
+export function fetchTeamCostPrices(): Promise<CostPrices> {
+  return apiFetch("/master-data/team/cost-prices");
+}
+
+/** One POS-import Excel file per supplier, all in one .zip. */
+export function downloadTeamCostPricesZip(): Promise<void> {
+  return downloadExcel("/master-data/team/cost-prices/zip", "SPAR-Cost-Prices.zip");
+}

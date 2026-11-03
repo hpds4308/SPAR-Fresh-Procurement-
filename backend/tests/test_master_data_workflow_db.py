@@ -407,3 +407,56 @@ def test_branch_cannot_set_selling_price(client, auth_headers, branch_user, make
         f"/api/v1/master-data/{p.id}", headers=auth_headers(branch_user), json={"field": "selling_price", "value": 1}
     )
     assert resp.status_code == 403
+
+
+# --- Master Data Team: Cost Prices -----------------------------------------------------------
+
+
+def test_cost_prices_grouped_by_winning_supplier_and_zipped(client, auth_headers, admin, md_user, make_supplier, make_user, make_product, db_session):
+    import io
+    import zipfile
+
+    from openpyxl import load_workbook
+
+    rkr = make_user(role="SUPPLIER", supplier=make_supplier(supplier_name="RKR"))
+    chh = make_user(role="SUPPLIER", supplier=make_supplier(supplier_name="Ceylon Heredity"))
+    carrot = make_product(description="Carrot", pos_code="00003662")
+    leeks = make_product(description="Leeks", pos_code="00000300")
+    no_pos = make_product(description="No POS", pos_code=None)
+    make_product(description="Nobody quoted", pos_code="00000999")
+    _quote(db_session, rkr, carrot, 4625)  # RKR highest for carrot
+    _quote(db_session, chh, carrot, 4000)
+    _quote(db_session, chh, leeks, 210.5)  # Ceylon Heredity only for leeks
+    _quote(db_session, rkr, no_pos, 50)
+
+    assert client.get("/api/v1/master-data/team/cost-prices", headers=auth_headers(md_user)).status_code == 404
+    client.post("/api/v1/master-data/send", headers=auth_headers(admin))
+
+    body = client.get("/api/v1/master-data/team/cost-prices", headers=auth_headers(md_user)).json()
+    groups = {s["supplier_name"]: [(i["pos_code"], i["cost_price"]) for i in s["items"]] for s in body["suppliers"]}
+    assert groups == {"Ceylon Heredity": [("00000300", 210.5)], "RKR": [("00003662", 4625.0)]}
+    assert body["skipped_no_pos_code"] == ["No POS"]
+
+    resp = client.get("/api/v1/master-data/team/cost-prices/zip", headers=auth_headers(md_user))
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/zip"
+    assert 'filename="SPAR-Cost-Prices-v1-' in resp.headers["content-disposition"]
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    assert sorted(zf.namelist()) == ["Ceylon Heredity Cost Prices.xlsx", "RKR Cost Prices.xlsx"]
+
+    wb = load_workbook(io.BytesIO(zf.read("RKR Cost Prices.xlsx")))
+    assert wb.sheetnames == ["Transaction", "Tax"]
+    ws = wb["Transaction"]
+    assert [c.value for c in ws[1]][:8] == [
+        "DET_LINENO", "DET_PROCODE", "DET_PRODESC", "DET_STOCKCODE", "DET_UNIT", "DET_CS", "DET_UNITQTY", "DET_CPRICE",
+    ]
+    assert ws.max_column == 33
+    assert [c.value for c in ws[2]][:8] == [1, "00003662", None, "00003662", None, 1, 1, 4625]
+    assert ws["B2"].number_format == "@"  # code kept as text, leading zeros intact
+    assert all(c.value is None for c in ws[3])
+
+
+@pytest.mark.parametrize("path", ["/api/v1/master-data/team/cost-prices", "/api/v1/master-data/team/cost-prices/zip"])
+def test_cost_prices_hidden_from_branches_and_suppliers(client, auth_headers, branch_user, supplier_user, path):
+    for user in (branch_user, supplier_user):
+        assert client.get(path, headers=auth_headers(user)).status_code == 403

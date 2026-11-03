@@ -12,6 +12,7 @@ from app.core.security import get_current_user, require_roles
 from app.models.user import User
 from app.schemas.master_data import (
     AutoGenerateSummaryOut,
+    CostPricesOut,
     MasterDataFieldUpdateRequest,
     MasterDataRowOut,
     MasterDataSendOut,
@@ -19,7 +20,7 @@ from app.schemas.master_data import (
     MasterDataSubmissionOut,
     PublishSummaryOut,
 )
-from app.services import master_data_service, settings_service
+from app.services import cost_price_export_service, master_data_service, settings_service
 
 router = APIRouter(prefix="/master-data", dependencies=[Depends(get_current_user)])
 
@@ -151,6 +152,29 @@ def export_team_sheet(
     return StreamingResponse(
         io.BytesIO(excel_bytes),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/team/cost-prices", response_model=CostPricesOut)
+def get_team_cost_prices(
+    user: User = Depends(require_roles("MASTER_DATA", "ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """Cost Price column of the latest sent sheet, grouped by the supplier whose price it is."""
+    return cost_price_export_service.get_cost_prices(db)
+
+
+@router.get("/team/cost-prices/zip")
+def download_team_cost_prices(
+    user: User = Depends(require_roles("MASTER_DATA", "ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """One POS-import .xlsx per supplier (code + cost price), all in one .zip."""
+    zip_bytes, filename = cost_price_export_service.cost_prices_zip(db)
+    return StreamingResponse(
+        io.BytesIO(zip_bytes),
+        media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
