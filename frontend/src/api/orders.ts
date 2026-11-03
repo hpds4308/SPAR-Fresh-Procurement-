@@ -8,8 +8,6 @@ export type Product = {
   subcategory: string | null;
   unit_code: string;
   status: string;
-  // Selling price published by the Master Data Team — read-only; null if none yet.
-  selling_price?: number | null;
 };
 
 // Fixed display grouping for every product listing across the app:

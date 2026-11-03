@@ -355,17 +355,7 @@ export default function OrderForm({ onSubmitted }: { onSubmitted: () => void }) 
                   {p.subcategory ? ` · ${p.subcategory}` : ""}
                 </span>
                 <CategoryBadge name={p.category_name} />
-                {/* Phones: no room for a Selling Price column, so it sits here. */}
-                <span className="sm:hidden text-xs text-crate-800/60 whitespace-nowrap">
-                  {p.selling_price != null ? `Rs. ${p.selling_price.toFixed(2)}` : ""}
-                </span>
               </div>
-            </div>
-            <div className="hidden sm:block text-right shrink-0 w-24 px-2">
-              <p className="text-[10px] uppercase tracking-wide whitespace-nowrap text-crate-800/35">Selling Price</p>
-              <p className="text-sm text-crate-800/70 whitespace-nowrap">
-                {p.selling_price != null ? `Rs. ${p.selling_price.toFixed(2)}` : "—"}
-              </p>
             </div>
             <div className="text-right shrink-0 w-28 px-2">
               <p className="text-[10px] uppercase tracking-wide whitespace-nowrap text-crate-800/35">Stock in Hand</p>

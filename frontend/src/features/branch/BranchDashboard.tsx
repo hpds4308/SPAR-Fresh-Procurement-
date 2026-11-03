@@ -3,19 +3,20 @@ import { useAuth } from "../auth/AuthContext";
 import DashboardShell from "../shared/DashboardShell";
 import { useTabParam } from "../shared/useTabParam";
 import { SidebarItem } from "../shared/Sidebar";
-import { IconPlus, IconClock, IconChat, IconLog, IconShield, IconReceipt } from "../shared/Icons";
+import { IconPlus, IconClock, IconChat, IconLog, IconShield, IconReceipt, IconTag } from "../shared/Icons";
 import { fetchMyUnreadCount } from "../../api/messages";
 import OrderForm from "./OrderForm";
 import OrderHistory from "./OrderHistory";
 import BranchMessages from "./BranchMessages";
 import SafetyStock from "./SafetyStock";
+import SellingPrices from "./SellingPrices";
 import PurchaseOrderList from "../shared/PurchaseOrderList";
 import { fetchBranchPurchaseOrder, fetchBranchPurchaseOrders } from "../../api/purchaseOrders";
 import BranchGuidelines from "./BranchGuidelines";
 import BranchWelcomeScreen from "./BranchWelcomeScreen";
 import { FadeSwitch } from "../shared/ui/FadeSwitch";
 
-const TABS = ["new", "history", "purchaseOrders", "safety", "messages", "guidelines"] as const;
+const TABS = ["new", "history", "sellingPrices", "purchaseOrders", "safety", "messages", "guidelines"] as const;
 type Tab = (typeof TABS)[number];
 
 const iconProps = { width: 17, height: 17 };
@@ -67,6 +68,7 @@ export default function BranchDashboard() {
   const navItems: SidebarItem<Tab>[] = [
     { id: "new", label: "New Order", icon: <IconPlus {...iconProps} /> },
     { id: "history", label: "My Orders", icon: <IconClock {...iconProps} /> },
+    { id: "sellingPrices", label: "Selling Price", icon: <IconTag {...iconProps} /> },
     { id: "purchaseOrders", label: "Purchase Orders", icon: <IconReceipt {...iconProps} /> },
     { id: "safety", label: "Safety Stock", icon: <IconShield {...iconProps} /> },
     { id: "messages", label: "Messages", icon: <IconChat {...iconProps} />, badge: unread },
@@ -95,6 +97,7 @@ export default function BranchDashboard() {
       <FadeSwitch tabKey={tab}>
         {tab === "new" && <OrderForm onSubmitted={() => setRefreshKey((k) => k + 1)} />}
         {tab === "history" && <OrderHistory refreshKey={refreshKey} />}
+        {tab === "sellingPrices" && <SellingPrices />}
         {tab === "purchaseOrders" && (
           <PurchaseOrderList
             fetchList={fetchBranchPurchaseOrders}

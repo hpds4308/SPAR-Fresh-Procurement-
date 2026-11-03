@@ -41,6 +41,7 @@ from app.models.branch import Branch
 from app.models.master_data_submission import MasterDataSubmission
 from app.models.pricing import SupplierPrice
 from app.models.product import Product, ProductCategory
+from app.models.selling_price_history import SellingPriceHistory
 from app.models.supplier import Supplier
 from app.models.user import User
 from app.services import price_approval_service, pricing_service
@@ -503,6 +504,15 @@ def publish_selling_prices(db: Session, user: User) -> PublishSummaryOut:
             product.published_selling_price = row.selling_price
             product.selling_price_published_at = now
             product.selling_price_published_by = user.id
+            db.add(
+                SellingPriceHistory(
+                    product_id=product.id,
+                    price=row.selling_price,
+                    published_at=now,
+                    published_by=user.id,
+                    version=latest.version,
+                )
+            )
             updated += 1
 
         if updated == 0 and unchanged == 0:

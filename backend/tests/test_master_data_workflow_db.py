@@ -345,30 +345,60 @@ def test_publish_before_any_send_is_rejected(client, auth_headers, md_user):
     assert client.post("/api/v1/master-data/team/publish", headers=auth_headers(md_user)).status_code == 422
 
 
-# --- Branch side -----------------------------------------------------------------------
 
 
-def test_branch_sees_published_price_but_not_admins_draft(client, auth_headers, admin, md_user, branch_user, supplier_user, make_product):
+# --- Branch side: Selling Price tab -------------------------------------------------------
+
+
+def _branch_prices(client, auth_headers, user, on=None):
+    resp = client.get("/api/v1/selling-prices", headers=auth_headers(user), params={"on": on} if on else None)
+    assert resp.status_code == 200, resp.text
+    return {r["product_code"]: r["selling_price"] for r in resp.json()["rows"]}
+
+
+def test_branch_sees_published_price_but_not_admins_draft(client, auth_headers, admin, md_user, branch_user, make_product):
     p = make_product(product_code="SP-9", selling_price=220, selling_price_source="MANUAL")
-    other = make_product(product_code="SP-10")
+    make_product(product_code="SP-10")
 
-    def branch_prices():
-        rows = client.get("/api/v1/products", headers=auth_headers(branch_user)).json()
-        return {r["product_code"]: r["selling_price"] for r in rows}
-
-    assert branch_prices() == {"SP-9": None, "SP-10": None}  # not published yet
+    assert _branch_prices(client, auth_headers, branch_user) == {"SP-9": None, "SP-10": None}  # not published yet
     client.post("/api/v1/master-data/send", headers=auth_headers(admin))
     client.post("/api/v1/master-data/team/publish", headers=auth_headers(md_user))
-    assert branch_prices() == {"SP-9": 220, "SP-10": None}
+    assert _branch_prices(client, auth_headers, branch_user) == {"SP-9": 220, "SP-10": None}
 
     # Admin changes the draft — branches keep seeing the published price.
     client.patch(f"/api/v1/master-data/{p.id}", headers=auth_headers(admin), json={"field": "selling_price", "value": 300})
-    assert branch_prices()["SP-9"] == 220
+    assert _branch_prices(client, auth_headers, branch_user)["SP-9"] == 220
 
-    # Suppliers never see SPAR's retail selling price.
+
+def test_branch_can_look_up_prices_on_an_earlier_date(client, auth_headers, admin, md_user, branch_user, make_product, db_session):
+    from app.models.selling_price_history import SellingPriceHistory
+
+    p = make_product(product_code="SP-D", selling_price=100, selling_price_source="MANUAL")
+    client.post("/api/v1/master-data/send", headers=auth_headers(admin))
+    client.post("/api/v1/master-data/team/publish", headers=auth_headers(md_user))
+    # Pretend that first publish happened 3 days ago.
+    first = db_session.query(SellingPriceHistory).filter_by(product_id=p.id).one()
+    first.published_at = first.published_at - timedelta(days=3)
+    db_session.commit()
+
+    client.patch(f"/api/v1/master-data/{p.id}", headers=auth_headers(admin), json={"field": "selling_price", "value": 150})
+    client.post("/api/v1/master-data/send", headers=auth_headers(admin))
+    client.post("/api/v1/master-data/team/publish", headers=auth_headers(md_user))
+    # Publishing the same version again adds no history.
+    client.post("/api/v1/master-data/team/publish", headers=auth_headers(md_user))
+    assert db_session.query(SellingPriceHistory).filter_by(product_id=p.id).count() == 2
+
+    today = date.today()
+    assert _branch_prices(client, auth_headers, branch_user)["SP-D"] == 150
+    assert _branch_prices(client, auth_headers, branch_user, (today - timedelta(days=2)).isoformat())["SP-D"] == 100
+    assert _branch_prices(client, auth_headers, branch_user, (today - timedelta(days=10)).isoformat())["SP-D"] is None
+
+
+def test_suppliers_cannot_see_selling_prices(client, auth_headers, supplier_user):
+    assert client.get("/api/v1/selling-prices", headers=auth_headers(supplier_user)).status_code == 403
+    assert client.get("/api/v1/selling-prices").status_code == 401
     rows = client.get("/api/v1/products", headers=auth_headers(supplier_user)).json()
-    assert all(r["selling_price"] is None for r in rows)
-    assert other.id  # keep fixture referenced
+    assert all("selling_price" not in r for r in rows)
 
 
 def test_branch_cannot_set_selling_price(client, auth_headers, branch_user, make_product):
