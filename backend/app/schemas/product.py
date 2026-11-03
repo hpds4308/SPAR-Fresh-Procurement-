@@ -22,6 +22,8 @@ class ProductAdminOut(ProductOut):
     category_id: int
     unit_id: int
     created_at: datetime | None = None
+    # Changes whenever the photo is replaced; None = no photo yet.
+    image_version: str | None = None
 
 
 class ProductOption(BaseModel):
@@ -57,3 +59,18 @@ class ProductCreate(BaseModel):
             return None
         v = " ".join(v.split())
         return v or None
+
+
+class ProductUpdate(ProductCreate):
+    """Admin's edit of an existing product — the same fields as adding one."""
+
+
+class ProductImageRef(BaseModel):
+    """
+    One product's photo info for thumbnails: version is set (and changes
+    on every replace) when Admin uploaded a photo; without one, pages fall
+    back to the older photo file named by product_code, if there is one.
+    """
+    product_id: int
+    product_code: str
+    version: str | None = None

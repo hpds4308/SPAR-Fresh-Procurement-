@@ -20,6 +20,7 @@ import {
   FinalOfferTag,
   rs,
 } from "../shared/PriceSheetParts";
+import { ProductThumb } from "../shared/ui/ProductThumb";
 import { ProductPromotion } from "../shared/ui/PromotionBadge";
 import SignaturePad, { SignaturePadHandle } from "../shared/SignaturePad";
 import Button from "../shared/ui/Button";
@@ -352,6 +353,7 @@ function ResponseForm({ sheet, onDone }: { sheet: PriceSheet; onDone: (s: PriceS
                   a.decision === "REJECTED" ? "bg-tomato-500/[0.03]" : a.decision === "APPROVED" ? "bg-crate-700/[0.03]" : ""
                 }`}
               >
+                <ProductThumb productId={item.product_id} name={item.product_description} size="md" />
                 <div className="flex-1 min-w-[13rem]">
                   <p className="text-sm text-crate-950">
                     {item.product_description}

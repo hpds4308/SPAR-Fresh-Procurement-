@@ -11,6 +11,7 @@ import EmptyState from "../shared/EmptyState";
 import { SkeletonTable } from "../shared/ui/Skeleton";
 import { IconReceipt } from "../shared/Icons";
 import { formatDateTime, formatSignDeadline, formatSubmissionDate, rs, submissionDateIso } from "../shared/PriceSheetParts";
+import { ProductThumb } from "../shared/ui/ProductThumb";
 import { ProductPromotion } from "../shared/ui/PromotionBadge";
 
 const CARD = "bg-white rounded-2xl shadow-[0_10px_30px_-12px_rgba(21,56,38,0.15)] border border-sage-100";
@@ -171,6 +172,7 @@ export default function FinalPrices() {
                 {list.lines.map((l) => (
                   <tr key={l.product_id}>
                     <td className="py-2 text-crate-950">
+                      <ProductThumb productId={l.product_id} name={l.product_description} className="mr-2 float-left" />
                       {l.product_description}
                       <ProductPromotion productId={l.product_id} className="ml-1.5" />
                       <span className="block text-[11px] text-crate-800/40">

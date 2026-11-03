@@ -14,6 +14,7 @@ import {
 import { CategoryBadge } from "../shared/ui/CategoryBadge";
 import { PromotionBadge, ProductPromotion } from "../shared/ui/PromotionBadge";
 import { useActivePromotions } from "../shared/useActivePromotions";
+import { useProductPhotos } from "../shared/useProductImages";
 import { ONE_DECIMAL_STEP, formatOneDecimal, isOneDecimal } from "../shared/oneDecimal";
 
 function formatDate(iso: string): string {
@@ -21,14 +22,11 @@ function formatDate(iso: string): string {
   return d.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
 }
 
-// Only some products have a real photo on file (named by product code);
-// most don't. Nothing is shown by default — hovering the item name pops
-// up the photo, only for products a preload check confirmed actually has
-// one, so hovering an item with no photo does nothing rather than
+// Only some products have a photo (one Admin uploaded, or an older file
+// named by product code); most don't. Nothing is shown by default —
+// hovering the item name pops up the photo, only for products whose photo
+// was found, so hovering an item with no photo does nothing rather than
 // showing an empty or broken box.
-function productImageUrl(productCode: string): string {
-  return `/images/products/${productCode}.png`;
-}
 
 const PREVIEW_SIZE = 180;
 
@@ -38,15 +36,10 @@ export default function OrderForm({ onSubmitted }: { onSubmitted: () => void }) 
   const [myOrder, setMyOrder] = useState<Order | null>(null);
   const [stockByProduct, setStockByProduct] = useState<Record<number, number>>({});
   const promotions = useActivePromotions();
-  // Product IDs a real photo was found for, discovered by silently
-  // preloading every product's image once products are known (below) —
-  // this decides whether hovering an item's name can pop anything up at
-  // all, rather than trying and failing on every hover.
-  const [hasImage, setHasImage] = useState<Set<number>>(new Set());
   // The single floating preview, positioned in viewport coordinates
   // (not relative to the scrolling list) so it's never clipped by the
   // list's own overflow — see showPreview/hidePreview below.
-  const [preview, setPreview] = useState<{ productCode: string; top: number; left: number } | null>(null);
+  const [preview, setPreview] = useState<{ src: string; top: number; left: number } | null>(null);
   const [quantities, setQuantities] = useState<Record<number, string>>({});
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState<string>("ALL");
@@ -97,39 +90,21 @@ export default function OrderForm({ onSubmitted }: { onSubmitted: () => void }) 
     };
   }, []);
 
-  // Silently probes every product's photo once, off-screen — populates
-  // hasImage per product as each check resolves, so the hover preview
-  // only ever offers to pop up for an item that genuinely has one.
-  useEffect(() => {
-    if (products.length === 0) return;
-    let cancelled = false;
-    for (const p of products) {
-      const img = new Image();
-      img.onload = () => {
-        if (!cancelled) setHasImage((prev) => (prev.has(p.id) ? prev : new Set(prev).add(p.id)));
-      };
-      img.src = productImageUrl(p.product_code);
-    }
-    return () => {
-      cancelled = true;
-    };
-  }, [products]);
-
-  const productCodeById = useMemo(() => {
-    const m = new Map<number, string>();
-    for (const p of products) m.set(p.id, p.product_code);
-    return m;
-  }, [products]);
+  // Photo URLs (product_id -> url) for the products that have one, found
+  // once products are known — this decides whether hovering an item's
+  // name can pop anything up at all, rather than trying on every hover.
+  const productIds = useMemo(() => products.map((p) => p.id), [products]);
+  const photos = useProductPhotos(productIds, "thumb");
 
   function showPreview(productId: number, target: HTMLElement) {
-    const productCode = productCodeById.get(productId);
-    if (!productCode) return;
+    const src = photos[productId];
+    if (!src) return;
     const rect = target.getBoundingClientRect();
     // Prefer just above the name; if that would run off the top of the
     // viewport (an item near the top of the scrolled list), show it just
     // below instead.
     const top = rect.top - PREVIEW_SIZE - 10 >= 8 ? rect.top - PREVIEW_SIZE - 10 : rect.bottom + 10;
-    setPreview({ productCode, top, left: rect.left });
+    setPreview({ src, top, left: rect.left });
   }
 
   function hidePreview() {
@@ -145,7 +120,7 @@ export default function OrderForm({ onSubmitted }: { onSubmitted: () => void }) 
       style={{ top: preview.top, left: preview.left }}
     >
       <img
-        src={productImageUrl(preview.productCode)}
+        src={preview.src}
         alt=""
         className="rounded-lg object-contain"
         style={{ width: PREVIEW_SIZE, height: PREVIEW_SIZE }}
@@ -264,8 +239,8 @@ export default function OrderForm({ onSubmitted }: { onSubmitted: () => void }) 
           {myOrder.lines.map((ln) => (
             <div key={ln.id} className="flex items-center justify-between px-4 py-2 text-sm">
               <span
-                className={`text-crate-950 truncate w-fit ${hasImage.has(ln.product_id) ? "cursor-pointer" : ""}`}
-                onMouseEnter={(e) => hasImage.has(ln.product_id) && showPreview(ln.product_id, e.currentTarget)}
+                className={`text-crate-950 truncate w-fit ${photos[ln.product_id] ? "cursor-pointer" : ""}`}
+                onMouseEnter={(e) => photos[ln.product_id] && showPreview(ln.product_id, e.currentTarget)}
                 onMouseLeave={hidePreview}
               >
                 {ln.product_description}
@@ -334,8 +309,8 @@ export default function OrderForm({ onSubmitted }: { onSubmitted: () => void }) 
             <div className="min-w-0 flex-1 pr-2">
               <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0">
                 <p
-                  className={`text-sm text-crate-950 truncate w-fit max-w-full ${hasImage.has(p.id) ? "cursor-pointer" : ""}`}
-                  onMouseEnter={(e) => hasImage.has(p.id) && showPreview(p.id, e.currentTarget)}
+                  className={`text-sm text-crate-950 truncate w-fit max-w-full ${photos[p.id] ? "cursor-pointer" : ""}`}
+                  onMouseEnter={(e) => photos[p.id] && showPreview(p.id, e.currentTarget)}
                   onMouseLeave={hidePreview}
                 >
                   {p.description}

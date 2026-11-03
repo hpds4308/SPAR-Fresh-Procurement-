@@ -15,18 +15,16 @@ import {
 import { CategoryBadge } from "../shared/ui/CategoryBadge";
 import PriceExcelPreviewModal from "./PriceExcelPreviewModal";
 import { ProductPromotion } from "../shared/ui/PromotionBadge";
+import { useProductPhotos } from "../shared/useProductImages";
 import { ONE_DECIMAL_STEP, formatOneDecimal, isOneDecimal } from "../shared/oneDecimal";
 import { formatSubmissionDate, submissionDateIso } from "../shared/PriceSheetParts";
 
 
-// Only some products have a real photo on file (named by product code);
-// most don't. Nothing is shown by default — hovering the item name pops
-// up the photo, only for products a preload check confirmed actually has
-// one, so hovering an item with no photo does nothing rather than
+// Only some products have a photo (one Admin uploaded, or an older file
+// named by product code); most don't. Nothing is shown by default —
+// hovering the item name pops up the photo, only for products whose photo
+// was found, so hovering an item with no photo does nothing rather than
 // showing an empty or broken box.
-function productImageUrl(productCode: string): string {
-  return `/images/products/${productCode}.png`;
-}
 
 const PREVIEW_SIZE = 180;
 
@@ -62,15 +60,10 @@ export default function PriceForm({ onSubmitted }: { onSubmitted: () => void }) 
   const [window_, setWindow] = useState<PriceWindow | null>(null);
   const [prices, setPrices] = useState<Record<number, string>>({});
   const [lastPrices, setLastPrices] = useState<Record<number, LastPrice>>({});
-  // Product IDs a real photo was found for, discovered by silently
-  // preloading every product's image once products are known (below) —
-  // this decides whether hovering an item's name can pop anything up at
-  // all, rather than trying and failing on every hover.
-  const [hasImage, setHasImage] = useState<Set<number>>(new Set());
   // The single floating preview, positioned in viewport coordinates
   // (not relative to the scrolling list) so it's never clipped by the
   // list's own overflow — see showPreview/hidePreview below.
-  const [preview, setPreview] = useState<{ productCode: string; top: number; left: number } | null>(null);
+  const [preview, setPreview] = useState<{ src: string; top: number; left: number } | null>(null);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState<string>("ALL");
   const [loading, setLoading] = useState(true);
@@ -142,39 +135,21 @@ export default function PriceForm({ onSubmitted }: { onSubmitted: () => void }) 
     };
   }, []);
 
-  // Silently probes every product's photo once, off-screen — populates
-  // hasImage per product as each check resolves, so the hover preview
-  // only ever offers to pop up for an item that genuinely has one.
-  useEffect(() => {
-    if (products.length === 0) return;
-    let cancelled = false;
-    for (const p of products) {
-      const img = new Image();
-      img.onload = () => {
-        if (!cancelled) setHasImage((prev) => (prev.has(p.id) ? prev : new Set(prev).add(p.id)));
-      };
-      img.src = productImageUrl(p.product_code);
-    }
-    return () => {
-      cancelled = true;
-    };
-  }, [products]);
-
-  const productCodeById = useMemo(() => {
-    const m = new Map<number, string>();
-    for (const p of products) m.set(p.id, p.product_code);
-    return m;
-  }, [products]);
+  // Photo URLs (product_id -> url) for the products that have one, found
+  // once products are known — this decides whether hovering an item's
+  // name can pop anything up at all, rather than trying on every hover.
+  const productIds = useMemo(() => products.map((p) => p.id), [products]);
+  const photos = useProductPhotos(productIds, "thumb");
 
   function showPreview(productId: number, target: HTMLElement) {
-    const productCode = productCodeById.get(productId);
-    if (!productCode) return;
+    const src = photos[productId];
+    if (!src) return;
     const rect = target.getBoundingClientRect();
     // Prefer just above the name; if that would run off the top of the
     // viewport (an item near the top of the scrolled list), show it just
     // below instead.
     const top = rect.top - PREVIEW_SIZE - 10 >= 8 ? rect.top - PREVIEW_SIZE - 10 : rect.bottom + 10;
-    setPreview({ productCode, top, left: rect.left });
+    setPreview({ src, top, left: rect.left });
   }
 
   function hidePreview() {
@@ -190,7 +165,7 @@ export default function PriceForm({ onSubmitted }: { onSubmitted: () => void }) 
       style={{ top: preview.top, left: preview.left }}
     >
       <img
-        src={productImageUrl(preview.productCode)}
+        src={preview.src}
         alt=""
         className="rounded-lg object-contain"
         style={{ width: PREVIEW_SIZE, height: PREVIEW_SIZE }}
@@ -425,8 +400,8 @@ export default function PriceForm({ onSubmitted }: { onSubmitted: () => void }) 
               <div className="min-w-0">
                 <div className="flex items-center gap-2 min-w-0">
                   <p
-                    className={`text-sm text-crate-950 truncate w-fit ${hasImage.has(p.id) ? "cursor-pointer" : ""}`}
-                    onMouseEnter={(e) => hasImage.has(p.id) && showPreview(p.id, e.currentTarget)}
+                    className={`text-sm text-crate-950 truncate w-fit ${photos[p.id] ? "cursor-pointer" : ""}`}
+                    onMouseEnter={(e) => photos[p.id] && showPreview(p.id, e.currentTarget)}
                     onMouseLeave={hidePreview}
                   >
                     {p.description}

@@ -6,7 +6,7 @@ order and price history stays intact.
 import pytest
 from pydantic import ValidationError
 
-from app.core.errors import ConflictError, ValidationFailedError
+from app.core.errors import ConflictError, NotFoundError, ValidationFailedError
 from app.models.product import Product
 from app.schemas.product import ProductCreate
 from app.services import product_service
@@ -105,3 +105,95 @@ def test_api_role_gates_and_branch_view(client, make_branch, make_user, make_pro
 
     r = client.post(f"/api/v1/products/{pid}/restore", headers=auth_headers(admin))
     assert r.status_code == 200 and r.json()["status"] == "ACTIVE"
+
+
+# ---- Editing ----
+
+
+def test_update_changes_details_in_place(db_session, admin, make_product):
+    p = make_product(product_code="ED1", pos_code="00011111")
+    payload = _payload(db_session, make_product, product_code="ED1-NEW", pos_code=None, description=" Mango  TJC ")
+
+    out = product_service.update(db_session, admin, p.id, payload)
+
+    assert out.id == p.id
+    assert out.product_code == "ED1-NEW"
+    assert out.description == "Mango TJC"
+    row = db_session.get(Product, p.id)
+    assert row.pos_code is None and row.pos_code_flag == "MISSING"
+
+
+def test_update_keeps_existing_pos_flag_when_pos_code_unchanged(db_session, admin, make_product):
+    p = make_product(product_code="ED2", pos_code="00022222")
+    p.pos_code_flag = "NA"
+    db_session.commit()
+
+    product_service.update(db_session, admin, p.id, _payload(db_session, make_product, product_code="ED2", pos_code="00022222"))
+
+    assert db_session.get(Product, p.id).pos_code_flag == "NA"
+
+
+def test_update_rejects_code_of_another_product(db_session, admin, make_product):
+    make_product(product_code="TAKEN")
+    p = make_product(product_code="MINE")
+    with pytest.raises(ConflictError):
+        product_service.update(db_session, admin, p.id, _payload(db_session, make_product, product_code="taken"))
+
+
+def test_update_can_keep_own_code(db_session, admin, make_product):
+    p = make_product(product_code="SAME1")
+    out = product_service.update(db_session, admin, p.id, _payload(db_session, make_product, product_code="same1"))
+    assert out.product_code == "same1"
+
+
+# ---- Photos ----
+
+
+def _png(w: int, h: int) -> bytes:
+    import struct
+
+    return b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR" + struct.pack(">II", w, h) + b"\x08\x02\x00\x00\x00" + b"\x00" * 64
+
+
+def _jpeg(w: int, h: int) -> bytes:
+    import struct
+
+    app0 = b"\xff\xe0" + struct.pack(">H", 16) + b"JFIF\x00" + b"\x00" * 9
+    sof = b"\xff\xc0" + struct.pack(">HBHH", 17, 8, h, w) + b"\x03" + b"\x00" * 9
+    return b"\xff\xd8" + app0 + sof + b"\xff\xd9"
+
+
+def test_set_image_accepts_1080_square_and_versions_it(db_session, admin, make_product):
+    p = make_product()
+    out = product_service.set_image(db_session, admin, p.id, _jpeg(1080, 1080), _jpeg(240, 240))
+
+    assert out.image_version
+    data, ctype = product_service.get_image(db_session, p.id, thumb=False)
+    assert ctype == "image/jpeg" and data.startswith(b"\xff\xd8")
+    refs = {r.product_id: r for r in product_service.image_refs(db_session)}
+    assert refs[p.id].version == out.image_version
+    assert refs[p.id].product_code == p.product_code
+
+
+@pytest.mark.parametrize("w,h", [(1080, 1079), (1920, 1080), (500, 500)])
+def test_set_image_rejects_other_sizes(db_session, admin, make_product, w, h):
+    p = make_product()
+    with pytest.raises(ValidationFailedError, match="1080 x 1080"):
+        product_service.set_image(db_session, admin, p.id, _png(w, h), _png(240, 240))
+
+
+def test_set_image_rejects_non_images_and_bad_thumbs(db_session, admin, make_product):
+    p = make_product()
+    with pytest.raises(ValidationFailedError, match="isn't a photo"):
+        product_service.set_image(db_session, admin, p.id, b"<svg></svg>", _png(240, 240))
+    with pytest.raises(ValidationFailedError, match="thumbnail"):
+        product_service.set_image(db_session, admin, p.id, _png(1080, 1080), _png(1080, 1080))
+
+
+def test_remove_image(db_session, admin, make_product):
+    p = make_product()
+    product_service.set_image(db_session, admin, p.id, _png(1080, 1080), _png(240, 240))
+    out = product_service.remove_image(db_session, admin, p.id)
+    assert out.image_version is None
+    with pytest.raises(NotFoundError):
+        product_service.get_image(db_session, p.id, thumb=True)

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import String, ForeignKey, DateTime, Numeric, func
+from sqlalchemy import String, ForeignKey, DateTime, Integer, LargeBinary, Numeric, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -56,6 +56,28 @@ class Product(Base):
     # — those stay visible alongside it for comparison, never overwritten.
     reference_cost_price: Mapped[float | None] = mapped_column(Numeric(10, 2))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class ProductImage(Base):
+    """
+    The product's photo (exactly 1080x1080) plus a small thumbnail the
+    browser makes from it for lists. Stored in the database itself, one
+    row per product; the bytes are deferred so listing which products
+    have a photo never loads them.
+    """
+
+    __tablename__ = "product_images"
+
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), primary_key=True)
+    content_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False, deferred=True)
+    thumb_content_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    thumb: Mapped[bytes] = mapped_column(LargeBinary, nullable=False, deferred=True)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    uploaded_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

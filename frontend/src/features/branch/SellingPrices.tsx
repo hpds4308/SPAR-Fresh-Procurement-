@@ -4,6 +4,7 @@ import { SellingPriceList, fetchSellingPrices } from "../../api/sellingPrices";
 import EmptyState from "../shared/EmptyState";
 import { IconTag } from "../shared/Icons";
 import { CategoryBadge } from "../shared/ui/CategoryBadge";
+import { ProductThumb } from "../shared/ui/ProductThumb";
 import { ProductPromotion } from "../shared/ui/PromotionBadge";
 import { SkeletonTable } from "../shared/ui/Skeleton";
 
@@ -138,14 +139,19 @@ export default function SellingPrices() {
               {filtered.map((r) => (
                 <tr key={r.product_id} className="hover:bg-sage-50/50 transition-colors duration-100">
                   <td className="px-4 py-2.5">
-                    <p className="text-crate-950">
-                      {r.description}
-                      <ProductPromotion productId={r.product_id} className="ml-1.5" />
-                    </p>
-                    <p className="text-xs text-crate-800/40">
-                      {r.product_code}
-                      {r.pos_code ? ` · POS ${r.pos_code}` : ""}
-                    </p>
+                    <div className="flex items-center gap-3">
+                      <ProductThumb productId={r.product_id} name={r.description} size="md" />
+                      <div className="min-w-0">
+                        <p className="text-crate-950">
+                          {r.description}
+                          <ProductPromotion productId={r.product_id} className="ml-1.5" />
+                        </p>
+                        <p className="text-xs text-crate-800/40">
+                          {r.product_code}
+                          {r.pos_code ? ` · POS ${r.pos_code}` : ""}
+                        </p>
+                      </div>
+                    </div>
                   </td>
                   <td className="px-3 py-2.5 hidden sm:table-cell">
                     <CategoryBadge name={r.category_name} />

@@ -4,6 +4,7 @@ import { Order, OrderSummary, fetchMyOrders, fetchOrder, confirmDelivery } from 
 import EmptyState from "../shared/EmptyState";
 import { IconBasket } from "../shared/Icons";
 import { useToast } from "../shared/ui/Toast";
+import { ProductThumb } from "../shared/ui/ProductThumb";
 import { ProductPromotion } from "../shared/ui/PromotionBadge";
 
 function statusColor(status: string): string {
@@ -60,6 +61,7 @@ function DeliveryConfirmForm({
         {order.lines.map((ln) => (
           <div key={ln.id} className="flex items-center gap-2 text-sm">
             <span className="flex-1 min-w-0 flex items-center gap-2">
+              <ProductThumb productId={ln.product_id} name={ln.product_description} />
               <span className="text-crate-950 truncate">{ln.product_description}</span>
               <ProductPromotion productId={ln.product_id} className="shrink-0" />
             </span>

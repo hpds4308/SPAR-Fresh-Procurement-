@@ -1,11 +1,18 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, Response, UploadFile
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.security import get_current_user, require_roles
 from app.models.product import Product, ProductCategory, ProductUnit
 from app.models.user import User
-from app.schemas.product import ProductAdminOut, ProductCreate, ProductOptionsOut, ProductOut
+from app.schemas.product import (
+    ProductAdminOut,
+    ProductCreate,
+    ProductImageRef,
+    ProductOptionsOut,
+    ProductOut,
+    ProductUpdate,
+)
 from app.services import product_service
 
 router = APIRouter(prefix="/products", dependencies=[Depends(get_current_user)])
@@ -61,6 +68,23 @@ def product_options(
     return product_service.options(db)
 
 
+@router.get("/images", response_model=list[ProductImageRef])
+def product_images(db: Session = Depends(get_db)):
+    """Which products have a photo (any signed-in user - thumbnails show on every page)."""
+    return product_service.image_refs(db)
+
+
+@router.get("/{product_id}/image")
+def product_image(product_id: int, size: str = "full", db: Session = Depends(get_db)):
+    """The product's photo; size=thumb for the small list version."""
+    data, content_type = product_service.get_image(db, product_id, thumb=size == "thumb")
+    return Response(
+        content=data,
+        media_type=content_type,
+        headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, max-age=86400"},
+    )
+
+
 @router.post("", response_model=ProductAdminOut, status_code=201)
 def create_product(
     payload: ProductCreate,
@@ -68,6 +92,40 @@ def create_product(
     db: Session = Depends(get_db),
 ):
     return product_service.create(db, admin, payload)
+
+
+@router.patch("/{product_id}", response_model=ProductAdminOut)
+def update_product(
+    product_id: int,
+    payload: ProductUpdate,
+    admin: User = Depends(require_roles("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """Edits code, POS code, description, category, subcategory and unit."""
+    return product_service.update(db, admin, product_id, payload)
+
+
+@router.put("/{product_id}/image", response_model=ProductAdminOut)
+def upload_product_image(
+    product_id: int,
+    file: UploadFile = File(...),
+    thumb: UploadFile = File(...),
+    admin: User = Depends(require_roles("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """Sets (or replaces) the product's 1080x1080 photo and its list thumbnail."""
+    data = file.file.read(product_service.MAX_IMAGE_BYTES + 1)
+    thumb_data = thumb.file.read(product_service.MAX_THUMB_BYTES + 1)
+    return product_service.set_image(db, admin, product_id, data, thumb_data)
+
+
+@router.delete("/{product_id}/image", response_model=ProductAdminOut)
+def remove_product_image(
+    product_id: int,
+    admin: User = Depends(require_roles("ADMIN")),
+    db: Session = Depends(get_db),
+):
+    return product_service.remove_image(db, admin, product_id)
 
 
 @router.delete("/{product_id}", response_model=ProductAdminOut)
