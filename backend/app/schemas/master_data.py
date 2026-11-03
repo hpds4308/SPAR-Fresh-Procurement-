@@ -115,6 +115,26 @@ class CostPricesOut(BaseModel):
     skipped_no_pos_code: list[str]  # have a cost price but no POS code — can't go in the POS files
 
 
+class SellingPriceItemOut(BaseModel):
+    product_id: int
+    product_code: str
+    pos_code: str
+    description: str
+    category_name: str
+    selling_price: float
+    published_selling_price: float | None = None  # what branches see right now
+
+
+class SellingPricesOut(BaseModel):
+    """Selling Price column of the latest sent sheet (items with a price and a POS code)."""
+
+    version: int
+    sent_at: datetime
+    items: list[SellingPriceItemOut]
+    skipped_no_pos_code: list[str]  # have a selling price but no POS code — can't go in the POS file
+    without_selling_price: int
+
+
 class PublishSummaryOut(BaseModel):
     version: int
     published_at: datetime

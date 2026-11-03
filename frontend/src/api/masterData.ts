@@ -173,3 +173,31 @@ export function fetchTeamCostPrices(): Promise<CostPrices> {
 export function downloadTeamCostPricesZip(): Promise<void> {
   return downloadExcel("/master-data/team/cost-prices/zip", "SPAR-Cost-Prices.zip");
 }
+
+export type SellingPriceItem = {
+  product_id: number;
+  product_code: string;
+  pos_code: string;
+  description: string;
+  category_name: string;
+  selling_price: number;
+  published_selling_price: number | null;
+};
+
+export type SellingPrices = {
+  version: number;
+  sent_at: string;
+  items: SellingPriceItem[];
+  skipped_no_pos_code: string[];
+  without_selling_price: number;
+};
+
+/** Master Data Team: Selling Price column of the latest sent sheet. 404 before the first send. */
+export function fetchTeamSellingPrices(): Promise<SellingPrices> {
+  return apiFetch("/master-data/team/selling-prices");
+}
+
+/** One POS-import Excel file (code + selling price). */
+export function downloadTeamSellingPricesExcel(): Promise<void> {
+  return downloadExcel("/master-data/team/selling-prices/excel", "SPAR-Selling-Prices.xlsx");
+}

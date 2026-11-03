@@ -1,12 +1,12 @@
 import { useAuth } from "../auth/AuthContext";
 import DashboardShell from "../shared/DashboardShell";
-import EmptyState from "../shared/EmptyState";
 import { IconGrid, IconReceipt, IconTag } from "../shared/Icons";
 import { SidebarItem } from "../shared/Sidebar";
 import { FadeSwitch } from "../shared/ui/FadeSwitch";
 import { useTabParam } from "../shared/useTabParam";
 import CostPricesView from "./CostPricesView";
 import MasterDataSheetView from "./MasterDataSheetView";
+import SellingPricesView from "./SellingPricesView";
 
 const TABS = ["sheet", "costPrices", "sellingPrices"] as const;
 type Tab = (typeof TABS)[number];
@@ -34,13 +34,7 @@ export default function MasterDataDashboard() {
       <FadeSwitch tabKey={tab}>
         {tab === "sheet" && <MasterDataSheetView />}
         {tab === "costPrices" && <CostPricesView />}
-        {tab === "sellingPrices" && (
-          <EmptyState
-            icon={<IconTag width={20} height={20} />}
-            title="Selling Prices"
-            description="Coming soon."
-          />
-        )}
+        {tab === "sellingPrices" && <SellingPricesView />}
       </FadeSwitch>
     </DashboardShell>
   );

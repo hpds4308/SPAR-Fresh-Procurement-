@@ -460,3 +460,49 @@ def test_cost_prices_grouped_by_winning_supplier_and_zipped(client, auth_headers
 def test_cost_prices_hidden_from_branches_and_suppliers(client, auth_headers, branch_user, supplier_user, path):
     for user in (branch_user, supplier_user):
         assert client.get(path, headers=auth_headers(user)).status_code == 403
+
+
+# --- Master Data Team: Selling Prices --------------------------------------------------------
+
+
+def test_selling_prices_list_and_pos_excel(client, auth_headers, admin, md_user, make_product):
+    import io
+
+    from openpyxl import load_workbook
+
+    make_product(description="Grapes", pos_code="00019411", selling_price=1270, selling_price_source="MANUAL")
+    make_product(description="Melon", pos_code="00022986", selling_price=2140, selling_price_source="AUTO")
+    make_product(description="No POS", pos_code=None, selling_price=100, selling_price_source="MANUAL")
+    make_product(description="No price", pos_code="00000001")
+
+    assert client.get("/api/v1/master-data/team/selling-prices", headers=auth_headers(md_user)).status_code == 404
+    client.post("/api/v1/master-data/send", headers=auth_headers(admin))
+
+    body = client.get("/api/v1/master-data/team/selling-prices", headers=auth_headers(md_user)).json()
+    assert {(i["pos_code"], i["selling_price"]) for i in body["items"]} == {("00019411", 1270), ("00022986", 2140)}
+    assert body["skipped_no_pos_code"] == ["No POS"]
+    assert body["without_selling_price"] == 1
+
+    resp = client.get("/api/v1/master-data/team/selling-prices/excel", headers=auth_headers(md_user))
+    assert resp.status_code == 200
+    assert 'filename="SPAR-Selling-Prices-v1-' in resp.headers["content-disposition"]
+    wb = load_workbook(io.BytesIO(resp.content))
+    assert wb.sheetnames == ["Transaction", "Tax"]
+    ws = wb["Transaction"]
+    assert ws.max_column == 32
+    assert [c.value for c in ws[1]][:9] == [
+        "DET_LINENO", "DET_PROCODE", "DET_PRODESC", "DET_STOCKCODE", "DET_UNIT",
+        "DET_CS", "DET_UNITQTY", "DET_CPRICE", "DET_SPRICE",
+    ]
+    rows = [[c.value for c in r][:9] for r in ws.iter_rows(min_row=2) if r[0].value is not None]
+    assert rows == [  # sheet order: category, then description
+        [1, "00019411", None, "00019411", None, 1, 1, None, 1270],
+        [2, "00022986", None, "00022986", None, 1, 1, None, 2140],
+    ]
+    assert ws["B2"].number_format == "@" and ws["I2"].number_format == "0.00"
+
+
+@pytest.mark.parametrize("path", ["/api/v1/master-data/team/selling-prices", "/api/v1/master-data/team/selling-prices/excel"])
+def test_selling_prices_hidden_from_branches_and_suppliers(client, auth_headers, branch_user, supplier_user, path):
+    for user in (branch_user, supplier_user):
+        assert client.get(path, headers=auth_headers(user)).status_code == 403
