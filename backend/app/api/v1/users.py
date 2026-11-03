@@ -23,7 +23,7 @@ from app.schemas.user import (
 
 router = APIRouter(prefix="/users", dependencies=[Depends(require_roles("ADMIN"))])
 
-VALID_ROLES = {"ADMIN", "BRANCH", "SUPPLIER"}
+VALID_ROLES = {"ADMIN", "BRANCH", "SUPPLIER", "MASTER_DATA"}
 
 
 def _generate_temp_password() -> str:
@@ -132,7 +132,7 @@ def create_user(
     Creates a login account — previously only possible by SSHing into the
     server and running scripts/seed_users.py. BRANCH/SUPPLIER usernames
     are derived from the branch/supplier code (matching that script's
-    convention); ADMIN accounts need an explicit username. Returns a
+    convention); ADMIN and MASTER_DATA accounts need an explicit username. Returns a
     one-time temporary password — shown only in this response, never
     stored in plain text or logged.
     """
@@ -143,9 +143,9 @@ def create_user(
     supplier_id = None
     username: str
 
-    if payload.role == "ADMIN":
+    if payload.role in ("ADMIN", "MASTER_DATA"):
         if not payload.username:
-            raise ValidationFailedError("Username is required for an Admin account.")
+            raise ValidationFailedError("Username is required for this account.")
         username = payload.username.strip().lower()
     elif payload.role == "BRANCH":
         if not payload.branch_id:

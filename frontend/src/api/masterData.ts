@@ -13,6 +13,10 @@ export type MasterDataRow = {
   category_name: string;
   target_gp_percent: number;
   selling_price: number | null;
+  // MANUAL (typed by Admin) or AUTO (Auto-generate); null when blank.
+  selling_price_source: "MANUAL" | "AUTO" | null;
+  // What branches currently see (published by the Master Data Team).
+  published_selling_price: number | null;
   computed_gp_percent: number | null;
   keells_price: number | null;
   keells_price_date: string | null;
@@ -44,10 +48,14 @@ export function updateMasterDataField(
   });
 }
 
-export async function downloadMasterData(): Promise<void> {
+export function downloadMasterData(): Promise<void> {
+  return downloadExcel("/master-data/export", "master-data-sheet.xlsx");
+}
+
+async function downloadExcel(path: string, fallbackName: string): Promise<void> {
   const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
   const access = localStorage.getItem("spar_access_token");
-  const res = await fetch(`${API_BASE}/api/v1/master-data/export`, {
+  const res = await fetch(`${API_BASE}/api/v1${path}`, {
     headers: access ? { Authorization: `Bearer ${access}` } : {},
   });
   if (!res.ok) {
@@ -56,7 +64,7 @@ export async function downloadMasterData(): Promise<void> {
   const blob = await res.blob();
   const disposition = res.headers.get("Content-Disposition") ?? "";
   const match = disposition.match(/filename="?([^"]+)"?/);
-  const filename = match ? match[1] : "master-data-sheet.xlsx";
+  const filename = match ? match[1] : fallbackName;
 
   const url = window.URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -72,6 +80,64 @@ export function sendMasterDataEmail(): Promise<{ sent_to: string }> {
   return apiFetch("/master-data/send-email", { method: "POST" });
 }
 
-export function autoGenerateSellingPrices(): Promise<{ updated: number }> {
+export type AutoGenerateSummary = {
+  total_products: number;
+  generated: number;
+  preserved: number;
+  without_price: number;
+};
+
+export function autoGenerateSellingPrices(): Promise<AutoGenerateSummary> {
   return apiFetch("/master-data/auto-generate-selling-prices", { method: "POST" });
+}
+
+export type MasterDataSendResult = {
+  version: number;
+  sent_at: string;
+  product_count: number;
+  products_with_price: number;
+  created: boolean;
+  emailed_to: string | null;
+  email_error: string | null;
+};
+
+/** Admin: make the current sheet the latest version for the Master Data Team. */
+export function sendToMasterData(): Promise<MasterDataSendResult> {
+  return apiFetch("/master-data/send", { method: "POST" });
+}
+
+export type PublishSummary = {
+  version: number;
+  published_at: string;
+  products_updated: number;
+  products_unchanged: number;
+  branches_updated: number;
+  skipped_missing_price: string[];
+  skipped_invalid: string[];
+};
+
+export type MasterDataSubmission = {
+  version: number;
+  sent_at: string;
+  sent_by: string;
+  product_count: number;
+  products_with_price: number;
+  published_at: string | null;
+  published_by: string | null;
+  publish_summary: PublishSummary | null;
+  sheet: MasterDataSheet;
+};
+
+/** Master Data Team: the latest sheet Admin sent. Rejects with a 404 ApiError before the first send. */
+export function fetchTeamSheet(): Promise<MasterDataSubmission> {
+  return apiFetch("/master-data/team");
+}
+
+export function downloadTeamSheet(): Promise<void> {
+  return downloadExcel("/master-data/team/export", "SPAR-Master-Data-Sheet.xlsx");
+}
+
+/** Master Data Team: Update Selling Prices — every branch sees the sheet's selling prices. */
+export function publishSellingPrices(): Promise<PublishSummary> {
+  return apiFetch("/master-data/team/publish", { method: "POST" });
 }

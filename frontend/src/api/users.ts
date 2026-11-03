@@ -37,7 +37,7 @@ export function fetchAvailableSuppliers(): Promise<AvailableParty[]> {
 }
 
 export function createUser(payload: {
-  role: "ADMIN" | "BRANCH" | "SUPPLIER";
+  role: "ADMIN" | "BRANCH" | "SUPPLIER" | "MASTER_DATA";
   branch_id?: number;
   supplier_id?: number;
   username?: string;

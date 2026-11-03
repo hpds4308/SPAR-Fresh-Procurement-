@@ -7,7 +7,11 @@ Target GP% / Selling / GP% / Keells Price / Cost Price / one column per
 supplier's Adjusted CP).
 
 Field ownership:
-- selling_price: set manually by Admin here.
+- selling_price: set manually by Admin here (source MANUAL), or filled
+  by Auto-generate where it was blank (source AUTO).
+- published_selling_price: what branches see. Only the Master Data Team
+  changes it, by publishing the latest sheet Admin sent them (see
+  send_to_master_data / publish_selling_prices).
 - target_gp_percent: set manually by Admin here; defaults to 30% (0.30)
   for every product until overridden.
 - pos_code: NOT editable — fixed, sourced from the original uploaded
@@ -25,16 +29,27 @@ Field ownership:
   here — there is exactly one place a supplier's price can be changed,
   never two disagreeing UIs.
 """
-from datetime import date
+import json
+from datetime import date, datetime, timezone
 
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
-from app.core.errors import NotFoundError
+from app.core.audit import write_audit_log
+from app.core.errors import NotFoundError, ValidationFailedError
+from app.models.branch import Branch
+from app.models.master_data_submission import MasterDataSubmission
 from app.models.pricing import SupplierPrice
 from app.models.product import Product, ProductCategory
 from app.models.supplier import Supplier
+from app.models.user import User
 from app.services import price_approval_service, pricing_service
+from app.schemas._limits import MAX_NUMERIC_10_2
 from app.schemas.master_data import (
+    AutoGenerateSummaryOut,
+    MasterDataSendOut,
+    MasterDataSubmissionOut,
+    PublishSummaryOut,
     MasterDataRowOut,
     MasterDataSheetOut,
     MasterDataSupplierColumn,
@@ -124,6 +139,10 @@ def get_master_data_sheet(db: Session) -> MasterDataSheetOut:
                 category_name=categories.get(p.category_id, "—"),
                 target_gp_percent=target_gp,
                 selling_price=selling_price,
+                selling_price_source=p.selling_price_source if selling_price is not None else None,
+                published_selling_price=(
+                    float(p.published_selling_price) if p.published_selling_price is not None else None
+                ),
                 computed_gp_percent=computed_gp,
                 keells_price=float(keells_row.price) if keells_row else None,
                 keells_price_date=keells_row.delivery_date if keells_row else None,
@@ -140,48 +159,57 @@ def get_master_data_sheet(db: Session) -> MasterDataSheetOut:
     )
 
 
-def auto_generate_selling_prices(db: Session) -> int:
+def auto_generate_selling_prices(db: Session) -> AutoGenerateSummaryOut:
     """
-    Recalculates Selling Price for every active product, from the GP%
-    formula solved for selling price:
+    Fills in Selling Price for every active product that doesn't have one
+    yet, from the GP% formula solved for selling price:
 
         GP = (selling_price - cost_price) / selling_price
         => selling_price = cost_price / (1 - target_gp_percent)
 
     then drops the decimals and rounds up to the next 10. Uses each
     product's own target_gp_percent (defaulting to 30% the same way the
-    sheet already does). Overwrites any existing selling price, including
-    manually typed ones. Products with no cost_price yet (no supplier has
-    submitted a price) are skipped and keep whatever they had. Returns how
-    many rows actually changed.
+    sheet already does).
+
+    A product that already has a selling price — typed by Admin, or
+    generated earlier — is never touched, and neither is the price the
+    Master Data Team published to branches (a separate column). Products
+    with no cost_price yet (no supplier has quoted) stay blank. The rows
+    are locked while this runs, so a double click or two Admins at once
+    can't both fill the same product; a second run just finds nothing
+    left to fill.
     """
-    products = db.query(Product).filter(Product.status == "ACTIVE").all()
-    if not products:
-        return 0
+    products = db.query(Product).filter(Product.status == "ACTIVE").with_for_update().all()
 
     latest_prices, _ = _latest_prices(db)
     supplier_ids = [s.id for s in db.query(Supplier).filter(Supplier.status == "ACTIVE").all()]
 
-    updated = 0
+    generated = preserved = without_price = 0
     for p in products:
-        prices_for_product = [latest_prices[(sid, p.id)] for sid in supplier_ids if (sid, p.id) in latest_prices]
-        if not prices_for_product:
+        if p.selling_price is not None:
+            preserved += 1
             continue
-        cost_price = max(prices_for_product)
-
+        prices_for_product = [latest_prices[(sid, p.id)] for sid in supplier_ids if (sid, p.id) in latest_prices]
         target_gp = float(p.target_gp_percent) if p.target_gp_percent is not None else 0.30
-        if target_gp >= 1:
-            continue  # can't solve (division by zero or negative) — leave blank rather than guess
-
-        new_price = round_up_to_10(cost_price / (1 - target_gp))
-        if p.selling_price is not None and float(p.selling_price) == new_price:
+        if not prices_for_product or target_gp >= 1:
+            # No cost price, or can't solve (division by zero or negative) — leave blank rather than guess.
+            without_price += 1
+            continue
+        new_price = round_up_to_10(max(prices_for_product) / (1 - target_gp))
+        if new_price > MAX_NUMERIC_10_2:
+            without_price += 1
             continue
         p.selling_price = new_price
-        updated += 1
+        p.selling_price_source = "AUTO"
+        generated += 1
 
-    if updated:
-        db.commit()
-    return updated
+    db.commit()
+    return AutoGenerateSummaryOut(
+        total_products=len(products),
+        generated=generated,
+        preserved=preserved,
+        without_price=without_price,
+    )
 
 
 def build_master_data_excel(db: Session) -> bytes:
@@ -191,13 +219,16 @@ def build_master_data_excel(db: Session) -> bytes:
     the two can never drift into showing different data for the same
     export.
     """
+    return sheet_to_excel(get_master_data_sheet(db))
+
+
+def sheet_to_excel(sheet: MasterDataSheetOut) -> bytes:
+    """One sheet as .xlsx — the live one (Admin) or a sent copy (Master Data Team)."""
     import io
 
     from openpyxl import Workbook
     from openpyxl.styles import Font, Alignment, PatternFill
     from openpyxl.utils import get_column_letter
-
-    sheet = get_master_data_sheet(db)
 
     wb = Workbook()
     ws = wb.active
@@ -270,6 +301,7 @@ def update_master_data_field(
         product.target_gp_percent = value
     elif field == "selling_price":
         product.selling_price = value
+        product.selling_price_source = "MANUAL" if value is not None else None
     # cost_price is intentionally not settable here — it's always derived
     # as the highest current supplier price, computed in get_master_data_sheet.
 
@@ -295,3 +327,221 @@ def update_master_data_field(
         cost_price=None,
         supplier_prices={},
     )
+
+
+# --------------------------------------------------------------------------
+# Send to Master Data → Master Data Team → Update Selling Prices
+# --------------------------------------------------------------------------
+
+# Any constant works — it only has to be the same for every caller, so two
+# "Send" clicks (or two "Publish" clicks) run one after the other, never
+# interleaved. Released automatically when the transaction ends.
+_SEND_LOCK_KEY = 732001
+_PUBLISH_LOCK_KEY = 732002
+
+
+def _sheet_json(sheet: MasterDataSheetOut) -> dict:
+    # Through a JSON round-trip so supplier_prices' int keys become the
+    # same strings the database hands back — lets "nothing changed" compare equal.
+    return json.loads(sheet.model_dump_json())
+
+
+def _count_with_price(sheet: MasterDataSheetOut) -> int:
+    return sum(1 for r in sheet.rows if r.selling_price is not None)
+
+
+def _latest_submission(db: Session) -> MasterDataSubmission | None:
+    return db.query(MasterDataSubmission).order_by(MasterDataSubmission.version.desc()).first()
+
+
+def send_to_master_data(db: Session, admin: User) -> tuple[MasterDataSendOut, MasterDataSheetOut]:
+    """
+    Saves the current Master Data Sheet as the next numbered version for
+    the Master Data Team. Products aren't copied or created — this is one
+    read-only snapshot row. If nothing changed since the last send, no new
+    version is made (created=False), so repeated clicks don't pile up
+    identical copies. Returns the sheet too, for the optional email.
+    """
+    db.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": _SEND_LOCK_KEY})
+    sheet = get_master_data_sheet(db)
+    if not sheet.rows:
+        db.rollback()
+        raise ValidationFailedError("There are no active products on the Master Data Sheet to send.")
+    for r in sheet.rows:
+        if r.selling_price is not None and not (0 < r.selling_price <= MAX_NUMERIC_10_2):
+            db.rollback()
+            raise ValidationFailedError(f"{r.description} has an invalid selling price — fix it before sending.")
+
+    snapshot = _sheet_json(sheet)
+    latest = _latest_submission(db)
+    if latest is not None and latest.sheet == snapshot:
+        db.commit()  # releases the lock
+        return (
+            MasterDataSendOut(
+                version=latest.version,
+                sent_at=latest.sent_at,
+                product_count=latest.product_count,
+                products_with_price=_count_with_price(sheet),
+                created=False,
+            ),
+            sheet,
+        )
+
+    submission = MasterDataSubmission(
+        version=(latest.version + 1) if latest else 1,
+        sent_by=admin.id,
+        product_count=len(sheet.rows),
+        sheet=snapshot,
+    )
+    db.add(submission)
+    db.commit()
+    db.refresh(submission)
+    write_audit_log(
+        db,
+        user_id=admin.id,
+        role="ADMIN",
+        action="MASTER_DATA_SENT",
+        entity_type="master_data_submission",
+        entity_id=submission.id,
+        description=f"Sent Master Data Sheet version {submission.version} ({submission.product_count} products).",
+    )
+    return (
+        MasterDataSendOut(
+            version=submission.version,
+            sent_at=submission.sent_at,
+            product_count=submission.product_count,
+            products_with_price=_count_with_price(sheet),
+            created=True,
+        ),
+        sheet,
+    )
+
+
+def _display_name(db: Session, user_id: int | None) -> str | None:
+    if user_id is None:
+        return None
+    user = db.get(User, user_id)
+    return (user.full_name or user.username) if user else None
+
+
+def get_latest_submission(db: Session) -> MasterDataSubmissionOut:
+    latest = _latest_submission(db)
+    if latest is None:
+        raise NotFoundError("Admin hasn't sent the Master Data Sheet yet.")
+    sheet = MasterDataSheetOut.model_validate(latest.sheet)
+    # Everything is as Admin sent it, except "published" — that's what
+    # branches see right now, so the team can tell what is still to publish.
+    published = dict(
+        db.query(Product.id, Product.published_selling_price)
+        .filter(Product.id.in_([r.product_id for r in sheet.rows]))
+        .all()
+    )
+    for r in sheet.rows:
+        value = published.get(r.product_id)
+        r.published_selling_price = float(value) if value is not None else None
+    return MasterDataSubmissionOut(
+        version=latest.version,
+        sent_at=latest.sent_at,
+        sent_by=_display_name(db, latest.sent_by) or "—",
+        product_count=latest.product_count,
+        products_with_price=_count_with_price(sheet),
+        published_at=latest.published_at,
+        published_by=_display_name(db, latest.published_by),
+        publish_summary=latest.publish_summary,
+        sheet=sheet,
+    )
+
+
+def publish_selling_prices(db: Session, user: User) -> PublishSummaryOut:
+    """
+    Publishes the selling prices in the latest sheet Admin sent, so every
+    branch sees them. Products are global (one row each, shared by all
+    branches), so this updates products.published_selling_price in place —
+    nothing is inserted, and order quantities, supplier prices and
+    anything branch-specific aren't touched. All-or-nothing: one
+    transaction, committed once at the end. Publishing the same version
+    again just reports every product as unchanged.
+
+    Skipped: rows with no selling price (missing), and rows whose product
+    no longer exists / was removed or whose price is out of range (invalid).
+    """
+    try:
+        db.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": _PUBLISH_LOCK_KEY})
+        latest = _latest_submission(db)
+        if latest is None:
+            raise ValidationFailedError("Admin hasn't sent the Master Data Sheet yet — there is nothing to publish.")
+        sheet = MasterDataSheetOut.model_validate(latest.sheet)
+
+        now = datetime.now(timezone.utc)
+        updated = unchanged = 0
+        missing: list[str] = []
+        invalid: list[str] = []
+        products = {
+            p.id: p
+            for p in db.query(Product)
+            .filter(Product.id.in_([r.product_id for r in sheet.rows]))
+            .with_for_update()
+            .all()
+        }
+        for row in sheet.rows:
+            product = products.get(row.product_id)
+            if product is None or product.status != "ACTIVE" or product.product_code != row.product_code:
+                invalid.append(row.description)
+                continue
+            if row.selling_price is None:
+                missing.append(row.description)
+                continue
+            if not (0 < row.selling_price <= MAX_NUMERIC_10_2):
+                invalid.append(row.description)
+                continue
+            if (
+                product.published_selling_price is not None
+                and float(product.published_selling_price) == row.selling_price
+            ):
+                unchanged += 1
+                continue
+            product.published_selling_price = row.selling_price
+            product.selling_price_published_at = now
+            product.selling_price_published_by = user.id
+            updated += 1
+
+        if updated == 0 and unchanged == 0:
+            raise ValidationFailedError("None of the products in this sheet has a valid selling price to publish.")
+
+        branches = db.query(func.count(Branch.id)).filter(Branch.status == "ACTIVE").scalar() or 0
+        summary = PublishSummaryOut(
+            version=latest.version,
+            published_at=now,
+            products_updated=updated,
+            products_unchanged=unchanged,
+            branches_updated=branches,
+            skipped_missing_price=missing,
+            skipped_invalid=invalid,
+        )
+        latest.published_by = user.id
+        latest.published_at = now
+        latest.publish_summary = json.loads(summary.model_dump_json())
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    write_audit_log(
+        db,
+        user_id=user.id,
+        role="MASTER_DATA",
+        action="SELLING_PRICES_PUBLISHED",
+        entity_type="master_data_submission",
+        entity_id=latest.id,
+        description=(
+            f"Published selling prices from version {latest.version}: {updated} updated, {unchanged} unchanged, "
+            f"{len(missing)} missing a price, {len(invalid)} invalid."
+        ),
+    )
+    return summary
+
+
+def latest_submission_excel(db: Session) -> tuple[bytes, str]:
+    latest = get_latest_submission(db)
+    filename = f"SPAR-Master-Data-Sheet-v{latest.version}-{latest.sent_at.date().isoformat()}.xlsx"
+    return sheet_to_excel(latest.sheet), filename

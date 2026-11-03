@@ -161,7 +161,7 @@ def client(db_session):
 def roles(db_session):
     from app.models.user import Role
 
-    codes = {"ADMIN": "Administrator", "BRANCH": "Branch", "SUPPLIER": "Supplier"}
+    codes = {"ADMIN": "Administrator", "BRANCH": "Branch", "SUPPLIER": "Supplier", "MASTER_DATA": "Master Data Team"}
     made = {}
     for code, name in codes.items():
         row = db_session.query(Role).filter(Role.code == code).first()

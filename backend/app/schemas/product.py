@@ -11,6 +11,9 @@ class ProductOut(BaseModel):
     subcategory: str | None = None
     unit_code: str
     status: str
+    # Selling price the Master Data Team published — read-only. Only
+    # filled in for branch and admin users, never sent to suppliers.
+    selling_price: float | None = None
 
     class Config:
         from_attributes = True

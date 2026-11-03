@@ -20,12 +20,13 @@ import { Modal } from "../shared/ui/Modal";
 import { SkeletonTable } from "../shared/ui/Skeleton";
 import { useToast } from "../shared/ui/Toast";
 
-type NewPartyType = "BRANCH" | "SUPPLIER";
+type NewPartyType = "BRANCH" | "SUPPLIER" | "MASTER_DATA";
 
 const ROLE_COLORS: Record<string, string> = {
   ADMIN: "bg-rose-100 text-rose-700",
   BRANCH: "bg-blue-100 text-blue-700",
   SUPPLIER: "bg-teal-100 text-teal-700",
+  MASTER_DATA: "bg-amber-100 text-amber-800",
 };
 
 function SupplierAccountDetails({ supplierId }: { supplierId: number }) {
@@ -104,6 +105,7 @@ export default function AdminUsers() {
   const [newSupplierContact, setNewSupplierContact] = useState("");
   const [newSupplierPhone, setNewSupplierPhone] = useState("");
   const [newSupplierEmail, setNewSupplierEmail] = useState("");
+  const [newMasterDataUsername, setNewMasterDataUsername] = useState("");
   const [newPartySaving, setNewPartySaving] = useState(false);
   const [newPartyError, setNewPartyError] = useState<string | null>(null);
   const [newPartySuccess, setNewPartySuccess] = useState<string | null>(null);
@@ -149,9 +151,19 @@ export default function AdminUsers() {
       setNewPartyError("Enter a name for the new supplier.");
       return;
     }
+    if (newPartyType === "MASTER_DATA" && newMasterDataUsername.trim().length < 3) {
+      setNewPartyError("Enter a username of at least 3 characters.");
+      return;
+    }
     setNewPartySaving(true);
     try {
-      if (newPartyType === "BRANCH") {
+      if (newPartyType === "MASTER_DATA") {
+        // Head Office Master Data Team: a login only — no branch or supplier behind it.
+        const account = await createUser({ role: "MASTER_DATA", username: newMasterDataUsername.trim() });
+        setCreated(account);
+        setNewPartySuccess(`Master Data Team login "${account.username}" created.`);
+        setNewMasterDataUsername("");
+      } else if (newPartyType === "BRANCH") {
         const branch = await createBranch({
           branch_name: newBranchName.trim(),
           location: newBranchLocation.trim() || undefined,
@@ -193,7 +205,9 @@ export default function AdminUsers() {
       load();
     } catch (err) {
       setNewPartyError(
-        err instanceof ApiError ? err.message : `Could not create that ${newPartyType.toLowerCase()}.`
+        err instanceof ApiError
+          ? err.message
+          : `Could not create that ${newPartyType === "MASTER_DATA" ? "account" : newPartyType.toLowerCase()}.`
       );
     } finally {
       setNewPartySaving(false);
@@ -303,7 +317,7 @@ export default function AdminUsers() {
   return (
     <div className="space-y-4">
       <div className="bg-white rounded-2xl shadow-card border border-sage-100 p-6">
-        <h2 className="font-display font-semibold text-lg text-crate-950 mb-1">Add Branch or Supplier</h2>
+        <h2 className="font-display font-semibold text-lg text-crate-950 mb-1">Add Branch, Supplier or Master Data User</h2>
         <p className="text-sm text-crate-800/50 mb-5">
           Previously new branches/suppliers only entered the system via a CSV loaded on the server —
           creating one here adds it as master data and sets up its login account immediately.
@@ -316,7 +330,7 @@ export default function AdminUsers() {
         )}
 
         <div className="flex gap-1 bg-sage-100 rounded-full p-0.5 w-fit mb-4">
-          {(["BRANCH", "SUPPLIER"] as NewPartyType[]).map((pt) => (
+          {(["BRANCH", "SUPPLIER", "MASTER_DATA"] as NewPartyType[]).map((pt) => (
             <button
               key={pt}
               onClick={() => {
@@ -327,12 +341,34 @@ export default function AdminUsers() {
                 newPartyType === pt ? "bg-white text-crate-950 shadow-sm" : "text-crate-800/50 hover:text-crate-800"
               }`}
             >
-              {pt === "BRANCH" ? "New Branch" : "New Supplier"}
+              {pt === "BRANCH" ? "New Branch" : pt === "SUPPLIER" ? "New Supplier" : "New Master Data User"}
             </button>
           ))}
         </div>
 
-        {newPartyType === "BRANCH" ? (
+        {newPartyType === "MASTER_DATA" ? (
+          <div className="flex flex-wrap items-end gap-3">
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wide text-crate-800/60 mb-1.5">
+                Username
+              </label>
+              <input
+                type="text"
+                value={newMasterDataUsername}
+                onChange={(e) => setNewMasterDataUsername(e.target.value)}
+                placeholder="e.g. masterdata"
+                className="border border-sage-300 bg-sage-50/60 rounded-full px-4 py-2 text-sm min-w-[12rem] focus:outline-none focus:ring-2 focus:ring-crate-700/30 focus:border-crate-700 focus:bg-white transition-all duration-150"
+              />
+            </div>
+            <Button onClick={handleCreateParty} loading={newPartySaving}>
+              Create Login
+            </Button>
+            <p className="basis-full text-xs text-crate-800/45">
+              Head Office Master Data Team: sees the Master Data Sheet you send, downloads it, and publishes
+              selling prices to branches. No other Admin access.
+            </p>
+          </div>
+        ) : newPartyType === "BRANCH" ? (
           <div className="flex flex-wrap items-end gap-3">
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wide text-crate-800/60 mb-1.5">

@@ -10,7 +10,7 @@ class Role(Base):
     __tablename__ = "roles"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    code: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)  # ADMIN, BRANCH, SUPPLIER
+    code: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)  # ADMIN, BRANCH, SUPPLIER, MASTER_DATA
     name: Mapped[str] = mapped_column(String(50), nullable=False)
 
 

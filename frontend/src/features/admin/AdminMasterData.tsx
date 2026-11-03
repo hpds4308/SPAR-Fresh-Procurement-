@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError } from "../../api/client";
 import {
   MasterDataFieldName,
@@ -7,15 +7,15 @@ import {
   autoGenerateSellingPrices,
   downloadMasterData,
   fetchMasterData,
-  sendMasterDataEmail,
+  sendToMasterData,
   updateMasterDataField,
 } from "../../api/masterData";
 import EmptyState from "../shared/EmptyState";
 import { IconGrid } from "../shared/Icons";
+import MasterDataTable from "../shared/MasterDataTable";
 import { ConfirmDialog } from "../shared/ui/Modal";
 import { SkeletonTable } from "../shared/ui/Skeleton";
-import { CategoryBadge } from "../shared/ui/CategoryBadge";
-import { ProductPromotion } from "../shared/ui/PromotionBadge";
+import { useToast } from "../shared/ui/Toast";
 
 type CellState = "idle" | "saving" | "saved" | "error";
 type CellKey = `${number}:${MasterDataFieldName}`;
@@ -31,8 +31,8 @@ export default function AdminMasterData() {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
   const [downloading, setDownloading] = useState(false);
-  const [sendingEmail, setSendingEmail] = useState(false);
-  const [emailSentMessage, setEmailSentMessage] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+  const [sentMessage, setSentMessage] = useState<string | null>(null);
   const [clearing, setClearing] = useState(false);
   const [confirmClearOpen, setConfirmClearOpen] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -41,6 +41,10 @@ export default function AdminMasterData() {
 
   const [drafts, setDrafts] = useState<Record<CellKey, string>>({});
   const [cellState, setCellState] = useState<Record<CellKey, CellState>>({});
+  // Cell saves still in flight — "Send to Master Data" waits for them so
+  // the team never gets a sheet missing the last thing Admin typed.
+  const pendingSaves = useRef(new Set<Promise<unknown>>());
+  const { show } = useToast();
 
   useEffect(() => {
     load();
@@ -117,8 +121,11 @@ export default function AdminMasterData() {
     }
 
     setCellState((s) => ({ ...s, [key]: "saving" }));
+    const request = updateMasterDataField(productId, field, value);
+    pendingSaves.current.add(request);
+    request.catch(() => {}).finally(() => pendingSaves.current.delete(request));
     try {
-      const updated = await updateMasterDataField(productId, field, value);
+      const updated = await request;
       setSheet((prev) => (prev ? { ...prev, rows: prev.rows.map((r) => (r.product_id === productId ? updated : r)) } : prev));
       // Server rounds selling price up to the next 10 — show what was actually saved.
       if (field === "selling_price") {
@@ -143,18 +150,34 @@ export default function AdminMasterData() {
     }
   }
 
-  async function handleSendEmail() {
-    setSendingEmail(true);
+  async function handleSend() {
+    if (sending) return;
+    setSending(true);
     setError(null);
-    setEmailSentMessage(null);
+    setSentMessage(null);
     try {
-      const result = await sendMasterDataEmail();
-      setEmailSentMessage(`Sent to ${result.sent_to}`);
-      setTimeout(() => setEmailSentMessage((m) => (m ? null : m)), 5000);
+      // Save whatever cell is still being typed in, then wait for every save.
+      if (document.activeElement instanceof HTMLInputElement) document.activeElement.blur();
+      await new Promise((r) => setTimeout(r, 0));
+      await Promise.allSettled(Array.from(pendingSaves.current));
+      if (Object.values(cellState).includes("error")) {
+        setError("Some cells couldn't be saved (marked in red) — fix them before sending.");
+        return;
+      }
+      const result = await sendToMasterData();
+      const message = result.created
+        ? `Sent to the Master Data Team as version ${result.version} — ${result.product_count} products, ${result.products_with_price} with a selling price.`
+        : `Nothing changed since version ${result.version} — the Master Data Team already has this sheet.`;
+      setSentMessage(
+        message +
+          (result.emailed_to ? ` Also emailed to ${result.emailed_to}.` : "") +
+          (result.email_error ? ` (The email copy wasn't sent: ${result.email_error})` : "")
+      );
+      show("success", result.created ? `Master Data Sheet v${result.version} sent.` : "Already up to date.");
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not send the email. Please try again.");
+      setError(err instanceof ApiError ? err.message : "Could not send to Master Data. Please try again.");
     } finally {
-      setSendingEmail(false);
+      setSending(false);
     }
   }
 
@@ -185,9 +208,9 @@ export default function AdminMasterData() {
     }
   }
 
-  // Recalculates Selling Price for every item with a Cost Price, from each
-  // row's own Target GP% (rounded up to the next 10 server-side) —
-  // overwrites existing prices, so it sits behind a confirm dialog.
+  // Fills Selling Price only for items that have none yet, from Cost Price
+  // and each row's own Target GP% (rounded up to the next 10 server-side).
+  // Prices already there — typed or generated earlier — are kept.
   async function handleAutoGenerate() {
     setGenerating(true);
     setError(null);
@@ -198,11 +221,10 @@ export default function AdminMasterData() {
       setSheet(fresh);
       seedDrafts(fresh.rows);
       setGenerateMessage(
-        result.updated === 0
-          ? "No changes — selling prices already match Target GP%, or items have no cost price yet."
-          : `Updated selling price for ${result.updated} item${result.updated === 1 ? "" : "s"}.`
+        `${result.total_products} products: ${result.generated} price${result.generated === 1 ? "" : "s"} generated, ` +
+          `${result.preserved} existing kept, ${result.without_price} still without a selling price (no cost price yet).`
       );
-      setTimeout(() => setGenerateMessage((m) => (m ? null : m)), 5000);
+      setTimeout(() => setGenerateMessage((m) => (m ? null : m)), 10000);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not auto-generate selling prices. Please try again.");
     } finally {
@@ -266,7 +288,7 @@ export default function AdminMasterData() {
           <button
             onClick={() => setConfirmGenerateOpen(true)}
             disabled={generating}
-            title="Recalculates Selling Price for every item from Cost Price and Target GP%, rounded up to the next 10"
+            title="Fills Selling Price for items that don't have one yet, from Cost Price and Target GP%, rounded up to the next 10"
             className="text-sm border border-sage-300 text-crate-800/70 rounded-full px-4 py-2 font-medium hover:bg-sage-50 disabled:opacity-50 transition-colors duration-150"
           >
             {generating ? "Generating…" : "Auto-generate Selling Price"}
@@ -286,183 +308,76 @@ export default function AdminMasterData() {
             {downloading ? "Preparing…" : "Download Excel"}
           </button>
           <button
-            onClick={handleSendEmail}
-            disabled={sendingEmail}
-            title="Emails the current sheet as an Excel attachment"
+            onClick={handleSend}
+            disabled={sending}
+            title="Saves the sheet and makes it the latest version for the Master Data Team (also emailed if a recipient is set in Settings)"
             className="text-sm border border-sage-300 text-crate-800/70 rounded-full px-4 py-2 font-medium hover:bg-sage-50 disabled:opacity-50 transition-colors duration-150"
           >
-            {sendingEmail ? "Sending…" : "Send to Master Data"}
+            {sending ? "Sending…" : "Send to Master Data"}
           </button>
         </div>
       </div>
 
-      {emailSentMessage && (
-        <p className="text-crate-700 text-sm px-1 font-medium">✓ {emailSentMessage}</p>
-      )}
+      {sentMessage && <p className="text-crate-700 text-sm px-1 font-medium">✓ {sentMessage}</p>}
       {generateMessage && (
         <p className="text-crate-700 text-sm px-1 font-medium">✓ {generateMessage}</p>
       )}
       {error && sheet && <p className="text-tomato-600 text-sm px-1">{error}</p>}
 
-      <div className="bg-white rounded-2xl shadow-card border border-sage-100 overflow-x-auto">
-        <table className="text-sm border-collapse min-w-max">
-          <thead>
-            <tr className="bg-sage-50 text-crate-800/50 text-xs uppercase tracking-wide">
-              <th className="text-left px-3 py-2.5 sticky z-20 bg-sage-50" style={{ left: 0, width: 90, minWidth: 90 }}>
-                Category
-              </th>
-              <th className="text-left px-3 py-2.5 sticky z-20 bg-sage-50" style={{ left: 90, width: 90, minWidth: 90 }}>
-                Code
-              </th>
-              <th className="text-left px-3 py-2.5 sticky z-20 bg-sage-50" style={{ left: 180, width: 90, minWidth: 90 }}>
-                POS Code
-              </th>
-              <th
-                className="text-left px-3 py-2.5 sticky z-20 bg-sage-50 shadow-[2px_0_2px_-1px_rgba(21,56,38,0.08)]"
-                style={{ left: 270, width: 190, minWidth: 190 }}
-              >
-                Description
-              </th>
-              <th className="text-right px-3 py-2.5 whitespace-nowrap">Target GP%</th>
-              <th className="text-right px-3 py-2.5 whitespace-nowrap">Selling Price</th>
-              <th className="text-right px-3 py-2.5 whitespace-nowrap">GP%</th>
-              <th className="text-right px-3 py-2.5 whitespace-nowrap bg-green-100/60">
-                Keells Price
-                <div className="text-[9px] font-normal normal-case text-crate-800/35">Latest entered</div>
-              </th>
-              <th className="text-right px-3 py-2.5 whitespace-nowrap">
-                Cost Price
-                <div className="text-[9px] font-normal normal-case text-crate-800/35">Highest submitted price</div>
-              </th>
-              {sheet.suppliers.map((s) => (
-                <th key={s.supplier_id} className="text-right px-3 py-2.5 whitespace-nowrap bg-mango-500/10">
-                  {s.supplier_name}
-                  <div className="text-[9px] font-normal normal-case text-crate-800/35">Adjusted CP</div>
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-sage-100">
-            {filteredRows.map((row) => {
-              const gpBelow = row.computed_gp_percent !== null && row.computed_gp_percent < row.target_gp_percent;
-              return (
-                <tr key={row.product_id} className="hover:bg-sage-50/50 transition-colors duration-100">
-                  <td className="px-3 py-2 sticky z-10 bg-white" style={{ left: 0, width: 90 }}>
-                    <CategoryBadge name={row.category_name} />
-                  </td>
-                  <td className="px-3 py-2 text-crate-800/40 sticky z-10 bg-white" style={{ left: 90, width: 90 }}>
-                    {row.product_code}
-                  </td>
-                  <td className="px-3 py-2 text-crate-800/60 sticky z-10 bg-white" style={{ left: 180, width: 90 }}>
-                    {row.pos_code ?? <span className="text-crate-800/20">—</span>}
-                  </td>
-                  <td
-                    className="px-3 py-2 text-crate-950 sticky z-10 bg-white shadow-[2px_0_2px_-1px_rgba(21,56,38,0.08)]"
-                    style={{ left: 270, width: 190 }}
-                  >
-                    {row.description}
-                    <ProductPromotion productId={row.product_id} className="ml-1.5" />
-                  </td>
-                  <td className="px-2 py-1.5 text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      <input
-                        type="number"
-                        min="0"
-                        max="100"
-                        step="0.1"
-                        placeholder="30.0"
-                        value={drafts[`${row.product_id}:target_gp_percent`] ?? ""}
-                        onChange={(e) =>
-                          setDrafts((d) => ({ ...d, [`${row.product_id}:target_gp_percent`]: e.target.value }))
-                        }
-                        onBlur={(e) => saveField(row.product_id, "target_gp_percent", e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
-                        className={`w-16 border rounded-lg px-1.5 py-1 text-right text-xs bg-sage-50/60 focus:outline-none focus:ring-2 focus:ring-crate-700/30 focus:border-crate-700 focus:bg-white ${
-                          cellState[`${row.product_id}:target_gp_percent`] === "error" ? "border-tomato-500" : "border-sage-300"
-                        }`}
-                      />
-                      <span className="text-[10px] text-crate-800/35">%</span>
-                    </div>
-                  </td>
-                  <td className="px-2 py-1.5">
-                    <div className="flex items-center justify-end gap-1">
-                      <span className="text-[10px] text-crate-800/35">Rs.</span>
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        placeholder="—"
-                        value={drafts[`${row.product_id}:selling_price`] ?? ""}
-                        onChange={(e) =>
-                          setDrafts((d) => ({ ...d, [`${row.product_id}:selling_price`]: e.target.value }))
-                        }
-                        onBlur={(e) => saveField(row.product_id, "selling_price", e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
-                        className={`w-20 border rounded-lg px-1.5 py-1 text-right text-xs bg-sage-50/60 focus:outline-none focus:ring-2 focus:ring-crate-700/30 focus:border-crate-700 focus:bg-white ${
-                          cellState[`${row.product_id}:selling_price`] === "error" ? "border-tomato-500" : "border-sage-300"
-                        }`}
-                      />
-                    </div>
-                  </td>
-                  <td className="px-3 py-2 text-right whitespace-nowrap">
-                    {row.computed_gp_percent !== null ? (
-                      <span className={`font-semibold ${gpBelow ? "text-tomato-600" : "text-crate-700"}`}>
-                        {(row.computed_gp_percent * 100).toFixed(1)}%
-                      </span>
-                    ) : (
-                      <span className="text-crate-800/20">—</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2 text-right text-crate-800/70 whitespace-nowrap bg-green-100/30">
-                    {row.keells_price !== null ? (
-                      <div className="flex flex-col items-end">
-                        <span>Rs. {row.keells_price.toFixed(2)}</span>
-                        {row.keells_price_date && (
-                          <span className="text-[9px] text-crate-800/40 leading-none mt-0.5">
-                            {new Date(row.keells_price_date + "T00:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short" })}
-                          </span>
-                        )}
-                      </div>
-                    ) : (
-                      <span className="text-crate-800/20">—</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2 text-right text-crate-800/70 whitespace-nowrap">
-                    {row.cost_price !== null ? (
-                      <div className="flex flex-col items-end">
-                        <span>Rs. {row.cost_price.toFixed(2)}</span>
-                        {row.cost_price_supplier_name && (
-                          <span className="text-[9px] text-crate-800/40 leading-none mt-0.5">
-                            {row.cost_price_supplier_name}
-                            {row.cost_price_date
-                              ? ` · ${new Date(row.cost_price_date + "T00:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short" })}`
-                              : ""}
-                          </span>
-                        )}
-                      </div>
-                    ) : (
-                      <span className="text-crate-800/20">—</span>
-                    )}
-                  </td>
-                  {sheet.suppliers.map((s) => {
-                    const price = row.supplier_prices[s.supplier_id];
-                    return (
-                      <td key={s.supplier_id} className="px-3 py-2 text-right text-crate-800/70 bg-mango-500/5">
-                        {price !== null && price !== undefined ? price.toFixed(2) : <span className="text-crate-800/20">—</span>}
-                      </td>
-                    );
-                  })}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      <MasterDataTable
+        suppliers={sheet.suppliers}
+        rows={filteredRows}
+        renderTargetGp={(row) => (
+          <div className="flex items-center justify-end gap-1">
+            <input
+              type="number"
+              min="0"
+              max="100"
+              step="0.1"
+              placeholder="30.0"
+              value={drafts[`${row.product_id}:target_gp_percent`] ?? ""}
+              onChange={(e) => setDrafts((d) => ({ ...d, [`${row.product_id}:target_gp_percent`]: e.target.value }))}
+              onBlur={(e) => saveField(row.product_id, "target_gp_percent", e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+              className={`w-16 border rounded-lg px-1.5 py-1 text-right text-xs bg-sage-50/60 focus:outline-none focus:ring-2 focus:ring-crate-700/30 focus:border-crate-700 focus:bg-white ${
+                cellState[`${row.product_id}:target_gp_percent`] === "error" ? "border-tomato-500" : "border-sage-300"
+              }`}
+            />
+            <span className="text-[10px] text-crate-800/35">%</span>
+          </div>
+        )}
+        renderSellingPrice={(row) => (
+          <div className="flex items-center justify-end gap-1">
+            <span className="text-[10px] text-crate-800/35">Rs.</span>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder="—"
+              value={drafts[`${row.product_id}:selling_price`] ?? ""}
+              onChange={(e) => setDrafts((d) => ({ ...d, [`${row.product_id}:selling_price`]: e.target.value }))}
+              onBlur={(e) => saveField(row.product_id, "selling_price", e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+              className={`w-20 border rounded-lg px-1.5 py-1 text-right text-xs bg-sage-50/60 focus:outline-none focus:ring-2 focus:ring-crate-700/30 focus:border-crate-700 focus:bg-white ${
+                cellState[`${row.product_id}:selling_price`] === "error" ? "border-tomato-500" : "border-sage-300"
+              }`}
+            />
+            <span
+              title={row.selling_price_source === "AUTO" ? "Auto-generated" : row.selling_price_source === "MANUAL" ? "Entered manually" : undefined}
+              className={`text-[9px] font-semibold w-8 ${row.selling_price_source === "AUTO" ? "text-[#8A5A0D]" : "text-crate-800/35"}`}
+            >
+              {row.selling_price_source === "AUTO" ? "AUTO" : row.selling_price_source === "MANUAL" ? "MAN" : ""}
+            </span>
+          </div>
+        )}
+      />
       <p className="text-[11px] text-crate-800/35 px-1">
         POS Code is fixed, sourced from the original uploaded product data — not editable here. Cost Price is
         the highest of the supplier prices in the same row — it's computed, not editable. Keells Price is the latest price entered on Keells Prices — edit it
         there. Supplier columns mirror Supplier Prices and are read-only here; edit them
-        there. Target GP% defaults to 30% until you set your own.
+        there. Target GP% defaults to 30% until you set your own. AUTO / MAN beside a selling price shows whether
+        it was auto-generated or typed in. Branches only see selling prices after the Master Data Team publishes
+        them.
       </p>
 
       <ConfirmDialog
@@ -470,7 +385,7 @@ export default function AdminMasterData() {
         onClose={() => setConfirmGenerateOpen(false)}
         onConfirm={handleAutoGenerate}
         title="Auto-generate selling prices?"
-        description="This recalculates Selling Price for every item that has a Cost Price, using its Target GP%, then removes decimals and rounds up to the next 10. Existing selling prices — including ones typed in manually — will be overwritten. Items with no Cost Price are left as they are."
+        description="This fills in Selling Price only for items that don't have one yet, from Cost Price and Target GP%, then removes decimals and rounds up to the next 10. Selling prices already on the sheet — typed in or generated earlier — are kept, and published prices are not changed. Items with no Cost Price stay blank."
         confirmLabel="Generate"
         loading={generating}
       />

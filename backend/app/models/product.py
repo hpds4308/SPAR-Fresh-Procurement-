@@ -42,6 +42,15 @@ class Product(Base):
     target_gp_percent: Mapped[float | None] = mapped_column(Numeric(5, 4))
     # selling_price: current retail selling price to the customer.
     selling_price: Mapped[float | None] = mapped_column(Numeric(10, 2))
+    # Where selling_price came from: MANUAL (typed by Admin) or AUTO
+    # (Auto-generate). Auto-generate only ever fills blank prices.
+    selling_price_source: Mapped[str | None] = mapped_column(String(10))
+    # What branches see: the selling price the Master Data Team last
+    # published (Update Selling Prices), and who/when. Admin editing
+    # selling_price never changes this until the team publishes again.
+    published_selling_price: Mapped[float | None] = mapped_column(Numeric(10, 2))
+    selling_price_published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    selling_price_published_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     # reference_cost_price: Admin's own reference cost figure, independent
     # of (and not derived from) any supplier's submitted or adjusted price
     # — those stay visible alongside it for comparison, never overwritten.

@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from decimal import ROUND_CEILING, Decimal
 from typing import Literal
 
@@ -31,6 +31,10 @@ class MasterDataRowOut(BaseModel):
     category_name: str
     target_gp_percent: float  # e.g. 0.30 = 30%; defaults to 0.30 until Admin overrides
     selling_price: float | None
+    # MANUAL (typed by Admin) or AUTO (Auto-generate); None when blank.
+    selling_price_source: str | None = None
+    # What branches currently see — last published by the Master Data Team.
+    published_selling_price: float | None = None
     computed_gp_percent: float | None  # (selling_price - cost_price) / selling_price, live-derived
     # Most recent Keells retail price for this product (any date) and the
     # date it was recorded for — a read-only reference, edited on Keells Prices.
@@ -51,6 +55,50 @@ class MasterDataRowOut(BaseModel):
 class MasterDataSheetOut(BaseModel):
     suppliers: list[MasterDataSupplierColumn]
     rows: list[MasterDataRowOut]
+
+
+class AutoGenerateSummaryOut(BaseModel):
+    """Result of Auto-generate Selling Price. Only blank prices are filled."""
+
+    total_products: int
+    generated: int  # blank selling prices that now have one
+    preserved: int  # already had a selling price (manual or earlier auto) — left untouched
+    without_price: int  # still blank afterwards (no cost price yet, or Target GP% of 100%)
+
+
+class MasterDataSubmissionOut(BaseModel):
+    """The latest sheet Admin sent to the Master Data Team."""
+
+    version: int
+    sent_at: datetime
+    sent_by: str
+    product_count: int
+    products_with_price: int
+    published_at: datetime | None = None
+    published_by: str | None = None
+    publish_summary: dict | None = None
+    sheet: MasterDataSheetOut
+
+
+class MasterDataSendOut(BaseModel):
+    version: int
+    sent_at: datetime
+    product_count: int
+    products_with_price: int
+    # False when nothing changed since the last send — no new version made.
+    created: bool
+    emailed_to: str | None = None
+    email_error: str | None = None
+
+
+class PublishSummaryOut(BaseModel):
+    version: int
+    published_at: datetime
+    products_updated: int  # branches now see a new/changed price
+    products_unchanged: int  # same price was already published
+    branches_updated: int  # active branches that see the published prices
+    skipped_missing_price: list[str]
+    skipped_invalid: list[str]
 
 
 MasterDataField = Literal["target_gp_percent", "selling_price"]

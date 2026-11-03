@@ -28,7 +28,14 @@ export default function ProtectedRoute({
 
   if (!allowedRoles.includes(user.role)) {
     // Logged in, but wrong role for this route — send them to their own dashboard.
-    const fallback = user.role === "ADMIN" ? "/admin" : user.role === "BRANCH" ? "/branch" : "/supplier";
+    const fallback =
+      user.role === "ADMIN"
+        ? "/admin"
+        : user.role === "BRANCH"
+          ? "/branch"
+          : user.role === "MASTER_DATA"
+            ? "/master-data"
+            : "/supplier";
     return <Navigate to={fallback} replace />;
   }
 

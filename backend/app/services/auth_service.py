@@ -32,6 +32,7 @@ ROLE_REDIRECTS = {
     "ADMIN": "/admin",
     "BRANCH": "/branch",
     "SUPPLIER": "/supplier",
+    "MASTER_DATA": "/master-data",
 }
 
 

@@ -26,10 +26,10 @@ class AvailablePartyOut(BaseModel):
 
 
 class UserCreateRequest(BaseModel):
-    role: str  # "ADMIN" | "BRANCH" | "SUPPLIER"
+    role: str  # "ADMIN" | "BRANCH" | "SUPPLIER" | "MASTER_DATA"
     branch_id: int | None = None
     supplier_id: int | None = None
-    # Only used for ADMIN accounts — BRANCH/SUPPLIER usernames are always
+    # Only used for ADMIN and MASTER_DATA accounts — BRANCH/SUPPLIER usernames are always
     # derived from the branch/supplier code, same convention seed_users.py
     # uses, so logins stay predictable instead of Admin inventing new ones.
     username: str | None = Field(default=None, min_length=3, max_length=50)

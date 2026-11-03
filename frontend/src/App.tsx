@@ -7,6 +7,7 @@ import ProtectedRoute from "./features/auth/ProtectedRoute";
 import AdminDashboard from "./features/admin/AdminDashboard";
 import BranchDashboard from "./features/branch/BranchDashboard";
 import SupplierDashboard from "./features/supplier/SupplierDashboard";
+import MasterDataDashboard from "./features/masterData/MasterDataDashboard";
 import { PageSpinner } from "./features/shared/ui/PageSpinner";
 import { hideBootSplash } from "./features/shared/bootSplash";
 
@@ -19,6 +20,7 @@ function HomeRedirect() {
   if (user.role === "ADMIN") return <Navigate to="/admin" replace />;
   if (user.role === "BRANCH") return <Navigate to="/branch" replace />;
   if (user.role === "SUPPLIER") return <Navigate to="/supplier" replace />;
+  if (user.role === "MASTER_DATA") return <Navigate to="/master-data" replace />;
   return <Navigate to="/login" replace />;
 }
 
@@ -55,6 +57,14 @@ export default function App() {
         element={
           <ProtectedRoute allowedRoles={["SUPPLIER"]}>
             <SupplierDashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/master-data"
+        element={
+          <ProtectedRoute allowedRoles={["MASTER_DATA"]}>
+            <MasterDataDashboard />
           </ProtectedRoute>
         }
       />
