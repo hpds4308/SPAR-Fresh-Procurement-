@@ -223,8 +223,8 @@ def make_product(db_session):
     def _make(**overrides):
         counter["n"] += 1
         n = counter["n"]
-        # Migration 0035 seeds "Imported" (per-case items); tests want a plain one.
-        category = db_session.query(ProductCategory).filter(ProductCategory.name != "Imported").first()
+        # Migration 0035 seeds "Imported" (renamed "Imported Fruit" in 0036; per-case items); tests want a plain one.
+        category = db_session.query(ProductCategory).filter(ProductCategory.name != "Imported Fruit").first()
         if not category:
             category = ProductCategory(name="Test Category")
             db_session.add(category)

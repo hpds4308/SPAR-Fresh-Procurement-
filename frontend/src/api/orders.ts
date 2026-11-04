@@ -17,7 +17,7 @@ export type Product = {
 // item name within each category. An unrecognized category name (should
 // never happen with today's 4 categories) sorts last rather than first,
 // so it stays visible instead of silently jumping to the top.
-const CATEGORY_DISPLAY_ORDER = ["Fruit", "Vege Low", "Vege Pola", "Vege Up", "Imported"];
+const CATEGORY_DISPLAY_ORDER = ["Fruit", "Vege Low", "Vege Pola", "Vege Up", "Imported Fruit"];
 
 function categoryRank(categoryName: string): number {
   const idx = CATEGORY_DISPLAY_ORDER.indexOf(categoryName);

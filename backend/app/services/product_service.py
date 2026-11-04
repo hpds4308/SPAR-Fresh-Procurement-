@@ -35,7 +35,7 @@ from app.schemas.product import (
 
 ACTIVE = "ACTIVE"
 INACTIVE = "INACTIVE"
-IMPORTED_CATEGORY = "Imported"
+IMPORTED_CATEGORY = "Imported Fruit"
 CASE_UNIT = "case"
 
 

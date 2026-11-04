@@ -10,7 +10,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   "Vege Low": "bg-teal-100 text-teal-700",
   "Vege Pola": "bg-lime-100 text-lime-700",
   "Vege Up": "bg-emerald-100 text-emerald-700",
-  Imported: "bg-sky-100 text-sky-700",
+  "Imported Fruit": "bg-sky-100 text-sky-700",
 };
 
 const FALLBACK_COLOR = "bg-sage-100 text-crate-700";

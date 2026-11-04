@@ -176,6 +176,13 @@ def _validate_lines(db: Session, payload: OrderCreate) -> tuple[dict[int, Produc
     if len(product_ids) != len(set(product_ids)):
         raise ValidationFailedError("Each product can only appear once per order — combine duplicate lines.")
     units = {u.id: u.code for u in db.query(ProductUnit).all()}
+    # Imported items come in whole cases — 1, 2, 3, never 1.5 cases.
+    for line in payload.lines:
+        product = products[line.product_id]
+        if (units.get(product.unit_id) or "").lower() == "case" and line.quantity != int(line.quantity):
+            raise ValidationFailedError(
+                f"{product.description} is ordered in whole cases — enter 1, 2, 3 (not {line.quantity:g})."
+            )
     return products, units
 
 

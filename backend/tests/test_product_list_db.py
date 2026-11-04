@@ -204,7 +204,7 @@ def test_remove_image(db_session, admin, make_product):
 def _imported_category(db_session):
     from app.models.product import ProductCategory
 
-    return db_session.query(ProductCategory).filter_by(name="Imported").one()
+    return db_session.query(ProductCategory).filter_by(name="Imported Fruit").one()
 
 
 def test_imported_item_goes_per_case_with_its_kg(db_session, admin, make_product):
@@ -214,7 +214,7 @@ def test_imported_item_goes_per_case_with_its_kg(db_session, admin, make_product
         db_session, admin, _payload(db_session, make_product, category_id=imported.id, case_kg=12.5)
     )
 
-    assert out.category_name == "Imported"
+    assert out.category_name == "Imported Fruit"
     assert out.unit_code == "case"
     assert out.case_kg == 12.5
     refs = {r.product_id: r for r in product_service.image_refs(db_session)}

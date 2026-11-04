@@ -15,7 +15,7 @@ import { CategoryBadge } from "../shared/ui/CategoryBadge";
 import { PromotionBadge, ProductPromotion } from "../shared/ui/PromotionBadge";
 import { useActivePromotions } from "../shared/useActivePromotions";
 import { useProductPhotos } from "../shared/useProductImages";
-import { CaseSizeTag, QuantityLabel } from "../shared/ui/UnitLabel";
+import { CaseSizeTag, QuantityLabel, isCaseUnit } from "../shared/ui/UnitLabel";
 import { ONE_DECIMAL_STEP, formatOneDecimal, isOneDecimal } from "../shared/oneDecimal";
 
 function formatDate(iso: string): string {
@@ -147,8 +147,14 @@ export default function OrderForm({ onSubmitted }: { onSubmitted: () => void }) 
     [quantities]
   );
 
+  // Imported items are ordered in whole cases (1, 2, 3 — not 1.5).
+  const caseProductIds = useMemo(
+    () => new Set(products.filter((p) => isCaseUnit(p.unit_code)).map((p) => p.id)),
+    [products]
+  );
+
   function setQty(productId: number, value: string) {
-    if (!isOneDecimal(value)) return; // e.g. 5.71 — the second decimal must be 0
+    if (caseProductIds.has(productId) ? !/^\d*$/.test(value) : !isOneDecimal(value)) return; // e.g. 5.71 — the second decimal must be 0
     setQuantities((prev) => ({ ...prev, [productId]: value }));
     setDraftSaved(false);
   }
@@ -344,11 +350,12 @@ export default function OrderForm({ onSubmitted }: { onSubmitted: () => void }) 
               <input
                 type="number"
                 min="0"
-                step={ONE_DECIMAL_STEP}
+                step={caseProductIds.has(p.id) ? "1" : ONE_DECIMAL_STEP}
                 placeholder="0"
                 value={quantities[p.id] ?? ""}
                 onChange={(e) => setQty(p.id, e.target.value)}
                 onBlur={(e) => {
+                  if (caseProductIds.has(p.id)) return;
                   const v = formatOneDecimal(e.target.value);
                   if (v !== e.target.value) setQty(p.id, v);
                 }}

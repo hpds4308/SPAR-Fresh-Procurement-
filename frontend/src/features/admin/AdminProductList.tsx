@@ -42,7 +42,7 @@ const EMPTY_FORM = {
 };
 
 // Imported items are always counted in cases; Admin types each one's case size.
-const IMPORTED_CATEGORY = "Imported";
+const IMPORTED_CATEGORY = "Imported Fruit";
 
 const THUMB_SIZE = 240;
 
