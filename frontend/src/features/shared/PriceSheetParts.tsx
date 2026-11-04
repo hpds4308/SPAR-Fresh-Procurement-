@@ -1,6 +1,7 @@
 import { StatusBadge } from "./ui/Badge";
 import { PriceSheet, PriceSheetItem, RowApprovalStatus, SheetStatus } from "../../api/priceApprovals";
 import { ProductPromotion } from "./ui/PromotionBadge";
+import { UnitLabel } from "./ui/UnitLabel";
 
 type Tone = "neutral" | "success" | "warning" | "danger" | "info";
 
@@ -186,7 +187,10 @@ export function PriceSheetItemsTable({ items, priceLabel }: { items: PriceSheetI
               </span>
               <span className="text-crate-800/60">
                 SPAR: <span className="font-semibold text-crate-950 tabular-nums">{rs(item.adjusted_price)}</span>
-                <span className="text-crate-800/40"> /{item.unit_code}</span>
+                <span className="text-crate-800/40">
+                  {" "}
+                  /<UnitLabel productId={item.product_id} unit={item.unit_code} />
+                </span>
               </span>
             </p>
             {answered && (
@@ -227,7 +231,9 @@ function ItemsTable({ items, priceLabel, answered }: { items: PriceSheetItem[]; 
                   <ProductPromotion productId={item.product_id} className="ml-1.5" />
                   {item.final_offer && <FinalOfferTag className="ml-1.5" />}
                 </td>
-                <td className="py-2 px-3 text-right text-crate-800/50">{item.unit_code}</td>
+                <td className="py-2 px-3 text-right text-crate-800/50 whitespace-nowrap">
+                  <UnitLabel productId={item.product_id} unit={item.unit_code} />
+                </td>
                 <td className="py-2 px-3 text-right text-crate-800/70 tabular-nums">{rs(item.supplier_price)}</td>
                 <td className="py-2 px-3 text-right font-semibold text-crate-950 tabular-nums">{rs(item.adjusted_price)}</td>
                 <td

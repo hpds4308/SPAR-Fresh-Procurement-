@@ -11,6 +11,8 @@ class ProductOut(BaseModel):
     subcategory: str | None = None
     unit_code: str
     status: str
+    # Imported items only: kg in one case of this product.
+    case_kg: float | None = None
 
     class Config:
         from_attributes = True
@@ -43,6 +45,8 @@ class ProductCreate(BaseModel):
     category_id: int
     subcategory: str | None = Field(default=None, max_length=100)
     unit_id: int
+    # Required for (and only kept on) Imported items: 1 case = case_kg kg.
+    case_kg: float | None = Field(default=None, gt=0, le=10000)
 
     @field_validator("product_code", "description")
     @classmethod
@@ -74,3 +78,6 @@ class ProductImageRef(BaseModel):
     product_id: int
     product_code: str
     version: str | None = None
+    # Imported items only: kg in one case, so every page can show
+    # "case (12 kg)" next to the product.
+    case_kg: float | None = None

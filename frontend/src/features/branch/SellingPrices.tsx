@@ -7,6 +7,7 @@ import { CategoryBadge } from "../shared/ui/CategoryBadge";
 import { ProductThumb } from "../shared/ui/ProductThumb";
 import { ProductPromotion } from "../shared/ui/PromotionBadge";
 import { SkeletonTable } from "../shared/ui/Skeleton";
+import { UnitLabel } from "../shared/ui/UnitLabel";
 
 // Today in Sri Lanka as YYYY-MM-DD (the date input's format).
 function todayColombo(): string {
@@ -160,7 +161,10 @@ export default function SellingPrices() {
                     {r.selling_price !== null ? (
                       <span className="font-semibold text-crate-950">
                         Rs. {r.selling_price.toFixed(2)}
-                        <span className="text-xs font-normal text-crate-800/40"> / {r.unit_code}</span>
+                        <span className="text-xs font-normal text-crate-800/40">
+                          {" "}
+                          / <UnitLabel productId={r.product_id} unit={r.unit_code} />
+                        </span>
                       </span>
                     ) : (
                       <span className="text-crate-800/20">—</span>

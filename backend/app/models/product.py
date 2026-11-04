@@ -35,6 +35,9 @@ class Product(Base):
     unit_id: Mapped[int] = mapped_column(ForeignKey("product_units.id"), nullable=False)
     default_supplier_id: Mapped[int | None] = mapped_column(ForeignKey("suppliers.id"))
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="ACTIVE")
+    # Imported items are counted in cases; how many kg one case of this
+    # product holds (cases differ per product). NULL for every other item.
+    case_kg: Mapped[float | None] = mapped_column(Numeric(7, 2))
     # Margin/pricing reference fields for the Master Data Sheet — set and
     # maintained by Admin, independent of any supplier's quoted price.
     # target_gp_percent: the gross-profit fraction Admin wants on this

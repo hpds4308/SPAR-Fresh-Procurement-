@@ -5,6 +5,7 @@ import { StatusBadge } from "./ui/Badge";
 import Button from "./ui/Button";
 import { formatDateTime, formatLongDate } from "./PriceSheetParts";
 import { ProductPromotion } from "./ui/PromotionBadge";
+import { UnitLabel } from "./ui/UnitLabel";
 
 /** "supplier" = all branches combined; "matrix" = items x branches with
  *  the quantity for each branch; "branches" = every branch PO; "all" =
@@ -50,7 +51,9 @@ function LinesTable({ lines, total }: { lines: PurchaseOrderLine[]; total: numbe
                   {l.notes && <div className="text-xs text-crate-800/50">{l.notes}</div>}
                 </td>
                 <td className="py-1.5 px-2 text-right tabular-nums">{l.quantity}</td>
-                <td className="py-1.5 px-2 text-crate-800/60">{l.unit_code}</td>
+                <td className="py-1.5 px-2 text-crate-800/60 whitespace-nowrap">
+                  <UnitLabel productId={l.product_id} unit={l.unit_code} />
+                </td>
                 <td className="py-1.5 px-2 text-right tabular-nums">
                   {money(l.unit_price)}
                   {l.price_is_estimated && <span className="text-mango-600 text-[10px] ml-0.5">*</span>}
@@ -120,7 +123,9 @@ function BranchMatrixTable({ po }: { po: PurchaseOrder }) {
                 <span className="text-crate-800/40 text-xs ml-1.5">{line.product_code}</span>
                 <ProductPromotion productId={line.product_id} className="ml-1.5" />
               </td>
-              <td className="py-1.5 px-2 text-crate-800/60">{line.unit_code}</td>
+              <td className="py-1.5 px-2 text-crate-800/60 whitespace-nowrap">
+                <UnitLabel productId={line.product_id} unit={line.unit_code} />
+              </td>
               {po.branches.map((b) => (
                 <td key={b.branch_id} className="py-1.5 px-2 text-right tabular-nums border-l border-sage-100">
                   {qty.has(b.branch_id) ? qty.get(b.branch_id) : <span className="text-crate-800/20">—</span>}

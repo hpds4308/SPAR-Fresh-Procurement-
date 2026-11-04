@@ -13,6 +13,7 @@ import { IconReceipt } from "../shared/Icons";
 import { formatDateTime, formatSignDeadline, formatSubmissionDate, rs, submissionDateIso } from "../shared/PriceSheetParts";
 import { ProductThumb } from "../shared/ui/ProductThumb";
 import { ProductPromotion } from "../shared/ui/PromotionBadge";
+import { UnitLabel } from "../shared/ui/UnitLabel";
 
 const CARD = "bg-white rounded-2xl shadow-[0_10px_30px_-12px_rgba(21,56,38,0.15)] border border-sage-100";
 
@@ -176,7 +177,7 @@ export default function FinalPrices() {
                       {l.product_description}
                       <ProductPromotion productId={l.product_id} className="ml-1.5" />
                       <span className="block text-[11px] text-crate-800/40">
-                        {l.product_code} · {l.unit_code}
+                        {l.product_code} · <UnitLabel productId={l.product_id} unit={l.unit_code} />
                       </span>
                     </td>
                     <td className="py-2 text-right text-crate-800/70 whitespace-nowrap">{rs(l.your_price)}</td>

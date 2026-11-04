@@ -40,6 +40,7 @@ def list_products(db: Session = Depends(get_db), current_user: User = Depends(ge
             subcategory=p.subcategory,
             unit_code=units.get(p.unit_id, "—"),
             status=p.status,
+            case_kg=float(p.case_kg) if p.case_kg is not None else None,
         )
         for p in products
     ]
@@ -70,7 +71,7 @@ def product_options(
 
 @router.get("/images", response_model=list[ProductImageRef])
 def product_images(db: Session = Depends(get_db)):
-    """Which products have a photo (any signed-in user - thumbnails show on every page)."""
+    """Which products have a photo, and Imported items' case size (any signed-in user)."""
     return product_service.image_refs(db)
 
 

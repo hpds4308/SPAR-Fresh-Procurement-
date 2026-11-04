@@ -15,6 +15,7 @@ import { CategoryBadge } from "../shared/ui/CategoryBadge";
 import { PromotionBadge, ProductPromotion } from "../shared/ui/PromotionBadge";
 import { useActivePromotions } from "../shared/useActivePromotions";
 import { useProductPhotos } from "../shared/useProductImages";
+import { CaseSizeTag, QuantityLabel } from "../shared/ui/UnitLabel";
 import { ONE_DECIMAL_STEP, formatOneDecimal, isOneDecimal } from "../shared/oneDecimal";
 
 function formatDate(iso: string): string {
@@ -247,7 +248,7 @@ export default function OrderForm({ onSubmitted }: { onSubmitted: () => void }) 
               </span>
               <ProductPromotion productId={ln.product_id} className="ml-2 shrink-0" />
               <span className="text-crate-800/70 shrink-0 ml-auto pl-3">
-                {ln.quantity} {ln.unit_code}
+                <QuantityLabel productId={ln.product_id} quantity={ln.quantity} unit={ln.unit_code} />
               </span>
             </div>
           ))}
@@ -330,6 +331,7 @@ export default function OrderForm({ onSubmitted }: { onSubmitted: () => void }) 
                   {p.subcategory ? ` · ${p.subcategory}` : ""}
                 </span>
                 <CategoryBadge name={p.category_name} />
+                <CaseSizeTag productId={p.id} />
               </div>
             </div>
             <div className="text-right shrink-0 w-28 px-2">

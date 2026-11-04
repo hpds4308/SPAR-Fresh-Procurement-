@@ -17,6 +17,7 @@ import { PurchaseOrder, issuePurchaseOrder } from "../../api/purchaseOrders";
 import { SkeletonTable } from "../shared/ui/Skeleton";
 import { ProductPromotion } from "../shared/ui/PromotionBadge";
 import { PriceAnswerLabel } from "../shared/PriceSheetParts";
+import { isCaseUnit } from "../shared/ui/UnitLabel";
 
 // One cell in the grid = one branch+product combination.
 function cellKey(productId: number, branchId: number): string {
@@ -429,10 +430,15 @@ export default function SupplierOrderBuilder({
     return total;
   }, [filledCells, qty, extra, supplierPrices]);
 
-  const totalKg = useMemo(
-    () => filledCells.reduce((sum, key) => sum + (parseFloat(qty[key]) || 0), 0),
-    [filledCells, qty],
-  );
+  // Imported items are ordered in cases: each case counts as its kg.
+  const totalKg = useMemo(() => {
+    const byId = new Map(products.map((p) => [p.id, p]));
+    return filledCells.reduce((sum, key) => {
+      const q = parseFloat(qty[key]) || 0;
+      const p = byId.get(Number(key.split(":")[0]));
+      return sum + (p && isCaseUnit(p.unit_code) ? q * (p.case_kg ?? 0) : q);
+    }, 0);
+  }, [filledCells, qty, products]);
 
   async function handleSave() {
     if (!supplierId) {

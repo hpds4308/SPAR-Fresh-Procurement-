@@ -197,3 +197,58 @@ def test_remove_image(db_session, admin, make_product):
     assert out.image_version is None
     with pytest.raises(NotFoundError):
         product_service.get_image(db_session, p.id, thumb=True)
+
+
+# ---- Imported items: counted in cases, with Admin's case size ----
+
+def _imported_category(db_session):
+    from app.models.product import ProductCategory
+
+    return db_session.query(ProductCategory).filter_by(name="Imported").one()
+
+
+def test_imported_item_goes_per_case_with_its_kg(db_session, admin, make_product):
+    imported = _imported_category(db_session)
+    # Whatever unit the form sent, Imported items are saved per case.
+    out = product_service.create(
+        db_session, admin, _payload(db_session, make_product, category_id=imported.id, case_kg=12.5)
+    )
+
+    assert out.category_name == "Imported"
+    assert out.unit_code == "case"
+    assert out.case_kg == 12.5
+    refs = {r.product_id: r for r in product_service.image_refs(db_session)}
+    assert refs[out.id].case_kg == 12.5
+
+
+def test_imported_item_needs_case_kg(db_session, admin, make_product):
+    imported = _imported_category(db_session)
+    with pytest.raises(ValidationFailedError, match="1 case"):
+        product_service.create(db_session, admin, _payload(db_session, make_product, category_id=imported.id))
+
+
+def test_case_kg_must_be_positive():
+    with pytest.raises(ValidationError):
+        ProductCreate(product_code="X1", description="Apple", category_id=1, unit_id=1, case_kg=0)
+
+
+def test_moving_out_of_imported_drops_case_kg(db_session, admin, make_product):
+    imported = _imported_category(db_session)
+    payload = _payload(db_session, make_product, category_id=imported.id, case_kg=18)
+    out = product_service.create(db_session, admin, payload)
+
+    ref = make_product()
+    edited = product_service.update(
+        db_session,
+        admin,
+        out.id,
+        _payload(db_session, make_product, category_id=ref.category_id, unit_id=ref.unit_id, case_kg=18),
+    )
+    assert edited.unit_code == "KG"
+    assert edited.case_kg is None
+
+
+def test_case_kg_is_ignored_for_other_categories(db_session, admin, make_product):
+    out = product_service.create(db_session, admin, _payload(db_session, make_product, case_kg=10))
+    assert out.case_kg is None
+    assert out.unit_code == "KG"

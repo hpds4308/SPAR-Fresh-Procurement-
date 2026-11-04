@@ -15,6 +15,8 @@ export type AdminProduct = {
   created_at: string | null;
   // Changes whenever the photo is replaced; null = no photo yet.
   image_version: string | null;
+  // Imported items only: kg in one case of this product.
+  case_kg: number | null;
 };
 
 export type ProductOption = { id: number; name: string };
@@ -27,6 +29,8 @@ export type NewProduct = {
   category_id: number;
   subcategory: string | null;
   unit_id: number;
+  // Required for Imported items (always counted in cases): 1 case = case_kg kg.
+  case_kg: number | null;
 };
 
 // Admin only: every product, active and removed.
@@ -54,7 +58,7 @@ export function restoreProduct(id: number): Promise<AdminProduct> {
   return apiFetch(`/products/${id}/restore`, { method: "POST" });
 }
 
-// Admin only: edits code, POS code, description, category, subcategory and unit.
+// Admin only: edits code, POS code, description, category, subcategory, unit and case size.
 export function updateProduct(id: number, body: NewProduct): Promise<AdminProduct> {
   return apiFetch(`/products/${id}`, { method: "PATCH", body: JSON.stringify(body) });
 }
@@ -79,7 +83,13 @@ export function removeProductImage(id: number): Promise<AdminProduct> {
 
 // version is set when Admin uploaded a photo; otherwise pages fall back to
 // the older photo file named by product_code, if there is one.
-export type ProductImageRef = { product_id: number; product_code: string; version: string | null };
+// case_kg is set on Imported items (kg in one case).
+export type ProductImageRef = {
+  product_id: number;
+  product_code: string;
+  version: string | null;
+  case_kg?: number | null;
+};
 
 // Any signed-in user: every product's code and photo version.
 export function fetchProductImageRefs(): Promise<ProductImageRef[]> {

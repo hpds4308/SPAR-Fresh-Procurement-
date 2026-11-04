@@ -6,6 +6,7 @@ import { IconBasket } from "../shared/Icons";
 import { useToast } from "../shared/ui/Toast";
 import { ProductThumb } from "../shared/ui/ProductThumb";
 import { ProductPromotion } from "../shared/ui/PromotionBadge";
+import { QuantityLabel, UnitLabel } from "../shared/ui/UnitLabel";
 
 function statusColor(status: string): string {
   switch (status) {
@@ -65,8 +66,8 @@ function DeliveryConfirmForm({
               <span className="text-crate-950 truncate">{ln.product_description}</span>
               <ProductPromotion productId={ln.product_id} className="shrink-0" />
             </span>
-            <span className="text-xs text-crate-800/40 w-24 text-right shrink-0">
-              ordered {ln.quantity} {ln.unit_code}
+            <span className="text-xs text-crate-800/40 min-w-24 text-right shrink-0">
+              ordered <QuantityLabel productId={ln.product_id} quantity={ln.quantity} unit={ln.unit_code} />
             </span>
             <input
               type="number"
@@ -253,7 +254,9 @@ export default function OrderHistory({ refreshKey }: { refreshKey: number }) {
                                 {ln.received_quantity ?? "—"}
                               </td>
                             )}
-                            <td className="py-0.5 text-right">{ln.unit_code}</td>
+                            <td className="py-0.5 text-right">
+                              <UnitLabel productId={ln.product_id} unit={ln.unit_code} />
+                            </td>
                           </tr>
                         );
                       })}

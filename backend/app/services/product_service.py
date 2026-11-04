@@ -9,6 +9,10 @@ products. Restoring flips it back.
 Admin can also edit a product (code, POS code, description, category,
 unit) — nothing else keeps a copy of those, so the change shows on every
 page straight away — and give it a 1080x1080 photo.
+
+Imported items are counted in cases: choosing the Imported category puts
+the product on the "case" unit and Admin types how many kg one case of
+it holds, which branches and suppliers see beside the unit.
 """
 import struct
 
@@ -31,6 +35,8 @@ from app.schemas.product import (
 
 ACTIVE = "ACTIVE"
 INACTIVE = "INACTIVE"
+IMPORTED_CATEGORY = "Imported"
+CASE_UNIT = "case"
 
 
 def _out(
@@ -47,9 +53,14 @@ def _out(
         unit_id=p.unit_id,
         unit_code=units.get(p.unit_id, "—"),
         status=p.status,
+        case_kg=_kg(p.case_kg),
         created_at=p.created_at,
         image_version=(image_versions or {}).get(p.id),
     )
+
+
+def _kg(value) -> float | None:
+    return float(value) if value is not None else None
 
 
 def _lookups(db: Session) -> tuple[dict[int, str], dict[int, str]]:
@@ -73,15 +84,25 @@ def options(db: Session) -> ProductOptionsOut:
     )
 
 
-def _check_choices(db: Session, payload: ProductCreate) -> None:
-    if db.get(ProductCategory, payload.category_id) is None:
+def _check_choices(db: Session, payload: ProductCreate) -> tuple[int, float | None]:
+    """The (unit_id, case_kg) to save: Imported items always go per case."""
+    category = db.get(ProductCategory, payload.category_id)
+    if category is None:
         raise ValidationFailedError("Choose a category.")
+    if category.name == IMPORTED_CATEGORY:
+        case_unit = db.query(ProductUnit).filter(func.lower(ProductUnit.code) == CASE_UNIT).first()
+        if case_unit is None:
+            raise ValidationFailedError('The "case" unit is missing. Please contact support.')
+        if payload.case_kg is None:
+            raise ValidationFailedError("Imported items are counted in cases. Enter how many kg 1 case holds.")
+        return case_unit.id, round(payload.case_kg, 2)
     if db.get(ProductUnit, payload.unit_id) is None:
         raise ValidationFailedError("Choose a unit.")
+    return payload.unit_id, None
 
 
 def create(db: Session, admin: User, payload: ProductCreate) -> ProductAdminOut:
-    _check_choices(db, payload)
+    unit_id, case_kg = _check_choices(db, payload)
 
     clash = db.query(Product).filter(func.lower(Product.product_code) == payload.product_code.lower()).first()
     if clash:
@@ -100,7 +121,8 @@ def create(db: Session, admin: User, payload: ProductCreate) -> ProductAdminOut:
         description=payload.description,
         category_id=payload.category_id,
         subcategory=payload.subcategory,
-        unit_id=payload.unit_id,
+        unit_id=unit_id,
+        case_kg=case_kg,
         status=ACTIVE,
     )
     db.add(row)
@@ -137,7 +159,7 @@ def _one_out(db: Session, row: Product) -> ProductAdminOut:
 def update(db: Session, admin: User, product_id: int, payload: ProductUpdate) -> ProductAdminOut:
     """Edits a product in place; orders, prices and POs pick it up by id."""
     row = _get(db, product_id)
-    _check_choices(db, payload)
+    unit_id, case_kg = _check_choices(db, payload)
 
     clash = (
         db.query(Product)
@@ -156,7 +178,8 @@ def update(db: Session, admin: User, product_id: int, payload: ProductUpdate) ->
     row.description = payload.description
     row.category_id = payload.category_id
     row.subcategory = payload.subcategory
-    row.unit_id = payload.unit_id
+    row.unit_id = unit_id
+    row.case_kg = case_kg
     try:
         db.commit()
     except IntegrityError:
@@ -225,11 +248,11 @@ def _image_versions(db: Session, product_id: int | None = None) -> dict[int, str
 
 
 def image_refs(db: Session) -> list[ProductImageRef]:
-    """Every product's code and photo version, for every page that shows photos."""
+    """Every product's code, photo version and case size, for every page that shows products."""
     versions = _image_versions(db)
     return [
-        ProductImageRef(product_id=pid, product_code=code, version=versions.get(pid))
-        for pid, code in db.query(Product.id, Product.product_code).all()
+        ProductImageRef(product_id=pid, product_code=code, version=versions.get(pid), case_kg=_kg(case_kg))
+        for pid, code, case_kg in db.query(Product.id, Product.product_code, Product.case_kg).all()
     ]
 
 

@@ -18,6 +18,7 @@ import {
   uploadProductImage,
 } from "../../api/products";
 import { CategoryBadge } from "../shared/ui/CategoryBadge";
+import { formatUnit } from "../shared/ui/UnitLabel";
 import { Modal } from "../shared/ui/Modal";
 import Button from "../shared/ui/Button";
 import { IconPlus } from "../shared/Icons";
@@ -30,7 +31,18 @@ type Show = "ACTIVE" | "INACTIVE" | "ALL";
 const fieldClass =
   "border border-sage-300 bg-sage-50/60 rounded-full px-4 py-2 text-sm text-crate-950 placeholder:text-crate-950/35 focus:outline-none focus:ring-2 focus:ring-crate-700/30 focus:border-crate-700 focus:bg-white transition-all duration-150";
 
-const EMPTY_FORM = { product_code: "", pos_code: "", description: "", category_id: "", subcategory: "", unit_id: "" };
+const EMPTY_FORM = {
+  product_code: "",
+  pos_code: "",
+  description: "",
+  category_id: "",
+  subcategory: "",
+  unit_id: "",
+  case_kg: "",
+};
+
+// Imported items are always counted in cases; Admin types each one's case size.
+const IMPORTED_CATEGORY = "Imported";
 
 const THUMB_SIZE = 240;
 
@@ -162,6 +174,21 @@ export default function AdminProductList() {
     setProducts((prev) => prev.map((p) => (p.id === row.id ? row : p)));
   }
 
+  const categoryName = (id: string) => options.categories.find((c) => String(c.id) === id)?.name;
+  const unitIdNamed = (name: string) =>
+    String(options.units.find((u) => u.name.toLowerCase() === name.toLowerCase())?.id ?? "");
+  const formImported = categoryName(form.category_id) === IMPORTED_CATEGORY;
+
+  // Imported puts the product on the case unit; moving it out of Imported
+  // goes back to kg, the usual unit.
+  function handleCategoryChange(categoryId: string) {
+    const imported = categoryName(categoryId) === IMPORTED_CATEGORY;
+    let unitId = form.unit_id;
+    if (imported) unitId = unitIdNamed("case");
+    else if (formImported) unitId = unitIdNamed("kg");
+    setForm({ ...form, category_id: categoryId, unit_id: unitId });
+  }
+
   function openForm(p: AdminProduct | "new") {
     const seq = ++openSeq.current;
     setLegacyUrl(null);
@@ -169,7 +196,7 @@ export default function AdminProductList() {
       setForm({
         ...EMPTY_FORM,
         category_id: category !== "ALL" ? String(options.categories.find((c) => c.name === category)?.id ?? "") : "",
-        unit_id: String(options.units.find((u) => u.name.toUpperCase() === "KG")?.id ?? ""),
+        unit_id: unitIdNamed(category === IMPORTED_CATEGORY ? "case" : "kg"),
       });
       setPhoto({ kind: "none" });
     } else {
@@ -180,6 +207,7 @@ export default function AdminProductList() {
         category_id: String(p.category_id),
         subcategory: p.subcategory ?? "",
         unit_id: String(p.unit_id),
+        case_kg: p.case_kg != null ? String(p.case_kg) : "",
       });
       if (p.image_version) {
         setPhoto({ kind: "current", url: null });
@@ -229,6 +257,11 @@ export default function AdminProductList() {
       setFormError("Choose a category and a unit.");
       return;
     }
+    const caseKg = Number(form.case_kg);
+    if (formImported && !(form.case_kg.trim() && caseKg > 0 && caseKg <= 10000)) {
+      setFormError("Imported items are counted in cases. Enter how many kg 1 case holds.");
+      return;
+    }
     setFormError(null);
     setSaving(true);
     const body = {
@@ -238,6 +271,7 @@ export default function AdminProductList() {
       category_id: Number(form.category_id),
       subcategory: form.subcategory.trim() || null,
       unit_id: Number(form.unit_id),
+      case_kg: formImported ? Math.round(caseKg * 100) / 100 : null,
     };
     const isNew = editing === "new";
     let row: AdminProduct | null = null;
@@ -245,7 +279,8 @@ export default function AdminProductList() {
       row = isNew ? await createProduct(body) : await updateProduct(editing.id, body);
       if (photo.kind === "new") row = await uploadProductImage(row.id, photo.file, photo.thumb);
       else if (photo.kind === "remove") row = await removeProductImage(row.id);
-      if (photo.kind === "new" || photo.kind === "remove") refreshProductImages();
+      // Also carries the case size, so refresh after every save.
+      refreshProductImages();
       const saved = row;
       setProducts((prev) => (isNew ? [...prev, saved] : prev.map((p) => (p.id === saved.id ? saved : p))));
       setEditing(null);
@@ -422,7 +457,7 @@ export default function AdminProductList() {
                 <span>
                   <CategoryBadge name={p.category_name} />
                 </span>
-                <span className="text-sm text-crate-800/70">{p.unit_code}</span>
+                <span className="text-sm text-crate-800/70">{formatUnit(p.unit_code, p.case_kg)}</span>
                 <span
                   className="col-span-2 lg:col-span-1 flex gap-2 lg:justify-end"
                   onClick={(e) => e.stopPropagation()}
@@ -559,7 +594,7 @@ export default function AdminProductList() {
               Category
               <select
                 value={form.category_id}
-                onChange={(e) => setForm({ ...form, category_id: e.target.value })}
+                onChange={(e) => handleCategoryChange(e.target.value)}
                 className={`mt-1 w-full ${fieldClass}`}
               >
                 <option value="">Choose…</option>
@@ -575,7 +610,9 @@ export default function AdminProductList() {
               <select
                 value={form.unit_id}
                 onChange={(e) => setForm({ ...form, unit_id: e.target.value })}
-                className={`mt-1 w-full ${fieldClass}`}
+                disabled={formImported}
+                title={formImported ? "Imported items are always counted in cases." : undefined}
+                className={`mt-1 w-full ${fieldClass} disabled:opacity-60`}
               >
                 <option value="">Choose…</option>
                 {options.units.map((u) => (
@@ -586,6 +623,30 @@ export default function AdminProductList() {
               </select>
             </label>
           </div>
+          {formImported && (
+            <div className="rounded-lg bg-sky-50 border border-sky-200 px-3 py-2.5">
+              <label className="flex flex-wrap items-center gap-2 text-sm text-crate-800/80">
+                <span className="font-medium">1 case =</span>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min="0.01"
+                  max="10000"
+                  step="0.01"
+                  required
+                  value={form.case_kg}
+                  onChange={(e) => setForm({ ...form, case_kg: e.target.value })}
+                  aria-label="Kilograms in 1 case"
+                  className={`w-24 ${fieldClass}`}
+                  placeholder="e.g. 12"
+                />
+                <span className="font-medium">kg</span>
+              </label>
+              <p className="mt-1 text-xs text-crate-800/50">
+                Imported items are ordered and priced per case. Branches and suppliers see the case size beside the item.
+              </p>
+            </div>
+          )}
           <label className="block text-sm text-crate-800/70">
             Subcategory <span className="text-crate-800/40">(optional)</span>
             <input

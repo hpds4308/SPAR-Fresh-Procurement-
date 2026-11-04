@@ -7,6 +7,7 @@ import { SkeletonTable } from "../shared/ui/Skeleton";
 import { CategoryBadge } from "../shared/ui/CategoryBadge";
 import { IconBranches } from "../shared/Icons";
 import { ProductPromotion } from "../shared/ui/PromotionBadge";
+import { CaseSizeTag, QuantityLabel, isCaseUnit } from "../shared/ui/UnitLabel";
 
 function formatDate(iso: string): string {
   const d = new Date(iso + "T00:00:00");
@@ -247,6 +248,7 @@ export default function OrdersByBranch() {
                   >
                     {row.description}
                     <ProductPromotion productId={row.product_id} className="ml-1.5" />
+                    <CaseSizeTag productId={row.product_id} className="ml-1.5" />
                   </td>
                   <td className="px-3 py-2 text-right whitespace-nowrap">
                     {row.costPrice !== null ? (
@@ -277,7 +279,13 @@ export default function OrdersByBranch() {
                       </td>
                     );
                   })}
-                  <td className="px-3 py-2 text-right font-semibold text-crate-950">{row.total}</td>
+                  <td className="px-3 py-2 text-right font-semibold text-crate-950 whitespace-nowrap">
+                    {isCaseUnit(row.unit_code) ? (
+                      <QuantityLabel productId={row.product_id} quantity={row.total} unit={row.unit_code} />
+                    ) : (
+                      row.total
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

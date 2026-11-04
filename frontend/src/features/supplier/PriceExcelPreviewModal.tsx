@@ -1,5 +1,6 @@
 import { ExcelPricePreview } from "../../api/pricing";
 import { ProductPromotion } from "../shared/ui/PromotionBadge";
+import { UnitLabel } from "../shared/ui/UnitLabel";
 
 // Shows what an uploaded price Excel will submit before anything is saved.
 // Rows with an error are listed but never sent.
@@ -89,7 +90,12 @@ export default function PriceExcelPreviewModal({
                       {l.price !== null ? (
                         <span className={l.error ? "text-crate-800/40 line-through" : "text-crate-950"}>
                           Rs. {l.price.toFixed(2)}
-                          {l.unit_code && <span className="text-xs text-crate-800/40"> /{l.unit_code}</span>}
+                          {l.unit_code && (
+                            <span className="text-xs text-crate-800/40">
+                              {" "}
+                              /<UnitLabel productId={l.product_id ?? 0} unit={l.unit_code} />
+                            </span>
+                          )}
                         </span>
                       ) : (
                         <span className="text-crate-800/30">—</span>

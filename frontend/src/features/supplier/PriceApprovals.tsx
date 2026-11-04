@@ -25,6 +25,7 @@ import { ProductPromotion } from "../shared/ui/PromotionBadge";
 import SignaturePad, { SignaturePadHandle } from "../shared/SignaturePad";
 import Button from "../shared/ui/Button";
 import { SkeletonTable } from "../shared/ui/Skeleton";
+import { UnitLabel, formatUnit, useCaseSizes } from "../shared/ui/UnitLabel";
 
 const card = "bg-white rounded-2xl shadow-card border border-sage-100";
 const input =
@@ -228,6 +229,7 @@ function ResponseForm({ sheet, onDone }: { sheet: PriceSheet; onDone: (s: PriceS
   const [answers, setAnswers] = useState<Record<number, Answer>>({});
   const [note, setNote] = useState("");
   const [agreed, setAgreed] = useState(false);
+  const caseSizes = useCaseSizes();
   const [hasInk, setHasInk] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -372,7 +374,10 @@ function ResponseForm({ sheet, onDone }: { sheet: PriceSheet; onDone: (s: PriceS
                     )}
                     <span className="text-crate-800/60">
                       SPAR: <span className="font-semibold text-crate-950 tabular-nums">{rs(item.adjusted_price)}</span>
-                      <span className="text-crate-800/40"> /{item.unit_code}</span>
+                      <span className="text-crate-800/40">
+                        {" "}
+                        /<UnitLabel productId={item.product_id} unit={item.unit_code} />
+                      </span>
                     </span>
                   </p>
                 </div>
@@ -424,7 +429,7 @@ function ResponseForm({ sheet, onDone }: { sheet: PriceSheet; onDone: (s: PriceS
                         }`}
                       />
                       <span className="text-xs text-crate-800/45">
-                        {problem ?? `/${item.unit_code} · leave blank to keep your price ${rs(item.supplier_price)}`}
+                        {problem ?? `/${formatUnit(item.unit_code, caseSizes[item.product_id])} · leave blank to keep your price ${rs(item.supplier_price)}`}
                       </span>
                     </label>
                   </div>

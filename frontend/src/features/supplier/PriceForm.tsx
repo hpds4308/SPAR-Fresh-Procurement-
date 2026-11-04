@@ -18,6 +18,7 @@ import { ProductPromotion } from "../shared/ui/PromotionBadge";
 import { useProductPhotos } from "../shared/useProductImages";
 import { ONE_DECIMAL_STEP, formatOneDecimal, isOneDecimal } from "../shared/oneDecimal";
 import { formatSubmissionDate, submissionDateIso } from "../shared/PriceSheetParts";
+import { CaseSizeTag } from "../shared/ui/UnitLabel";
 
 
 // Only some products have a photo (one Admin uploaded, or an older file
@@ -420,6 +421,7 @@ export default function PriceForm({ onSubmitted }: { onSubmitted: () => void }) 
                     )}
                   </span>
                   <CategoryBadge name={p.category_name} />
+                  <CaseSizeTag productId={p.id} />
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0 ml-4">

@@ -8,6 +8,8 @@ export type Product = {
   subcategory: string | null;
   unit_code: string;
   status: string;
+  // Imported items only: kg in one case.
+  case_kg?: number | null;
 };
 
 // Fixed display grouping for every product listing across the app:
@@ -15,7 +17,7 @@ export type Product = {
 // item name within each category. An unrecognized category name (should
 // never happen with today's 4 categories) sorts last rather than first,
 // so it stays visible instead of silently jumping to the top.
-const CATEGORY_DISPLAY_ORDER = ["Fruit", "Vege Low", "Vege Pola", "Vege Up"];
+const CATEGORY_DISPLAY_ORDER = ["Fruit", "Vege Low", "Vege Pola", "Vege Up", "Imported"];
 
 function categoryRank(categoryName: string): number {
   const idx = CATEGORY_DISPLAY_ORDER.indexOf(categoryName);

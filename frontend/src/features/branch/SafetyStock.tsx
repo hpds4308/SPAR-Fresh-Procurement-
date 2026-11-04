@@ -7,6 +7,7 @@ import { PromotionBadge } from "../shared/ui/PromotionBadge";
 import { useActivePromotions } from "../shared/useActivePromotions";
 import { Modal } from "../shared/ui/Modal";
 import Button from "../shared/ui/Button";
+import { CaseSizeTag } from "../shared/ui/UnitLabel";
 
 // The branch's standing safety-stock level per product. Unlike an order,
 // nothing here is per-day: saved figures stay as they are, day after day,
@@ -163,6 +164,7 @@ export default function SafetyStock() {
               <div className="flex items-center gap-1.5 mt-0.5">
                 <span className="text-xs text-crate-800/40">{p.product_code}</span>
                 <CategoryBadge name={p.category_name} />
+                <CaseSizeTag productId={p.id} />
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0 ml-4">

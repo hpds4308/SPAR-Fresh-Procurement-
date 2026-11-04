@@ -6,6 +6,7 @@ import { SkeletonTable } from "../shared/ui/Skeleton";
 import { IconTag } from "../shared/Icons";
 import { RowApprovalBadge, formatSubmissionDate } from "../shared/PriceSheetParts";
 import { ProductPromotion } from "../shared/ui/PromotionBadge";
+import { UnitLabel } from "../shared/ui/UnitLabel";
 
 export default function PriceHistory({ refreshKey }: { refreshKey: number }) {
   const [prices, setPrices] = useState<SupplierPrice[]>([]);
@@ -100,7 +101,9 @@ export default function PriceHistory({ refreshKey }: { refreshKey: number }) {
                   <span className="text-crate-800/25">—</span>
                 )}
               </td>
-              <td className="py-2 text-right text-crate-800/40">{p.unit_code}</td>
+              <td className="py-2 text-right text-crate-800/40 whitespace-nowrap">
+                <UnitLabel productId={p.product_id} unit={p.unit_code} />
+              </td>
             </tr>
           ))}
         </tbody>

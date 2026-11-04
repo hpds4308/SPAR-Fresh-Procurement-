@@ -660,7 +660,7 @@ def list_all_prices(
         )
     # Fixed display grouping: Fruit, Vege Low, Vege Pola, Vege Up (category
     # IDs 1-4 already match that order), alphabetical by item within each.
-    category_display_order = {"Fruit": 0, "Vege Low": 1, "Vege Pola": 2, "Vege Up": 3}
+    category_display_order = {"Fruit": 0, "Vege Low": 1, "Vege Pola": 2, "Vege Up": 3, "Imported": 4}
     result.sort(
         key=lambda row: (
             category_display_order.get(row["category_name"], len(category_display_order)),
